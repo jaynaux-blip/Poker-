@@ -70,6 +70,7 @@ constexpr uint32_t RitPromo = 0x1c2b26;     // the promotion tint (League rows, 
 constexpr uint32_t RitFlapTop = 0x2b2b32;   // a gloss flap tile's lit upper half
 constexpr uint32_t RitFlapLow = 0x0d0d10;   // and its lower half
 constexpr uint32_t RitAmberGround = 0x1a150d; // the projected-overlay box's ground
+constexpr uint32_t RitIronBar = 0x3d3d46;   // Iron's carbon as a bar on a Carbon panel (the Pyramid's)
 
 /** A palette hex as a colour. */
 inline Color RitC(uint32_t Rgb, float A = 1.0f)
@@ -210,6 +211,197 @@ enum class RitTile : uint8_t
  */
 float RitFlap(Canvas& C, float X, float Y, const std::string& Text, float Size, float H, int Settled, RitTile Tile, const Color& Ink, float W = 0.0f);
 
+// ------------------------------------------------------------------ G2: the loops' model (RunItTwice's half of the View)
+
+/**
+ * What RunItTwice's G2 surfaces draw (§3.4, §3.6 R1-R9), member for member the RitView proposed to core-siteplay
+ * (patches/ui-rit_to_core-siteplay_1.diff). RitPlayOf fills it from Session::SitePlayView(RunItTwice) and nothing else, so
+ * every figure is core's (the book, World::League, the Governor's ring): the pages rank, zone and score nothing themselves.
+ * While core's half is empty every surface shows its honest empty state; ui_seg_rit drives the pages with fixture data
+ * through RitPlayOverride, a test-only seam the game never calls.
+ */
+struct RitLeagueRow
+{
+	int Npc = -1; // -1: the player
+	std::string Name, Country;
+	int Rank = 0, Move = 0, Days = 0;
+	float Points = 0.0f;
+	std::array<float, 8> Best{};
+	std::array<int8_t, 5> Form{{-1, -1, -1, -1, -1}}; // oldest first: -1 no entry, 0 blank, 1 cash, 2 final table
+	std::array<int8_t, 3> Path{{-1, -1, -1}};         // oldest first: a division, -1 not known
+	int8_t Zone = 0;                                  // +1 promotion, -1 relegation
+	bool Team = false, Callout = false, CanCall = false;
+};
+struct RitFixture
+{
+	int Day = 0;
+	std::string TemplateId, Name;
+	float Mult = 1.5f;
+	bool Deadline = false;
+};
+struct RitDivision
+{
+	int Members = 0;
+	Chips Floor = 0;
+	std::vector<std::string> Matchdays;
+	std::string Reward;
+};
+struct RitCallout
+{
+	bool On = false;
+	int Npc = -1;
+	std::string Name, Country;
+	bool ByThem = false;
+	float Mine = 0.0f, Theirs = 0.0f;
+	int Week = -1;
+	double Ends = 0.0;
+	bool Tonight = false;
+	std::string EventId;
+	int W = 0, L = 0;
+	bool Seen = false; // G2 fix L6: this save has already slid this Matchweek's INCOMING CALLOUT in (RitView::IncomingSeen)
+};
+struct RitH2H
+{
+	std::string Name;
+	int W = 0, L = 0, TheyKo = 0, YouKo = 0;
+};
+struct RitScalpPro
+{
+	int Npc = -1;
+	std::string Name;
+	bool Taken = false;
+};
+struct RitScalps
+{
+	std::vector<RitScalpPro> Six;
+	int Taken = 0, Week = 0, WeekCap = 2, Lifetime = 0, Year = 0;
+	bool FullSet = false, Bounty = false;
+	std::vector<std::pair<Chips, std::string>> Ladder; // (the lowest buy-in, what a scalp there pays), ascending
+};
+struct RitStatementLine
+{
+	std::string Label;
+	int MonthKey = -1;
+	Chips Cents = 0;
+	int Kind = 0;      // site::play::Kind
+	std::string Month; // core's name for the earning month ("October"; MonthKey's when empty)
+};
+struct RitHold
+{
+	std::string What;
+	Chips Cents = 0, Covered = 0, RakeToGo = 0;
+	int Day = 0;
+	bool SparksOwed = false;
+};
+struct RitStatement
+{
+	std::string Line; // core's sentence ("RunItTwice gave back $53.48 of your $212.40 rake in the last 30 days (25%).")
+	Chips Rake30 = 0, Promo30 = 0;
+	double Share = 0.0, Ceiling = 0.5;
+	std::vector<RitStatementLine> Lines; // newest first
+	std::vector<RitHold> Holds;          // oldest first
+	int Day0 = -1;
+	std::array<int32_t, 30> RakeByDay{};
+};
+struct RitLuck
+{
+	int AllIns = 0, Won = 0;
+	double Expected = 0.0;
+	std::array<int, 10> N{}, Wins{};
+	std::array<double, 10> Exp{};
+	int SecondWon = 0, SecondOf = 0;
+	bool Seconds = false;
+};
+struct RitCred
+{
+	int Id = 0;
+	std::string Name;
+	bool Earned = false;
+	int Day = -1;
+	std::string Event;
+};
+struct RitBriefing
+{
+	bool On = false;
+	int Day = -1, Events = 0;
+	Chips Net = 0;
+	int RankWas = 0, RankNow = 0;
+	float ToPromotion = 0.0f;
+	std::string Matchday, Callout;
+	std::string Line; // core's composed line (when set, drawn as it is)
+};
+struct RitBellView
+{
+	std::string EventId, Name;
+	Chips Short = 0;
+	double Closes = 0.0, Rung = 0.0;
+};
+struct RitNight
+{
+	bool On = false;
+	int Month = -1;
+	int8_t From = 0, To = 0;
+	int Rank = 0, Of = 0;
+	std::vector<RitLeagueRow> Was, Final;
+	std::string Ticket;
+	bool Held = false;
+	bool Seen = false; // G2 fix L6: this save has already played this month's League Night (RitView::NightSeen)
+};
+struct RitPlayHist
+{
+	int Month = 0;
+	int8_t Div = 0;
+	int Rank = 0, Of = 0;
+	int8_t Move = 0;
+};
+struct RitPlay
+{
+	bool On = false; // core's loops are live (RitView::On): the LEAGUE plate shows; off, G1's 8 plates
+	bool Member = false, Started = false, InLeague = false, Clause = false;
+	bool Leave = false, Placement = false, Bounce = false, Deadline = false;
+	int MonthKey = -1;
+	int8_t Div = 0, Group = 0, Crest = 0;
+	int Rank = 0, Of = 0;
+	float Points = 0.0f, ToPromotion = 0.0f, ToSafety = 0.0f;
+	int Up = 3, Down = 4;
+	int Matchweek = 0, Matchweeks = 4;
+	double Closes = 0.0;
+	int Today = -1;
+	std::vector<std::string> Counting;
+	std::vector<std::pair<int, float>> HeroDays;
+	std::vector<RitLeagueRow> Table;
+	std::vector<RitFixture> Fixtures;
+	std::array<RitDivision, 5> Divisions{};
+	std::vector<RitPlayHist> History; // newest first
+	std::vector<std::pair<std::string, float>> Scored;
+	RitCallout Callout;
+	std::vector<RitH2H> H2H;
+	RitScalps Scalps;
+	RitStatement Statement;
+	RitLuck Luck;
+	std::vector<RitCred> Creds;
+	RitBriefing Briefing;
+	std::vector<std::string> Watch;
+	std::vector<RitBellView> Bells;
+	RitNight Night;
+};
+/** The League's divisions, low to high (§3.6 R2). */
+constexpr int RitDivisions = 5;
+const char* RitDivName(int Div);
+/** A division's status metal (§3.3's ramp: Open a chrome outline, Iron carbon, Steel chrome, Gold Status Gold, High Bridge red). */
+uint32_t RitDivMetal(int Div);
+/**
+ * A division's crest (§3.6 R2): a shield of 1-5 bars in its status metal (High Bridge's an arch), up to 5 stars over it.
+ * Split 0..1 draws the shield split along its chevron (League Night's re-forge: the halves apart by Split).
+ */
+void RitCrest(Canvas& C, float Cx, float Cy, float H, int Div, int Stars = 0, float Split = 0.0f);
+/** A credential: a chrome plate engraved in Onyx (6.25:1 or more on the ramp); while not earned, an outline in Muted. */
+void RitCredPlate(Canvas& C, const Rect& R, const std::string& Name, const std::string& Line, bool Earned);
+/** "You're the bounty" (R4): a Signal Red crosshair, a vector. */
+void RitCrosshair(Canvas& C, float Cx, float Cy, float R);
+/** A watched player's chrome eye (§3.5 Seats). */
+void RitEye(Canvas& C, float Cx, float Cy, float W, const Color& Col);
+
 // ------------------------------------------------------------------ the screen state (beside the class: RiverLine.h is frozen)
 
 /** A status cell the Board remembers, so it flips only when its value changes. */
@@ -262,6 +454,7 @@ struct RitKnockout
 	int Seat = 0;
 	std::string Name;
 	double At = 0.0;
+	bool Stamped = false; // G2: a Team pro's scalp, its TAKEN thunked (RitStamp, once)
 };
 struct RitUi
 {
@@ -322,11 +515,139 @@ struct RitUi
 	std::string PrintFor;
 	double PrintAt = -100.0;
 	bool Stamped = false;
+	// G2 (§3.6). The loops' screen state: what this laptop has seen and shown, never saved (core keeps the outcomes).
+	bool HasOverride = false;   // RitPlayOverride's fixture model (ui_seg_rit only)
+	RitPlay Override;
+	bool Mine = false;          // the Board's "mine" filter (the Watchlist)
+	int BriefingGone = -1;      // the 6 AM day whose Briefing was dismissed
+	int LeagueTab = -1;         // the League's browsed division (-1: the player's own)
+	int NightSeen = -1;         // the closed month whose League Night has played on this laptop
+	double NightAt = -100.0;    // League Night's start (real seconds); NightOn while it plays
+	bool NightOn = false;
+	int NightRankTicks = 0;     // RitRank ticks played in this League Night
+	int CallNpc = -1;           // the Callout drawer's member (-1: closed)
+	double CallAt = -100.0;
+	std::string CallSaid;       // core's answer to the last CALL OUT ("" called)
+	double CallSaidAt = -100.0;
+	int IncomingSeen = -1;      // the Matchweek whose incoming Callout alert has slid in
+	double IncomingAt = -100.0;
+	std::vector<std::string> BellsRung; // the desk bells rung on this laptop (instance ids, <= 24)
+	std::string DeskBellFor;    // the last desk bell's event
+	double DeskBellAt = -100.0;
+	bool Pyramid = false;       // RANKINGS' PYRAMID tab
+	int StatementTab = 0;       // the Club's Statement panel: 0 the Statement, 1 Club Day's printout
+	std::vector<int> CredsSeen; // credentials earned when this laptop last looked (a new one stamps once)
+	bool CredsInit = false;
+	double CredAt = -100.0;
+	int CredNew = -1;
+	bool SideLeague = false;    // the table's LEAGUE tab (ui-tablestyle's SidePanel; patches/ui-rit_to_ui-tablestyle_3.diff)
+	int RankWasFor = -1;        // the League place this laptop last saw (the Settlement's "11TH -> 7TH"), by month
+	int RankWas = 0;
+	float PointsWas = 0.0f;
+	int SettleRankFrom = 0;     // the place before the Settlement on show, and after
+	int SettleRankTo = 0;
+	float SettlePointsFrom = 0.0f;
+	bool SettleRanked = false;
+	int SettleTicks = 0;        // its RitRank ticks played
+	std::vector<std::pair<std::string, std::string>> TakenHere; // (event id, a Team pro's name) seen leave as a scalp (<= 8)
+	std::string ScalpSeatsFor;  // the table (event # table) ScalpBefore was read at
+	std::vector<std::string> ScalpBefore; // the Team pros already TAKEN when this laptop sat at that table (or stamped there):
+	                                      // a knockout stamps TAKEN only for a scalp core took after (review-ui-rit)
+	RitPlay PlayCache;          // this frame's RitPlayOf (the frame, its table layer and the LEAGUE tab read it once)
+	double PlayAt = -1.0;       // the session clock and world minute it was read at
+	double PlayWorld = -1.0;
 };
 /** This laptop's state (by address, as rlsites_detail::SitesOf). */
 RitUi& RitOf(const RiverLine* RL);
 /** Drops a laptop's state when it goes (~RiverLine, by ui-tablestyle's patch). */
 void ForgetRit(const RiverLine* RL);
+/** The loops' model for this laptop: core's (Session::SitePlayView, read once a frame), or the test's override. */
+RitPlay RitPlayOf(const RiverLine* RL, const Session& S);
+/** Core's view at a world minute as the model (RitPlayOf's uncached read). */
+RitPlay RitPlayFrom(const Session& S, double World);
+/** ui_seg_rit only: draw this laptop's G2 surfaces from P (null: core's again). The game never calls it. */
+void RitPlayOverride(const RiverLine* RL, const RitPlay* P);
+
+// ------------------------------------------------------------------ the page kit both files share (RiverLineRit.cpp's)
+
+/** Everything a page draws with: the laptop, its session, the canvas and pointer, this laptop's state, the clocks, the loops. */
+struct RitCtx
+{
+	RiverLine& RL;
+	Session& S;
+	Canvas& C;
+	Ui& UI;
+	RitUi& U;
+	double Now = 0.0;
+	double World = 0.0;
+	bool Preview = false;
+	RitPlay P; // this frame's loops (RitPlayOf)
+};
+/** RunItTwice. */
+inline constexpr net::SiteId RitSite = net::SiteId::RunItTwice;
+void RitSound(RitCtx& X, SoundId Id, float Vol);
+Ui::ClickState RitClick(RitCtx& X, const std::string& Id, const Rect& R, bool Enabled = true);
+std::string RitClock(double World);
+std::string RitCountdown(double Minutes);
+std::string RitBuyIn(Chips Cents);
+std::string RitDate(int Day);
+std::string RitTemplateOf(const std::string& EventId);
+/** "1ST", "22ND": a place in capitals. */
+std::string RitPlace(int N);
+/** League points as the pages print them: "38.2". */
+std::string RitPts(double V);
+/** A League row's name in the world's letters, the player's handle as typed. */
+const RitLeagueRow* RitHeroRow(const RitPlay& P);
+/** High Bridge: nobody goes up; its top places win a Sunday 100K ticket (RiverLineRitLeague.cpp). */
+bool RitTopDivision(const RitPlay& P);
+/** The table's projection (§3.6 R2, Deadline Day): the place the player would hold if this event scored Score today. */
+int RitRankIf(const RitPlay& P, double Score);
+/** A term sheet's line: a Chrome label, a dotted leader, the value right-aligned in Mono. */
+void RitTerm(RitCtx& X, float L, float R, float Y, const std::string& Key, const std::string& Value, uint32_t Rgb);
+/** "NOVEMBER" or "NOV"; "November". A MonthKey is Year * 12 + Month - 1 (world::MonthKeyOf). */
+std::string RitMonthName(int Key, bool Short);
+std::string RitMonthTitle(int Key);
+/** A multiplier as the copy writes it ("1.5", "1.25"). */
+std::string RitMult(float M);
+/** "STEEL G4": the group's short form. */
+std::string RitGroupTag(const RitPlay& P);
+/** A division's status-metal pip (Open's an outline; -1 a Dim outline: not known). */
+void RitPip(Canvas& C, float X, float Y, float S, int Div);
+
+// ------------------------------------------------------------------ G2's pages and panels (RiverLineRitLeague.cpp)
+
+/** THE LEAGUE (Page::League, §3.4 C). */
+void RitLeaguePage(RitCtx& X);
+/**
+ * League Night (§3.6 R2): the season finale, after the frame's pages (whose pointer it held from the top: SitesBlockUnder).
+ * A click anywhere skips it (Scrim: the click on the scrim, swallowed). Returns true while it plays.
+ */
+bool RitLeagueNight(RitCtx& X, bool Scrim);
+/** The Callout drawer (R3), after the frame's pages (pointer held from the top); Scrim closes it. */
+void RitCalloutDrawer(RitCtx& X, bool Scrim);
+/** The drawer's rect this frame (its slide in from the right). */
+Rect RitCallRect(const RitUi& U, double Now, bool Preview);
+/** INCOMING CALLOUT (R3): the Signal Red alert that slides in at the top of the client; its rect (the frame holds under it). */
+void RitIncoming(RitCtx& X, float X0);
+Rect RitIncomingRect(float X0);
+/** The Statement (R5): given back as a share of rake against the 50% ceiling, the dated lines, the Guest List. */
+void RitStatementPanel(RitCtx& X, const Rect& R);
+/** Team Scalps (R4) on the Club: the year's six, TAKEN, the ticket ladder, FULL SET; "you're the bounty". */
+void RitScalpsPanel(RitCtx& X, const Rect& R);
+/** The Luck Ledger (R7) on the Desk's right panel. */
+void RitLuckPanel(RitCtx& X, const Rect& R);
+/** Credentials (R7) as chrome plates, in R (the Member File's left column). */
+void RitCredentials(RitCtx& X, const Rect& R);
+/** The Member File's League history, Callout record and head-to-head (R2, R3). */
+void RitMemberLeague(RitCtx& X, const Rect& R);
+/** The Settlement's League panel (RiverLineRit.cpp): the place it moved from and to, the group re-sorting, RitRank's ticks. */
+void RitSettleLeague(RitCtx& X, const Rect& R, double Since);
+/** The Briefing (R9) in R; returns false when there is none to show (the caller draws what was there). */
+bool RitBriefingBand(RitCtx& X, const Rect& R, bool Pinned);
+/** The Watchlist's feed (the League's side): the starred events' next instances. */
+void RitWatchFeed(RitCtx& X, const Rect& R);
+/** The table's LEAGUE tab (§3.5 Side panel): the group live and the projected place by outcome. */
+void RitSideLeague(RiverLine& RL, Canvas& C, const Rect& Body, double Now);
 
 // ------------------------------------------------------------------ the forwarders (RiverLine.h's friend; RiverLineRitLeague.cpp)
 
@@ -418,6 +739,46 @@ inline constexpr const char* RitNoClubMonths = "No Club months yet. Your first $
 inline constexpr const char* RitSecondHow = "The rest of the deck, dealt again. It never moves a chip.";
 // G1's fix pass (fix-rit): ARRIVED's hover when the world has no result yet.
 inline constexpr const char* RitNoWinner = "The result posts in a moment.";
+// G2 (§3.4, §3.6): the League, Callouts, the Watchlist, Team Scalps, the Statement, the Luck Ledger, credentials, the Briefing.
+inline constexpr const char* RitLeagueNone = "The League draws its groups from members with a paid entry here. Your first paid RunItTwice entry puts you in this month's draw.";
+inline constexpr const char* RitLeagueNoGroup = "No group drawn for you this month yet. It's drawn at your first paid RunItTwice entry of the month, or on the 1st.";
+inline constexpr const char* RitLeagueRule = "Your best 8 days count. Each day's best is your best result from your first entries of the day at your division's stakes.";
+inline constexpr const char* RitLeagueOther = "Every division plays in groups of 20 each month. Only your own group's standings are kept.";
+inline constexpr const char* RitDivNoCount = "Members are counted when the month's groups are drawn.";
+inline constexpr const char* RitLeagueLeave = "On leave: no RunItTwice entry this month under your Team RiverLine deal. No relegation, no Callouts, and your division is kept.";
+inline constexpr const char* RitLeagueBounce = "Bounce Back: cash 3 times in Matchweek 1 and start 30 points up.";
+inline constexpr const char* RitNoFixtures = "No fixtures for your division this week.";
+inline constexpr const char* RitNightSkip = "Click to skip.";
+inline constexpr const char* RitCalloutNone = "No Callout this week. Call out a member of your group: the week's League points decide it.";
+inline constexpr const char* RitCalloutNoGroup = "Callouts are played inside your League group, once a Matchweek.";
+inline constexpr const char* RitCalloutLeave = "No Callouts while you're on leave.";
+inline constexpr const char* RitCalloutClause = "No Callouts under your Team RiverLine deal.";
+inline constexpr const char* RitCalloutRule = "Status only: no cash, no League points. A win goes on your Member File.";
+inline constexpr const char* RitCallDrawerWhat = "A week-long duel inside your group: this Matchweek's League points, by the League's own scoring.";
+inline constexpr const char* RitCallOnce = "One Callout a Matchweek, and they can call you out too.";
+inline constexpr const char* RitWatchNone = "Star an event on the Board to put it on your Watchlist. Its next five starts show in the header.";
+inline constexpr const char* RitWatchQuiet = "Nothing on your Watchlist is open in the next two days.";
+inline constexpr const char* RitMineNone = "Nothing on your Watchlist is on the Board. Star a row to add its event.";
+inline constexpr const char* RitClauseBanner = "Under your Team RiverLine deal, every table here is a strike.";
+inline constexpr const char* RitBounty = "Signed with Team RunItTwice, you can't take a scalp: the crosshair is on you now, at every table here.";
+inline constexpr const char* RitScalpsRule = "Knock one of Team RunItTwice's six out of a paid RunItTwice event and their scalp is yours, with a ticket for two a week at most.";
+inline constexpr const char* RitScalpsNone = "No scalps yet this year. The set is the six on the team when you take your first.";
+inline constexpr const char* RitScalpsLadder = "A ticket scaled to the event.";
+inline constexpr const char* RitStatementNone = "Nothing given back in the last 30 days. Second Run pays on the 1st; League and Team Scalps tickets land as you earn them.";
+inline constexpr const char* RitLuckNone = "No all-ins in paid RunItTwice events yet. Each one lands here against its equity.";
+inline constexpr const char* RitLuckEven = "You are running at expectation.";
+inline constexpr const char* RitLuckHow = "Expected wins are your equity when the chips went in, summed.";
+inline constexpr const char* RitCredsNone = "Credentials are engraved here as you earn them.";
+inline constexpr const char* RitHistNone = "No League months closed yet.";
+inline constexpr const char* RitH2HNone = "No head-to-head history yet.";
+inline constexpr const char* RitSideNoLeague = "Not in a League group this month. Your first paid RunItTwice entry of the month draws one.";
+inline constexpr const char* RitSideNotCounting = "This event doesn't score today: it's past your first entries of the day, or under your division's floor.";
+inline constexpr const char* RitSideFlip = "The tab flips to PROMOTION ZONE the moment you cash.";
+inline constexpr const char* RitTodaysBest = "Today's best counts.";
+inline constexpr const char* RitNotToday = "Not today's best.";
+inline constexpr const char* RitNoLeagueYet = "Your first paid RunItTwice entry of the month draws your League group.";
+inline constexpr const char* RitNoLuckHere = "No all-ins with cards to come.";
+inline constexpr const char* RitRakeNone = "No rake paid here in the last 30 days.";
 
 /** Every sentence RunItTwice's pages draw beyond core's own copy (the copy lint, the trademark screen). */
 std::vector<std::string> RitInventory();

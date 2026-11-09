@@ -16,6 +16,7 @@
 #include "ShortStack/AI/Grading.h"
 #include "ShortStack/Game/Autoplay.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Fuse.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Stake.h"
@@ -350,8 +351,17 @@ void IgniteMarquee(IgniteCtx& X)
 	const uint64_t Tone = (static_cast<uint64_t>(K.Mood) << 1) ^ (K.Night ? 1u : 0u) ^ (Skin::Current().Key() << 4);
 	C.Cached((static_cast<uint64_t>(Fnv1a("ignite:marquee-logo")) << 16) ^ Tone, 0.0f, 0.0f, [](Canvas& At) { siteart::Logo(At, {24.0f, 16.0f, 190.0f, 40.0f}, net::SiteId::Ignite); });
 	const net::Network& Net = net::Site(net::SiteId::Ignite);
+	const IgniteLoops& Lp = IgniteLoopsOf(X.RL, X.Now);
 
+	// G2 (SPEC §2.4): the Sparks pill ("+610" floats up as Sparks land) and the Flame pill (the nudge after 6 PM, the frost
+	// rim on ice).
+	if (Lp.Live)
+	{
+		IgniteSparksPill(X.RL, X.U, Lp, K, X.Tm, X.Preview, X.World);
+		IgniteFlamePill(X.RL, X.U, Lp, K, X.Tm, X.Preview, X.World);
+	}
 	// G1 (SPEC §2.4): where Sparks will count up, the next featured event's countdown (a click opens its sheet).
+	if (!Lp.Live)
 	{
 		const Rect R{230.0f, 18.0f, 170.0f, 36.0f};
 		const std::vector<net::EventInstance> Next = IgniteFeaturedNow(X, 1);
@@ -384,6 +394,7 @@ void IgniteMarquee(IgniteCtx& X)
 		}
 	}
 	// G1: where the Flame will burn, the crowd on the boardwalk right now (the site's own traffic, as its ticker counts it).
+	if (!Lp.Live)
 	{
 		const Rect R{412.0f, 18.0f, 120.0f, 36.0f};
 		const net::TrafficRule& Tr = net::Def(net::SiteId::Ignite).Traffic;
@@ -413,6 +424,16 @@ void IgniteMarquee(IgniteCtx& X)
 			At.StrokeArc(568.0f, 36.0f, 22.0f, 0.0f, 2.0f * Pi, IgniteHx(Hot ? K.Coral : igniteart::IgViolet, Hot ? 1.0f : 0.7f), 3.0f);
 			DrawAvatar(At, 568.0f, 36.0f, 17.5f, AvatarFor(Hero));
 		});
+		// G2: the violet arc to the next level and the hexagon badge (F6).
+		if (Lp.Live)
+		{
+			const double Fr = Lp.LevelTo > Lp.LevelFrom ? Clamp01(static_cast<double>(Lp.LevelSparks - Lp.LevelFrom) / static_cast<double>(Lp.LevelTo - Lp.LevelFrom)) : 0.0;
+			if (Fr > 0.0)
+			{
+				C.StrokeArc(568.0f, 36.0f, 22.0f, -Pi / 2.0f, -Pi / 2.0f + 2.0f * Pi * static_cast<float>(Fr), Hex(igniteart::IgLime), 3.0f);
+			}
+			igniteart::IgniteLevelBadge(C, 586.0f, 52.0f, 9.0f, Lp.Level);
+		}
 		if (St.Clicked)
 		{
 			X.S.ShowLobby();
@@ -553,7 +574,14 @@ void IgniteDock(IgniteCtx& X, bool FlipChip)
 	// The dock's still parts replay from the cache, keyed by what they show (its pages, the pointer, the bonus's figures, the
 	// hour's tones and the skin's muted ink); the breathing button and the Blaze's clock draw live (G1_AUDIT M3).
 	const uint64_t Tone = (static_cast<uint64_t>(K.Mood) << 1) ^ (K.Night ? 1u : 0u) ^ (Skin::Current().Key() << 4);
+	const IgniteLoops& Lp = IgniteLoopsOf(X.RL, X.Now);
+	// G2, left (SPEC §2.4): the Wristband's tier, rope and days left; it opens REWARDS › Wristband.
+	if (Lp.Live)
+	{
+		IgniteDockBand(X.RL, X.U, Lp, K, X.Tm, X.Preview);
+	}
 	// G1, left (SPEC §2.4, F11): where the Wristband will hang, the welcome bonus's Fuel Gauge; it opens REWARDS.
+	else
 	{
 		const Rect R{24.0f, 884.0f, 340.0f, 64.0f};
 		const Ui::ClickState St = UI.Clickable("dockband", R, !X.Preview);
@@ -659,7 +687,7 @@ void IgniteDock(IgniteCtx& X, bool FlipChip)
 			}
 			if (It.P == RiverLine::Page::Promotions)
 			{
-				IgniteOf(&X.RL).Rewards = 3;
+				IgniteOf(&X.RL).Rewards = Lp.Live ? 0 : 3;
 			}
 			Access::OpenPage(X.RL, It.P, X.Now);
 		}
@@ -670,25 +698,40 @@ void IgniteDock(IgniteCtx& X, bool FlipChip)
 		// the pointer and whether FLIP is on (G1_AUDIT M3); the coin spins live over them.
 		const int Step = std::min(11, static_cast<int>(IgnitePulse(X) * 12.0f));
 		const float Breath = 1.0f + 0.025f * (static_cast<float>(Step) + 0.5f) / 12.0f;
-		const bool Active = Pg == RiverLine::Page::Lobby && FlipChip;
+		const bool Fuse = Lp.Live && Lp.FuseOn;
+		const bool Active = Fuse ? Pg == RiverLine::Page::Fuse : Pg == RiverLine::Page::Lobby && FlipChip;
 		const Ui::ClickState St = UI.Clickable("nav2", {744.0f, 836.0f, 112.0f, 112.0f}, !X.Preview);
 		const float R0 = IgniteRaisedR * Breath * (St.Down ? 0.94f : 1.0f);
 		const bool Hot = St.Hover;
-		const uint64_t Look = (static_cast<uint64_t>(Fnv1a("ignite:raised")) << 16) ^ (static_cast<uint64_t>(Step) << 8) ^ (St.Down ? 0x80u : 0u) ^ (Hot ? 0x40u : 0u) ^ (Active ? 0x20u : 0u) ^ Tone;
-		C.Cached(Look, 0.0f, 0.0f, [&K, R0, Hot, Active](Canvas& At) {
+		const uint64_t Look = (static_cast<uint64_t>(Fnv1a(Fuse ? "ignite:raised-fuse" : "ignite:raised")) << 16) ^ (static_cast<uint64_t>(Step) << 8) ^ (St.Down ? 0x80u : 0u) ^ (Hot ? 0x40u : 0u) ^ (Active ? 0x20u : 0u) ^ Tone;
+		C.Cached(Look, 0.0f, 0.0f, [&K, R0, Hot, Active, Fuse](Canvas& At) {
 			At.GlowRoundRect({800.0f - 68.0f, 892.0f - 68.0f, 136.0f, 136.0f}, 68.0f, IgniteHx(K.Coral, Active ? 0.42f : 0.3f), 30.0f);
 			At.FillCircle(IgniteRaisedCx, IgniteRaisedCy + 5.0f, 60.0f, Rgba(0, 0, 0, 0.4f));
 			At.FillCircle(IgniteRaisedCx, IgniteRaisedCy, R0 + 7.0f, IgniteHx(IgPink, Hot ? 0.85f : 0.5f));
 			At.FillCircle(IgniteRaisedCx, IgniteRaisedCy, R0 + 5.0f, IgniteHx(IgNight));
 			At.FillCircle(IgniteRaisedCx, IgniteRaisedCy, R0 - 1.0f, IgniteHx(K.Cream, 0.45f));
 			At.FillCircle(IgniteRaisedCx, IgniteRaisedCy, R0 - 3.0f, Paint::Linear({783.0f, 840.0f}, {817.0f, 944.0f}, IgniteHx(K.CoralLight), IgniteHx(K.CoralDark)));
-			At.Text("FLIP", 800.0f, 916.0f, IgniteBi(24.0f, Hex(K.Cream), Align::Center));
+			At.Text(Fuse ? "FUSE" : "FLIP", 800.0f, 916.0f, IgniteBi(24.0f, Hex(K.Cream), Align::Center));
 		});
-		// The coin flipping on its edge (a Flip & Run's all-in at the start), on the beat.
-		const float Spin = static_cast<float>(std::fabs(std::cos(motion::Beat(X.Tm, K.Bpm * 0.5) * 3.14159265358979)));
-		C.FillEllipse(800.0f, 872.0f, 15.0f * std::max(0.18f, Spin), 15.0f, Hex(IgSun));
-		C.StrokeEllipse(800.0f, 872.0f, 10.5f * std::max(0.18f, Spin), 10.5f, IgniteHx(0x7a4a00, 0.7f), 2.0f);
-		if (St.Clicked)
+		if (Fuse)
+		{
+			// G2: a fuse burning across the button on the beat (FUSE's mark), its spark live.
+			const double Burn = 0.2 + 0.6 * motion::Beat(X.Tm, K.Bpm * 0.25);
+			IgniteFuseRope(C, 774.0f, 826.0f, 874.0f, 3.0f, Burn, Hex(K.Cream), IgniteHx(0x5a4060), X.Tm, true);
+		}
+		else
+		{
+			// The coin flipping on its edge (a Flip & Run's all-in at the start), on the beat.
+			const float Spin = static_cast<float>(std::fabs(std::cos(motion::Beat(X.Tm, K.Bpm * 0.5) * 3.14159265358979)));
+			C.FillEllipse(800.0f, 872.0f, 15.0f * std::max(0.18f, Spin), 15.0f, Hex(IgSun));
+			C.StrokeEllipse(800.0f, 872.0f, 10.5f * std::max(0.18f, Spin), 10.5f, IgniteHx(0x7a4a00, 0.7f), 2.0f);
+		}
+		if (St.Clicked && Fuse)
+		{
+			X.S.ShowLobby();
+			Access::OpenPage(X.RL, RiverLine::Page::Fuse, X.Now);
+		}
+		else if (St.Clicked)
 		{
 			IgniteUi& U = IgniteOf(&X.RL);
 			U.Chip = 2;
@@ -698,7 +741,13 @@ void IgniteDock(IgniteCtx& X, bool FlipChip)
 			Access::OpenPage(X.RL, RiverLine::Page::Lobby, X.Now);
 		}
 	}
+	// G2, right: the mini wheel with the rings lit and the crackers' count; they open REWARDS.
+	if (Lp.Live)
+	{
+		IgniteDockWheel(X.RL, X.U, Lp, K, X.Tm, X.Preview);
+	}
 	// G1, right: where the wheel and the crackers will sit, the Sunday Blaze's countdown; it opens the Blaze's sheet.
+	else
 	{
 		const Rect R{1236.0f, 884.0f, 340.0f, 64.0f};
 		net::EventInstance Bz;
@@ -901,6 +950,27 @@ void IgniteBoardwalk(IgniteCtx& X)
 			{
 				C.Text("+" + std::to_string(Who.size() - 3), Wx, 272.0f, IgniteTx(12.0f, 800, pal::Muted));
 			}
+			// G2: what the entry earns, the Headliners in it (a star), and SPECIAL GUEST while you're billed (F8).
+			const IgniteLoops& Lp = IgniteLoopsOf(X.RL, X.Now);
+			if (Lp.Live)
+			{
+				C.Text("SPARKS", 584.0f, 202.0f, IgniteTx(9.0f, 900, IgniteHx(igniteart::IgLime, 0.8f), Align::Right));
+				C.Text("+" + Grouped(IgniteBaseSparks(T.BuyInCents)), 546.0f, 202.0f, IgniteBi(17.0f, Hex(igniteart::IgLime), Align::Right));
+				int Heads = 0;
+				for (size_t I = 0; I < Who.size() && I < 3; ++I)
+				{
+					const world::Npc* N = W.Get(Who[I]);
+					Heads += std::find(Lp.Headliners.begin(), Lp.Headliners.end(), N->Name) != Lp.Headliners.end() ? 1 : 0;
+				}
+				if (Heads > 0)
+				{
+					C.Text(std::to_string(Heads) + (Heads == 1 ? " HEADLINER" : " HEADLINERS"), 584.0f, 250.0f, IgniteTx(10.0f, 900, Hex(igniteart::IgSun), Align::Right));
+				}
+				if (Lp.Guest)
+				{
+					C.Text("SPECIAL GUEST: " + X.S.HeroName, 584.0f, 290.0f, IgniteBi(13.0f, Hex(igniteart::IgSun), Align::Right, Baseline::Alphabetic, 354.0f));
+				}
+			}
 		}
 		else
 		{
@@ -908,7 +978,62 @@ void IgniteBoardwalk(IgniteCtx& X)
 		}
 	}
 
+	// The Spark Wheel. G2 (F4): its rings lit by today's paid entries, glowing while a spin waits; it opens REWARDS.
+	const IgniteLoops& Lp = IgniteLoopsOf(X.RL, X.Now);
+	if (Lp.Live)
+	{
+		const float Angle = static_cast<float>(std::fmod(X.Tm / 90.0, 1.0) * 2.0 * 3.14159265358979) + 0.1f;
+		IgniteFerrisWheel(C, IgniteWheelCx, IgniteWheelCy, IgniteWheelR, Angle, {}, K, X.Tm);
+		const uint32_t Lights[3] = {igniteart::IgLime, igniteart::IgSun, igniteart::IgPink};
+		const float Radii[3] = {IgniteWheelR * 0.6f, IgniteWheelR * 0.42f, IgniteWheelR * 0.26f};
+		const float Glow = Lp.SpinReady ? 0.5f + 0.5f * IgnitePulse(X) : 0.0f;
+		for (int Ring = 0; Ring < Lp.RingsLit && Ring < 3; ++Ring)
+		{
+			if (Glow > 0.0f)
+			{
+				C.StrokeArc(IgniteWheelCx, IgniteWheelCy, Radii[Ring], 0.0f, 2.0f * Pi, IgniteHx(Lights[Ring], 0.22f * Glow), 10.0f);
+			}
+			C.StrokeArc(IgniteWheelCx, IgniteWheelCy, Radii[Ring], 0.0f, 2.0f * Pi, Hex(Lights[Ring]), 3.5f);
+		}
+		if (IgniteHotspot(X, "igwheel", {676.0f, 100.0f, 228.0f, 228.0f}, 114.0f))
+		{
+			IgniteOf(&X.RL).Rewards = 0;
+			Access::OpenPage(X.RL, RiverLine::Page::Promotions, X.Now);
+		}
+		const std::string More = std::to_string(std::max(1, std::min(2, Lp.MoreForNext))) + " MORE FOR ";
+		std::string Says = "SPARK WHEEL";
+		if (Lp.SpinReady && !Lp.OnIce)
+		{
+			// A spin waits: a lime pill over the wheel, breathing on the beat (the mockup's SPIN READY).
+			const Rect Pill{850.0f, 94.0f, 96.0f, 22.0f};
+			C.GlowRoundRect(Pill, 11.0f, IgniteHx(igniteart::IgLime, 0.2f + 0.2f * IgnitePulse(X)), 8.0f);
+			igniteart::IgnitePill(C, Pill, Hex(igniteart::IgLime), Color(), 0.0f);
+			C.Text("SPIN READY", Pill.X + Pill.W / 2.0f, Pill.Y + 15.5f, IgniteTx(10.0f, 900, Hex(igniteart::IgDarkInk), Align::Center));
+		}
+		if (Lp.OnIce)
+		{
+			Says += " \xC2\xB7 ON ICE";
+		}
+		else if (Lp.RingsLit >= 3)
+		{
+			Says += " \xC2\xB7 ALL THREE LIT";
+		}
+		else if (Lp.RingsLit > 0)
+		{
+			Says = std::string(igniteart::IgniteRingName(Lp.RingsLit)) + " LIT \xC2\xB7 " + More + igniteart::IgniteRingName(Lp.RingsLit + 1);
+		}
+		else
+		{
+			Says += " \xC2\xB7 " + More + "GLOW";
+		}
+		const float Sw = std::max(156.0f, C.Measure(Says, 10.5f, 900) + 24.0f);
+		const Rect Sign{IgniteWheelCx - Sw / 2.0f, IgniteWheelSign.Y, Sw, IgniteWheelSign.H};
+		C.FillRoundRect(Sign, 12.0f, IgniteHx(0x1a0f2a));
+		C.StrokeRoundRect(Sign, 12.0f, Hex(igniteart::IgLime), 1.5f);
+		C.Text(Says, IgniteWheelCx, 308.0f, IgniteTx(10.5f, 900, Hex(igniteart::IgLime), Align::Center));
+	}
 	// The Spark Wheel. G1: three gondolas carry tonight's next featured starts; a click opens the nearest's sheet.
+	else
 	{
 		const std::vector<net::EventInstance> Starts = IgniteFeaturedNow(X, 3);
 		std::vector<std::string> Labels;
@@ -945,7 +1070,41 @@ void IgniteBoardwalk(IgniteCtx& X)
 		});
 	}
 
+	// The Fuse Booth. G2 (F7): LIGHT A FUSE, the top multiplier and your last three; it opens FUSE.
+	if (Lp.Live && Lp.FuseOn)
+	{
+		if (IgniteHotspot(X, "igbooth", {956.0f, 102.0f, 252.0f, 196.0f}, 18.0f))
+		{
+			Access::OpenPage(X.RL, RiverLine::Page::Fuse, X.Now);
+		}
+		C.Cached((static_cast<uint64_t>(Fnv1a("ignite:booth-fuse-sign")) << 32) ^ static_cast<uint64_t>(K.Cream), 0.0f, 0.0f, [&K](Canvas& At) {
+			At.FillRoundRect({1010.0f, 180.0f, 144.0f, 22.0f}, 4.0f, Hex(igniteart::IgSun));
+			At.Text("THE FUSE BOOTH", 1082.0f, 196.0f, IgniteTx(11.0f, 900, IgniteHx(0x2b1240), Align::Center));
+			At.Text("LIGHT A FUSE", 1082.0f, 230.0f, IgniteBi(20.0f, Hex(K.Cream), Align::Center));
+		});
+		const float Uw = C.Text("UP TO", 1020.0f, 246.0f, IgniteTx(9.5f, 900, Hex(igniteart::IgSun)));
+		const float Mw = IgniteTimes(C, 1026.0f + Uw, 247.0f, 11.0f, 1000, Hex(igniteart::IgSun), Align::Left);
+		C.Text("\xC2\xB7 3 PLAYERS", 1032.0f + Uw + Mw, 246.0f, IgniteTx(9.5f, 900, Hex(igniteart::IgSun)));
+		const double Burn = 0.35 + 0.1 * std::sin(X.Tm * 0.7);
+		IgniteFuseRope(C, 1004.0f, 1142.0f, 258.0f, 4.0f, Burn, Hex(0xc9a46a), IgniteHx(0x5a4060), X.Tm, true);
+		C.Text("LAST 3", 1004.0f, 287.0f, IgniteTx(9.0f, 900, pal::Muted));
+		float Lx = 1046.0f;
+		int Shown = 0;
+		for (const int16_t M : Lp.Fuse.Last10)
+		{
+			if (M <= 0 || Shown >= 3)
+			{
+				continue;
+			}
+			const uint32_t Tint = igniteart::IgniteFuseTint(M, K);
+			igniteart::IgnitePill(C, {Lx, 276.0f, 34.0f, 16.0f}, IgniteHx(igniteart::IgNight), Hex(Tint), 1.2f);
+			IgniteTimes(C, Lx + 17.0f, 288.5f, 10.0f, M, Hex(Tint), Align::Center);
+			Lx += 38.0f;
+			++Shown;
+		}
+	}
 	// The Fuse Booth. G1: the next Flip & Run is on its sign, and a click opens that Flip's sheet.
+	else
 	{
 		const IgniteUi::SchedulePicks& Picks = IgnitePicksOf(X);
 		const net::EventInstance& F = Picks.Flip;
@@ -976,7 +1135,57 @@ void IgniteBoardwalk(IgniteCtx& X)
 		}
 	}
 
+	// The Prize Counter. G2 (F1): tickets on strings with their prices, a look, your Sparks; it opens the Prize Counter.
+	if (Lp.Live)
+	{
+		if (IgniteHotspot(X, "igprize", {1244.0f, 104.0f, 320.0f, 194.0f}, 12.0f))
+		{
+			IgniteOf(&X.RL).Rewards = 2;
+			Access::OpenPage(X.RL, RiverLine::Page::Promotions, X.Now);
+		}
+		std::vector<const IgnitePrize*> Hang;
+		for (const IgnitePrize& Pz : Lp.Prizes)
+		{
+			if (!Pz.TicketId.empty() && Hang.size() < 3)
+			{
+				Hang.push_back(&Pz);
+			}
+		}
+		const float Xs[3] = {1262.0f, 1338.0f, 1418.0f};
+		const float Ys[3] = {156.0f, 168.0f, 158.0f};
+		C.Cached((static_cast<uint64_t>(Fnv1a("ignite:prize-head")) << 8) ^ static_cast<uint64_t>(Hang.size()), 0.0f, 0.0f, [&Xs, &Ys, &Hang](Canvas& At) {
+			At.FillRoundRect({1316.0f, 112.0f, 178.0f, 18.0f}, 9.0f, IgniteHx(igniteart::IgNight, 0.85f));
+			At.Text("PRIZE COUNTER", 1405.0f, 125.0f, IgniteTx(11.5f, 900, Hex(igniteart::IgSun), Align::Center));
+			for (size_t I = 0; I < Hang.size(); ++I)
+			{
+				At.FillRect({Xs[I] + 34.0f, 142.0f, 1.0f, Ys[I] - 142.0f}, IgniteHx(0xc9b8e6, 0.6f));
+			}
+		});
+		const uint32_t Cols[3] = {igniteart::IgLime, igniteart::IgSun, K.Coral};
+		for (size_t I = 0; I < Hang.size(); ++I)
+		{
+			const float Sway = static_cast<float>(std::sin(X.Tm * 1.3 + static_cast<double>(I) * 1.7) * 2.0);
+			const IgnitePrize& Pz = *Hang[I];
+			const std::string Top = rlnet_detail::NetMoney(Pz.FaceCents);
+			const std::string Bottom = Grouped(Pz.Sparks);
+			const uint32_t Col = Cols[I];
+			C.Cached((static_cast<uint64_t>(Fnv1a("ignite:ticket|" + Top + "|" + Bottom)) << 24) ^ static_cast<uint64_t>(Col), Xs[I] + Sway, Ys[I], [&Top, &Bottom, Col](Canvas& At) {
+				igniteart::IgniteTicket(At, 0.0f, 0.0f, 70.0f, 38.0f, Top, Bottom, Hex(Col), IgniteHx(0x1a0f2a));
+			});
+		}
+		C.Text("Tickets \xC2\xB7 Looks", 1256.0f, 268.0f, IgniteTx(12.0f, 700, Hex(K.Cream)));
+		if (!Hang.empty())
+		{
+			C.Text(Grouped(Hang.front()->Sparks) + " Sparks = " + Money(Hang.front()->FaceCents), 1256.0f, 285.0f, IgniteTx(10.5f, 700, pal::Muted, Align::Left, Baseline::Alphabetic, 124.0f));
+		}
+		C.FillRoundRect({1384.0f, 256.0f, 168.0f, 32.0f}, 6.0f, IgniteHx(0x0f1a08));
+		C.StrokeRoundRect({1384.0f, 256.0f, 168.0f, 32.0f}, 6.0f, IgniteHx(igniteart::IgLime, 0.6f), 1.2f);
+		igniteart::IgniteSpark(C, 1400.0f, 272.0f, 8.0f, Hex(igniteart::IgLime));
+		C.Text(Grouped(Lp.Sparks), 1414.0f, 279.0f, IgniteBi(17.0f, Hex(igniteart::IgLime), Align::Left, Baseline::Alphabetic, 96.0f));
+		C.Text("SPARKS", 1546.0f, 278.0f, IgniteTx(8.5f, 800, IgniteHx(igniteart::IgLime, 0.75f), Align::Right));
+	}
 	// The Prize Counter. G1: its strings hang the welcome bonus (released, pending, the next $5); it opens that page.
+	else
 	{
 		if (IgniteHotspot(X, "igprize", {1244.0f, 104.0f, 320.0f, 194.0f}, 12.0f))
 		{
@@ -1062,6 +1271,13 @@ void IgniteToday(IgniteCtx& X)
 		C.Text(Clause, 98.0f, 403.0f, IgniteTx(17.0f, 800, Hex(K.Cream), Align::Left, Baseline::Alphabetic, 1440.0f));
 		return;
 	}
+	// G2: the Flame, three Dare chips and the near-goal line (the hook).
+	const IgniteLoops& Lp = IgniteLoopsOf(X.RL, X.Now);
+	if (Lp.Live)
+	{
+		IgniteTodayLoops(X.RL, X.U, Lp, K, X.Tm, X.Preview, X.World);
+		return;
+	}
 	const net::Network& Net = net::Site(net::SiteId::Ignite);
 	const std::vector<net::EventInstance> Feat = IgniteFeaturedNow(X, 3);
 	const float W = (1552.0f - 2.0f * 16.0f) / 3.0f;
@@ -1142,18 +1358,24 @@ void IgniteChips(IgniteCtx& X, int Count)
 	Rect Rs[10];
 	int Hot = -1;
 	const int Was = X.U.Chip;
+	// FUSE's chip shows once FUSE lights (G2): it jumps to the Fuse Booth.
+	const bool Fuse = IgniteLoopsOf(X.RL, X.Now).Live && IgniteLoopsOf(X.RL, X.Now).FuseOn;
 	float Cx = 24.0f;
 	for (int I = 0; I < 10; ++I)
 	{
-		if (I == 8)
+		if (I == 8 && !Fuse)
 		{
-			continue; // FUSE: G2 (it jumps to the Fuse Booth once FUSE lights)
+			continue;
 		}
 		const float W = C.Measure(IgniteChipNames[I], 13.5f, 700) + 30.0f;
 		Rs[I] = {Cx, 440.0f, W, 32.0f};
 		const Ui::ClickState St = X.UI.Clickable(std::string("chip") + IgniteChipNames[I], Rs[I], !X.Preview);
 		Hot = St.Hover ? I : Hot;
-		if (St.Clicked && X.U.Chip != I)
+		if (St.Clicked && I == 8)
+		{
+			Access::OpenPage(X.RL, RiverLine::Page::Fuse, X.Now);
+		}
+		else if (St.Clicked && X.U.Chip != I)
 		{
 			X.U.Chip = I;
 			X.U.ChipAt = X.Now;
@@ -1164,11 +1386,11 @@ void IgniteChips(IgniteCtx& X, int Count)
 	}
 	const std::string Floor = Grouped(Count) + (Count == 1 ? " event on the floor" : " events on the floor");
 	const uint64_t Key = (static_cast<uint64_t>(Fnv1a("ignite:chips|" + Floor)) << 16) ^ (static_cast<uint64_t>(Was) << 8) ^ (static_cast<uint64_t>(Hot + 1) << 4) ^
-		(static_cast<uint64_t>(K.Mood) << 1) ^ (K.Night ? 1u : 0u) ^ (Skin::Current().Key() << 20);
-	C.Cached(Key, 0.0f, 0.0f, [&K, &Rs, &Floor, Was, Hot](Canvas& At) {
+		(static_cast<uint64_t>(K.Mood) << 1) ^ (K.Night ? 1u : 0u) ^ (Skin::Current().Key() << 20) ^ (Fuse ? 0x4000000000000000ull : 0ull);
+	C.Cached(Key, 0.0f, 0.0f, [&K, &Rs, &Floor, Was, Hot, Fuse](Canvas& At) {
 		for (int I = 0; I < 10; ++I)
 		{
-			if (I == 8)
+			if (I == 8 && !Fuse)
 			{
 				continue;
 			}
@@ -1209,6 +1431,8 @@ struct IgniteCab
 	int Mark = 0; // none, lock, LATE, REG
 	std::string When;
 	bool Rest = false; // not selected, not under the pointer, not in late registration
+	bool Loops = false; // G2: the face says what the entry earns in Sparks ("+610")
+	bool Themed = false; // G2 (F10): tonight's theme pays its base Sparks x1.5 (a sticker on the face)
 };
 
 IgniteCab IgniteCabinetAt(IgniteCtx& X, const Access::ListRow& Row, const Rect& R0, int Shelf, int Col)
@@ -1226,6 +1450,8 @@ IgniteCab IgniteCabinetAt(IgniteCtx& X, const Access::ListRow& Row, const Rect& 
 	Cab.Mark = !Row.Joinable ? 1 : Cab.Late ? 2 : L.St == net::Status::Registering && L.StartsIn <= 60.0 ? 3 : 0;
 	Cab.When = Cab.Late ? "LATE " + rlnet_detail::NetHms(L.LateRegLeft) : IgniteWhen(Row.E.Start, X.World);
 	Cab.Rest = !Cab.Selected && !Cab.St.Hover && !Cab.Late;
+	Cab.Loops = IgniteLoopsOf(X.RL, X.Now).Live;
+	Cab.Themed = Cab.Loops && site::play::ThemeMult(net::ForEvent(Row.E.Id).TemplateOf(Row.E).Id, Row.E.Start) > 1.0001;
 	return Cab;
 }
 
@@ -1258,7 +1484,7 @@ void IgniteCabinetFace(Canvas& C, const net::EventTemplate& T, const igniteart::
 	using namespace igniteart;
 	const bool Rest = Cab.Rest;
 	const std::string Look = Rest ? "ignite:cabinet:" + T.Id + "|" + Cab.When + "|" + std::to_string(Cab.Mark) : "ignite:cabinet:" + T.Id;
-	const uint64_t Key = (static_cast<uint64_t>(Fnv1a(Look)) << 8) ^ (static_cast<uint64_t>(K.Mood) << 1) ^ (K.Night ? 1u : 0u);
+	const uint64_t Key = (static_cast<uint64_t>(Fnv1a(Look)) << 8) ^ (static_cast<uint64_t>(K.Mood) << 1) ^ (K.Night ? 1u : 0u) ^ (Cab.Loops ? 0x80u : 0u) ^ (Cab.Themed ? 0x40u : 0u);
 	C.Cached(Key, X0, Y0, [&T, &K, &Cab, Rest](Canvas& At) {
 		IgniteCabinetBody(At, {0.0f, 0.0f, 180.0f, 120.0f}, IgniteEventTint(T, K), false, 0.0f, K, false);
 		IgniteEventMark(At, T, 30.0f, 27.0f, 18.0f, K);
@@ -1270,6 +1496,18 @@ void IgniteCabinetFace(Canvas& C, const net::EventTemplate& T, const igniteart::
 		At.Text(T.Name, 14.0f, 74.0f, IgniteTx(14.5f, 700, Hex(K.Cream), Align::Left, Baseline::Alphabetic, 152.0f));
 		At.Text(net::BuyIn(T.BuyInCents), 14.0f, 101.0f, IgniteBi(23.0f, Hex(K.Cream)));
 		At.FillRect({14.0f, 109.0f, 152.0f, 3.0f}, Rgba(255, 255, 255, 0.12f));
+		if (Cab.Loops && T.BuyInCents > 0)
+		{
+			// G2 (F1): the base Sparks an entry earns here, a spark after it.
+			At.Text("+" + Grouped(IgniteBaseSparks(T.BuyInCents)), 158.0f, 100.0f, IgniteBi(15.0f, Hex(IgLime), Align::Right));
+			IgniteSpark(At, 165.0f, 89.0f, 4.5f, Hex(IgLime));
+		}
+		if (Cab.Themed)
+		{
+			// Tonight's theme (F10): its base Sparks pay half again.
+			IgniteSticker(At, 158.0f, 56.0f, 15.0f, "", Hex(IgSun), Hex(IgDarkInk), 8.0f, 14, 0.8f);
+			IgniteTimesText(At, 158.0f, 60.0f, 10.5f, "1.5", Hex(IgDarkInk), Align::Center);
+		}
 		if (Rest)
 		{
 			IgniteCabinetFront(At, K, Cab.When, Cab.Mark, 0.0f, 0.0f);
@@ -1278,9 +1516,13 @@ void IgniteCabinetFace(Canvas& C, const net::EventTemplate& T, const igniteart::
 }
 
 /** The field so far ("212 in") and its bar against where it will end up. */
-void IgniteCabinetField(Canvas& C, const Access::ListRow& Row, const igniteart::IgniteTones& K, float X0, float Y0)
+void IgniteCabinetField(Canvas& C, const Access::ListRow& Row, const igniteart::IgniteTones& K, float X0, float Y0, bool Loops = false)
 {
-	C.Text(Grouped(Row.L.Entries) + " in", X0 + 166.0f, Y0 + 100.0f, igniteart::IgniteTx(12.0f, 800, Hex(igniteart::IgLime), Align::Right));
+	// G2: the face says what the entry earns ("+610"), so the field is its bar alone (the sheet counts the entries).
+	if (!Loops)
+	{
+		C.Text(Grouped(Row.L.Entries) + " in", X0 + 166.0f, Y0 + 100.0f, igniteart::IgniteTx(12.0f, 800, Hex(igniteart::IgLime), Align::Right));
+	}
 	const float Fill = Row.E.Entries > 0 ? static_cast<float>(Clamp01(static_cast<double>(Row.L.Entries) / static_cast<double>(Row.E.Entries))) : 0.0f;
 	if (Fill > 0.0f)
 	{
@@ -1320,7 +1562,7 @@ void IgniteCabinet(IgniteCtx& X, const IgniteCab& Cab)
 	{
 		C.Text(Cab.When, R.X + 56.0f, R.Y + 24.0f, IgniteTx(12.5f, 800, Hex(K.Cream), Align::Left, Baseline::Alphabetic, 96.0f));
 	}
-	IgniteCabinetField(C, Row, K, R.X, R.Y);
+	IgniteCabinetField(C, Row, K, R.X, R.Y, Cab.Loops);
 	if (!Cab.Rest)
 	{
 		IgniteCabinetFront(C, K, std::string(), Cab.Mark, R.X, R.Y);
@@ -1552,14 +1794,15 @@ void IgniteFloor(IgniteCtx& X, const std::vector<Access::ListRow>& Rows)
 		const uint64_t Tone = (static_cast<uint64_t>(K.Mood) << 1) ^ (K.Night ? 1u : 0u);
 		if (Still)
 		{
-			std::string Piece = "ignite:shelf|" + std::to_string(Sl) + "|" + std::to_string(std::lround(U.ShelfX[Sl]));
+			std::string Piece = "ignite:shelf|" + std::to_string(Sl) + "|" + std::to_string(std::lround(U.ShelfX[Sl])) + (IgniteLoopsOf(X.RL, X.Now).Live ? "|g2" : "");
 			std::string Late = "ignite:shelf-late|" + std::to_string(Sl) + "|" + std::to_string(std::lround(U.ShelfX[Sl]));
 			bool AnyLate = false;
 			for (const IgniteCab& Cab : Cabs)
 			{
 				if (Pieced(Cab))
 				{
-					Piece += "|" + std::to_string(Cab.Col) + ":" + Cab.Row->E.Id + (Cab.Late ? std::string(":late") : ":" + Cab.When + ":" + std::to_string(Cab.Mark) + ":" + std::to_string(Cab.Row->L.Entries));
+					Piece += "|" + std::to_string(Cab.Col) + ":" + Cab.Row->E.Id + (Cab.Late ? std::string(":late") : ":" + Cab.When + ":" + std::to_string(Cab.Mark) + ":" + std::to_string(Cab.Row->L.Entries)) +
+						(Cab.Themed ? ":t" : "");
 					if (Cab.Late)
 					{
 						Late += "|" + std::to_string(Cab.Col) + ":" + std::to_string(Cab.Mark);
@@ -1575,7 +1818,7 @@ void IgniteFloor(IgniteCtx& X, const std::vector<Access::ListRow>& Rows)
 						IgniteCabinetFace(At, net::ForEvent(Cab.Row->E.Id).TemplateOf(Cab.Row->E), K, Cab, Cab.R0.X, 0.0f);
 						if (!Cab.Late)
 						{
-							IgniteCabinetField(At, *Cab.Row, K, Cab.R0.X, 0.0f);
+							IgniteCabinetField(At, *Cab.Row, K, Cab.R0.X, 0.0f, Cab.Loops);
 						}
 					}
 				}
@@ -1587,7 +1830,7 @@ void IgniteFloor(IgniteCtx& X, const std::vector<Access::ListRow>& Rows)
 					if (Pieced(Cab) && Cab.Late)
 					{
 						C.Text(Cab.When, Cab.R0.X + 56.0f, Top + 24.0f, igniteart::IgniteTx(12.5f, 800, Hex(K.Cream), Align::Left, Baseline::Alphabetic, 96.0f));
-						IgniteCabinetField(C, *Cab.Row, K, Cab.R0.X, Top);
+						IgniteCabinetField(C, *Cab.Row, K, Cab.R0.X, Top, Cab.Loops);
 					}
 				}
 				C.Cached((static_cast<uint64_t>(Fnv1a(Late)) << 8) ^ Tone, 0.0f, Top, [&Cabs, &K, &Pieced](Canvas& At) {
@@ -1686,7 +1929,50 @@ void IgniteSheet(IgniteCtx& X)
 			Blurb = "A " + net::BuyIn(T.BuyInCents) + " " + rlnet_detail::NetLower(rlnet_detail::NetFormat(T)) + " with " + (T.GtdCents > 0 ? rlnet_detail::NetMoney(T.GtdCents) + " guaranteed" : std::string("a pool built by its entries")) +
 				". " + T.Speed + " structure, " + std::to_string(static_cast<int>(T.LevelMinutes)) + "-minute levels; about " + Grouped(E.Entries) + " players expected.";
 		}
-		rlnet_detail::NetParagraph(C, Blurb, Ix, 582.0f, 500.0f, 14.0f, 500, IgniteHx(K.Cream, 0.82f), 20.0f, 3);
+		const IgniteLoops& Lp = IgniteLoopsOf(X.RL, X.Now);
+		rlnet_detail::NetParagraph(C, Blurb, Ix, 582.0f, 500.0f, 14.0f, 500, IgniteHx(K.Cream, 0.82f), 20.0f, Lp.Live ? 2 : 3);
+		// A ticket held for this event plays it (Session::RegisterEvent spends it before any money), and a ticket entry earns
+		// nothing (W4): the sheet never promises its Sparks, flame or Dares.
+		const size_t At = E.Id.find('@');
+		const bool OnTicket = Lp.Live && T.BuyInCents > 0 && At != std::string::npos && X.S.Life.TicketsFor(Net.TicketOf(E.Id.substr(0, At))) > 0;
+		if (OnTicket)
+		{
+			const float Ew = C.Text("TICKET ENTRY \xC2\xB7 NO SPARKS", Ix + 8.0f, 646.0f, IgniteBi(16.0f, pal::Muted));
+			C.Text("your ticket plays this one", Ix + 20.0f + Ew, 645.0f, IgniteTx(12.5f, 700, Hex(K.Cream), Align::Left, Baseline::Alphabetic, 500.0f - Ew - 40.0f));
+		}
+		else if (Lp.Live && T.BuyInCents > 0)
+		{
+			// G2 (F1, F2, F4): what a paid entry here earns, and what it lights today.
+			IgniteSpark(C, Ix + 8.0f, 640.0f, 8.0f, Hex(IgLime));
+			const float Ew = C.Text("EARNS " + Grouped(IgniteBaseSparks(T.BuyInCents)) + " SPARKS", Ix + 22.0f, 646.0f, IgniteBi(16.0f, Hex(IgLime)));
+			std::string Also;
+			if (!Lp.LitToday && !Lp.OnIce)
+			{
+				Also = "keeps your flame";
+			}
+			if (Lp.RingsLit < 3 && Lp.MoreForNext == 1)
+			{
+				Also += (Also.empty() ? "" : " \xC2\xB7 ") + std::string("lights ") + IgniteRingName(Lp.RingsLit + 1);
+			}
+			// The Dares today an entry here can move (core's DareMayCount).
+			std::string Dares;
+			const char* const Tiers[3] = {"Easy", "Medium", "Hard"};
+			for (const IgniteDare& D : Lp.Dares)
+			{
+				if (D.Id >= 0 && !D.Done && !D.Claimed && site::play::DareMayCount(D.Id, T.Id, E.Start))
+				{
+					Dares += (Dares.empty() ? "" : ", ") + std::string(Tiers[std::min(2, std::max(0, D.Tier))]);
+				}
+			}
+			if (!Dares.empty() && !Lp.OnIce)
+			{
+				Also += (Also.empty() ? "" : " \xC2\xB7 ") + std::string("Dares: ") + Dares;
+			}
+			if (!Also.empty())
+			{
+				C.Text(Also, Ix + 34.0f + Ew, 645.0f, IgniteTx(12.5f, 700, Hex(K.Cream), Align::Left, Baseline::Alphabetic, 500.0f - Ew - 40.0f));
+			}
+		}
 		C.Text("WHO'S IN", Ix, 670.0f, IgniteBi(15.0f, Hex(IgPink)));
 		std::vector<int> Who = X.S.Living().Registered(E.Id);
 		const world::World& W = X.S.Living();
@@ -1703,7 +1989,17 @@ void IgniteSheet(IgniteCtx& X)
 			C.FillRoundRect({Wx, Wy - 14.0f, 244.0f, 28.0f}, 14.0f, IgniteHx(K.Well));
 			const AvatarSpec Pic = AvatarFor(N->Name);
 			DrawAvatar(C, Wx + 14.0f, Wy, 11.0f, Pic);
-			C.Text(N->Name, Wx + 32.0f, Wy + 5.0f, IgniteTx(13.0f, 700, Hex(K.Cream), Align::Left, Baseline::Alphabetic, 200.0f));
+			// G2 (F8): a Headliner's tag and your Beef's.
+			const bool Head = Lp.Live && std::find(Lp.Headliners.begin(), Lp.Headliners.end(), N->Name) != Lp.Headliners.end();
+			const bool Beef = Lp.Live && !Lp.BeefName.empty() && N->Name == Lp.BeefName;
+			const char* Tag = Beef ? "BEEF" : Head ? "HEADLINER" : nullptr;
+			const float Tw = Tag ? C.Measure(Tag, 9.0f, 900) + 12.0f : 0.0f;
+			C.Text(N->Name, Wx + 32.0f, Wy + 5.0f, IgniteTx(13.0f, 700, Hex(K.Cream), Align::Left, Baseline::Alphabetic, 200.0f - Tw));
+			if (Tag)
+			{
+				C.FillRoundRect({Wx + 238.0f - Tw, Wy - 8.0f, Tw, 16.0f}, 8.0f, Beef ? Hex(IgRed) : Hex(IgSun));
+				C.Text(Tag, Wx + 238.0f - Tw / 2.0f, Wy + 3.5f, IgniteTx(9.0f, 900, Hex(IgDarkInk), Align::Center));
+			}
 		}
 		if (Who.size() > 8)
 		{
@@ -1932,7 +2228,8 @@ void IgniteLobby(IgniteCtx& X)
 	// A page Ignite hasn't got goes to PLAY (RiverLine's own, RunItTwice's); FUSE's booth is G2: until FUSE lights, its page
 	// is PLAY on Flip & Run, as the centre button opens it.
 	Pg Page = rlsites_detail::SitesPageHome(net::SiteId::Ignite, Access::Shown(RL));
-	if (Page == Pg::Fuse)
+	const IgniteLoops& Lp = IgniteLoopsOf(RL, X.Now);
+	if (Page == Pg::Fuse && !(Lp.Live && Lp.FuseOn))
 	{
 		Page = Pg::Lobby;
 		X.U.Chip = 2;
@@ -2001,6 +2298,10 @@ void IgniteLobby(IgniteCtx& X)
 		{
 		case Pg::Lobby: IgnitePlay(X); break;
 		case Pg::Series: Access::SeriesPage(RL, X.Now); break;
+		case Pg::Fuse:
+			X.C.FillRect({0.0f, 72.0f, 1600.0f, 890.0f}, IgniteHx(X.K.Plum));
+			IgniteFusePage(RL, X.U, X.K, X.Now, X.Preview);
+			break;
 		default:
 			// The other pages (REWARDS, BOARDS, BUZZ, WALLET, the Player Card) draw on the plum ground.
 			X.C.FillRect({0.0f, 72.0f, 1600.0f, 890.0f}, IgniteHx(X.K.Plum));
@@ -2063,17 +2364,45 @@ void IgniteBoards(IgniteCtx& X)
 		const float W = C.Measure(Label, 15.0f, 800) + 36.0f;
 		const Rect R{Tx, 88.0f, W, 36.0f};
 		const Ui::ClickState St = X.UI.Clickable("board" + Label, R, !X.Preview);
-		const bool On = B == Board;
+		const bool On = B == Board && !X.U.BoardWall;
 		if (St.Clicked && !On)
 		{
 			Access::ShowBoard(X.RL, B, X.Now);
 			X.U.BoardAt = X.Now;
+			X.U.BoardWall = false;
 		}
 		IgnitePill(C, R, On ? Hex(K.Coral) : IgniteHx(St.Hover ? K.Panel : K.Well), IgniteHx(K.Rim), On ? 0.0f : 1.2f);
 		C.Text(Label, R.X + W / 2.0f, R.Y + 24.0f, IgniteTx(15.0f, 800, On ? IgniteHx(0x2a0d14) : Hex(K.Cream), Align::Center));
 		Tx += W + 10.0f;
 	}
+	// G2: the Fuse Wall (yours: your FUSEs of x10 and up).
+	const IgniteLoops& Lp = IgniteLoopsOf(X.RL, X.Now);
+	if (Lp.Live && Lp.FuseOn)
+	{
+		const char* Label = "Fuse Wall";
+		const float W = C.Measure(Label, 15.0f, 800) + 36.0f;
+		const Rect R{Tx, 88.0f, W, 36.0f};
+		const Ui::ClickState St = X.UI.Clickable(std::string("board") + Label, R, !X.Preview);
+		if (St.Clicked)
+		{
+			X.U.BoardWall = true;
+			X.U.BoardAt = X.Now;
+		}
+		const bool On = X.U.BoardWall;
+		IgnitePill(C, R, On ? Hex(K.Coral) : IgniteHx(St.Hover ? K.Panel : K.Well), IgniteHx(K.Rim), On ? 0.0f : 1.2f);
+		C.Text(Label, R.X + W / 2.0f, R.Y + 24.0f, IgniteTx(15.0f, 800, On ? IgniteHx(0x2a0d14) : Hex(K.Cream), Align::Center));
+		Tx += W + 10.0f;
+	}
+	else
+	{
+		X.U.BoardWall = false;
+	}
 	C.Text("HIGH SCORES", Tx + 14.0f, 116.0f, IgniteBi(22.0f, Hex(IgSun)));
+	if (X.U.BoardWall)
+	{
+		IgniteFuseWallCard(X.RL, Lp, K, {24.0f, 136.0f, 1552.0f, 696.0f});
+		return;
+	}
 	{
 		// What the board counts, in two lines at most at the right (a long one wraps rather than running off the page).
 		std::vector<std::string> About = rlnet_detail::NetWrap(C, rlsites_detail::SitesBoardAbout(X.S, Site, Board, X.World), 620.0f, 12.5f, 600);
@@ -2239,12 +2568,19 @@ void IgniteBuzz(IgniteCtx& X)
 	const igniteart::IgniteTones& K = X.K;
 	using namespace igniteart;
 	const char* const Filters[4] = {"Everything", "Big hits", "Promos", "Shouts"};
+	// Big hits: the FUSEs of x10 and up you sat in (G2); the filter appears with the first one.
+	const IgniteLoops& Lp = IgniteLoopsOf(X.RL, X.Now);
+	const bool Hits = Lp.Live && !Lp.Fuse.Hits.empty();
+	if (X.U.Buzz == 1 && !Hits)
+	{
+		X.U.Buzz = 0;
+	}
 	float Fx = 24.0f;
 	for (int I = 0; I < 4; ++I)
 	{
-		if (I == 1)
+		if (I == 1 && !Hits)
 		{
-			continue; // Big hits: the FUSEs of x10 and up you sat in (G2); it appears with the first one
+			continue;
 		}
 		const float W = C.Measure(Filters[I], 14.0f, 800) + 34.0f;
 		const Rect R{Fx, 88.0f, W, 34.0f};
@@ -2268,9 +2604,43 @@ void IgniteBuzz(IgniteCtx& X)
 		bool Shout = false;
 		std::string Tag, Title, Body, Who;
 		Chips Amount = 0;
+		int Day = -1; // a moment known by its day only (the Fuse record keeps days): its date, never an hour
 	};
 	std::vector<BuzzCard> Cards;
-	if (X.U.Buzz != 3)
+	// G2: the true results of the FUSEs you sat in (Big hits), and your own FUSEs of x25 and up (your moments).
+	if (Hits && (X.U.Buzz == 0 || X.U.Buzz == 1))
+	{
+		for (const site::play::HitRow& H : Lp.Fuse.Hits)
+		{
+			BuzzCard Bc;
+			Bc.At = static_cast<double>(H.Day) * net::MinutesPerDay;
+			Bc.Day = H.Day;
+			Bc.Tag = "BIG HIT";
+			Bc.Title = H.Winner + " hit x" + Grouped(H.M) + " at your table";
+			Bc.Body = "A " + Money(H.Prize) + " first prize, three seats, one fuse.";
+			Bc.Amount = H.Prize;
+			Cards.push_back(Bc);
+		}
+	}
+	if (Lp.Live && X.U.Buzz == 0)
+	{
+		for (const site::play::WallRow& W : Lp.Fuse.Wall)
+		{
+			if (W.M < 25)
+			{
+				continue;
+			}
+			BuzzCard Bc;
+			Bc.At = static_cast<double>(W.Day) * net::MinutesPerDay;
+			Bc.Day = W.Day;
+			Bc.Tag = "YOU";
+			Bc.Title = "BIG FUSE: " + X.S.HeroName + " lit a x" + Grouped(W.M);
+			Bc.Body = W.Place == 1 ? std::string("And took it down.") : "Finished " + Ordinal(W.Place) + ".";
+			Bc.Amount = W.Prize;
+			Cards.push_back(Bc);
+		}
+	}
+	if (X.U.Buzz != 3 && X.U.Buzz != 1)
 	{
 		for (const net::NewsItem& It : Access::NewsFeed(X.RL))
 		{
@@ -2319,7 +2689,7 @@ void IgniteBuzz(IgniteCtx& X)
 			// The slots: tonight's event and its time; your handle only after your first Ignite cash of $100 or more; a
 			// Headliner's name only once Headliners headline (G2). A line that says what time it is only at its hours, as of
 			// when it was shouted (G1_AUDIT L6: "Evening, boardwalk!" never at 9 AM).
-			if (Text.find("{Headliner}") != std::string::npos || (Text.find("{Hero}") != std::string::npos && !Cashed100) ||
+			if ((Text.find("{Headliner}") != std::string::npos && (!Lp.Live || Lp.Headliners.empty())) || (Text.find("{Hero}") != std::string::npos && !Cashed100 && !Lp.CrowdKnows) ||
 				((Text.find("{Event}") != std::string::npos || Text.find("{Time}") != std::string::npos) && Tonight.empty()) || !IgniteShoutFits(Text, At))
 			{
 				continue;
@@ -2329,6 +2699,12 @@ void IgniteBuzz(IgniteCtx& X)
 				Text = rlsites_detail::SitesFill(Text, {{"Event", Net.TemplateOf(Tonight.front()).Name}, {"Time", rlnet_detail::LiveTime(Tonight.front().Start)}});
 			}
 			Text = rlsites_detail::SitesFill(Text, {{"Hero", X.S.HeroName}});
+			if (Lp.Live && !Lp.Headliners.empty())
+			{
+				// This month's Headliners (G2, F8): a keyed pick by the shout's slot.
+				const uint32_t Pick = IgniteMix(Fnv1a(std::to_string(X.S.WorldSeed()) + ":ignite:shout-headliner:" + std::to_string(static_cast<long long>(At))));
+				Text = rlsites_detail::SitesFill(Text, {{"Headliner", Lp.Headliners[Pick % Lp.Headliners.size()]}});
+			}
 			BuzzCard Bc;
 			Bc.At = At;
 			Bc.Shout = true;
@@ -2394,13 +2770,14 @@ void IgniteBuzz(IgniteCtx& X)
 		}
 		else
 		{
-			Ty = rlnet_detail::NetParagraph(C, Bc.Title, R.X + 24.0f, R.Y + 36.0f, R.W - 2.0f * Sw - 60.0f, 17.0f, 800, Hex(K.Cream), 22.0f, 2) + 4.0f;
+			// A multiplier in a title ("LilaVance hit x25 at your table") draws its vector cross (the glyph rule).
+			Ty = IgniteParagraphTimes(C, Bc.Title, R.X + 24.0f, R.Y + 36.0f, R.W - 2.0f * Sw - 60.0f, 17.0f, 800, Hex(K.Cream), 22.0f, 2) + 4.0f;
 		}
 		for (size_t L = 0; L < Body.size() && L < 5; ++L)
 		{
 			C.Text(Body[L], R.X + 24.0f, Ty + static_cast<float>(L) * 20.0f, IgniteTx(14.0f, 500, IgniteHx(K.Cream, 0.82f)));
 		}
-		C.Text(rlnet_detail::NetAgo(X.World - Bc.At, Bc.At), R.X + 24.0f, R.Y + R.H - 16.0f, IgniteTx(11.5f, 700, pal::Muted));
+		C.Text(Bc.Day >= 0 ? net::DateLabel(Bc.Day) : rlnet_detail::NetAgo(X.World - Bc.At, Bc.At), R.X + 24.0f, R.Y + R.H - 16.0f, IgniteTx(11.5f, 700, pal::Muted));
 		if (Bc.Amount > 0)
 		{
 			C.Text(Money(Bc.Amount), R.X + R.W - 22.0f, R.Y + R.H - 14.0f, IgniteBi(20.0f, Hex(IgSun), Align::Right));
@@ -2636,7 +3013,7 @@ void IgniteWallet(IgniteCtx& X)
 			for (auto It = A->Lines.rbegin(); It != A->Lines.rend() && Ly + 48.0f <= Rt.Y + Rt.H - 10.0f; ++It, ++Row)
 			{
 				const site::Line& L = *It;
-				C.Text(L.Label, Rt.X + 26.0f, Ly + 20.0f, IgniteTx(14.5f, 700, Hex(K.Cream), Align::Left, Baseline::Alphabetic, Rt.W - 180.0f));
+				IgniteLineTimes(C, L.Label, Rt.X + 26.0f, Ly + 20.0f, IgniteTx(14.5f, 700, Hex(K.Cream), Align::Left, Baseline::Alphabetic, Rt.W - 180.0f)); // "FUSE x25: 1st"
 				C.Text(std::string(net::WeekdayName(net::DayOf(L.At))) + " " + net::TimeLabel(L.At), Rt.X + 26.0f, Ly + 38.0f, IgniteTx(12.0f, 500, pal::Muted));
 				C.Text(L.Cents == 0 ? std::string("\xE2\x80\x94") : (L.Cents > 0 ? "+" : "\xE2\x88\x92") + Money(L.Cents > 0 ? L.Cents : -L.Cents), Rt.X + Rt.W - 26.0f, Ly + 28.0f,
 					IgniteBi(16.0f, L.Cents > 0 ? Hex(IgLime) : L.Cents < 0 ? Hex(K.Cream) : pal::Muted, Align::Right));
@@ -2682,6 +3059,7 @@ void IgniteCard(IgniteCtx& X)
 	const igniteart::IgniteTones& K = X.K;
 	using namespace igniteart;
 	const site::Account* A = IgniteAccount(X.S);
+	const IgniteLoops& Lp = IgniteLoopsOf(X.RL, X.Now);
 	// The holographic card: a shimmer sweep across it, the bubble, the name, how long you've been here.
 	{
 		const Rect R{24.0f, 88.0f, 520.0f, 744.0f};
@@ -2697,10 +3075,39 @@ void IgniteCard(IgniteCtx& X)
 		C.GlowRoundRect({R.X + 170.0f, R.Y + 50.0f, 180.0f, 180.0f}, 90.0f, IgniteHx(IgViolet, 0.35f), 30.0f);
 		DrawAvatar(C, R.X + 260.0f, R.Y + 150.0f, 86.0f, AvatarFor(X.S.HeroName));
 		C.StrokeArc(R.X + 260.0f, R.Y + 150.0f, 92.0f, 0.0f, 2.0f * Pi, Hex(IgViolet), 5.0f);
+		if (Lp.Live)
+		{
+			// G2 (F6): the arc to the next level, the badge, the title.
+			const double Fr = Lp.LevelTo > Lp.LevelFrom ? Clamp01(static_cast<double>(Lp.LevelSparks - Lp.LevelFrom) / static_cast<double>(Lp.LevelTo - Lp.LevelFrom)) : 0.0;
+			if (Fr > 0.0)
+			{
+				C.StrokeArc(R.X + 260.0f, R.Y + 150.0f, 92.0f, -Pi / 2.0f, -Pi / 2.0f + 2.0f * Pi * static_cast<float>(Fr), Hex(IgLime), 5.0f);
+			}
+			IgniteLevelBadge(C, R.X + 330.0f, R.Y + 220.0f, 22.0f, Lp.Level);
+		}
 		C.Text(X.S.HeroName, R.X + 260.0f, R.Y + 290.0f, IgniteBi(34.0f, Hex(K.Cream), Align::Center, Baseline::Alphabetic, R.W - 40.0f));
 		if (A)
 		{
 			C.Text("On Ignite since " + net::DateLabel(net::DayOf(A->JoinedAt)), R.X + 260.0f, R.Y + 320.0f, IgniteTx(15.0f, 700, Hex(K.Coral), Align::Center));
+		}
+		if (Lp.Live)
+		{
+			C.Text("LEVEL " + std::to_string(Lp.Level) + " \xC2\xB7 " + IgniteUpper(Lp.Title), R.X + 260.0f, R.Y + 344.0f, IgniteTx(13.0f, 900, Hex(IgViolet), Align::Center));
+			const std::pair<std::string, std::string> More[3] = {
+				{Grouped(Lp.Best) + (Lp.Best == 1 ? " day" : " days"), "BEST FLAME"}, {Lp.Fuse.BestM > 0 ? std::string() : std::string("\xE2\x80\x94"), "BEST FUSE"}, {Grouped(Lp.ScalpLife), "HEADLINERS SCALPED"}};
+			for (int I = 0; I < 3; ++I)
+			{
+				const float Fx = R.X + 40.0f + static_cast<float>(I) * 150.0f;
+				if (I == 1 && Lp.Fuse.BestM > 0)
+				{
+					IgniteTimes(C, Fx, R.Y + 620.0f, 26.0f, Lp.Fuse.BestM, Hex(IgniteFuseTint(Lp.Fuse.BestM, K)), Align::Left);
+				}
+				else
+				{
+					C.Text(More[I].first, Fx, R.Y + 620.0f, IgniteBi(26.0f, Hex(K.Cream), Align::Left, Baseline::Alphabetic, 140.0f));
+				}
+				C.Text(More[I].second, Fx, R.Y + 642.0f, IgniteTx(9.5f, 900, pal::Muted, Align::Left, Baseline::Alphabetic, 140.0f));
+			}
 		}
 		C.FillRect({R.X + 40.0f, R.Y + 350.0f, R.W - 80.0f, 1.0f}, IgniteHx(K.Cream, 0.15f));
 		const std::pair<std::string, std::string> Facts[4] = {
@@ -2718,11 +3125,86 @@ void IgniteCard(IgniteCtx& X)
 		}
 		siteart::Logo(C, {R.X + 160.0f, R.Y + R.H - 70.0f, 200.0f, 40.0f}, net::SiteId::Ignite);
 	}
-	// The tabs: at G1, RECORDS (the Locker, the Sticker Book and Rivals open with the loops, G2).
+	// The tabs: LOCKER, STICKER BOOK, RECORDS, RIVALS (G2); at G1, RECORDS alone.
+	if (!Lp.Live)
 	{
+		X.U.CardTab = 2;
 		const Rect Tb{560.0f, 88.0f, 160.0f, 40.0f};
 		IgnitePill(C, Tb, Hex(K.Coral), Color(), 0.0f);
 		C.Text("RECORDS", Tb.X + Tb.W / 2.0f, Tb.Y + 26.0f, IgniteTx(15.0f, 900, IgniteHx(0x2a0d14), Align::Center));
+	}
+	else
+	{
+		const char* const Tabs[4] = {"LOCKER", "STICKER BOOK", "RECORDS", "RIVALS"};
+		float Tx = 560.0f;
+		for (int I = 0; I < 4; ++I)
+		{
+			const float W = C.Measure(Tabs[I], 15.0f, 900) + 40.0f;
+			const Rect Tb{Tx, 88.0f, W, 40.0f};
+			const Ui::ClickState St = X.UI.Clickable("cardtab" + std::to_string(I), Tb, !X.Preview);
+			if (St.Clicked)
+			{
+				X.U.CardTab = I;
+			}
+			const bool On = X.U.CardTab == I;
+			IgnitePill(C, Tb, On ? Hex(K.Coral) : IgniteHx(St.Hover ? K.Panel : K.Well), IgniteHx(K.Rim), On ? 0.0f : 1.2f);
+			C.Text(Tabs[I], Tb.X + W / 2.0f, Tb.Y + 26.0f, IgniteTx(15.0f, 900, On ? IgniteHx(0x2a0d14) : Hex(K.Cream), Align::Center));
+			Tx += W + 10.0f;
+		}
+		const Rect Box{560.0f, 140.0f, 1016.0f, 692.0f};
+		if (X.U.CardTab != 2)
+		{
+			C.FillRoundRect(Box, 24.0f, Paint::Linear({0.0f, Box.Y}, {0.0f, Box.Y + Box.H}, IgniteHx(K.PanelTop), IgniteHx(K.PanelBot)));
+			C.StrokeRoundRect(Box, 24.0f, IgniteHx(K.Rim), 1.0f);
+		}
+		if (X.U.CardTab == 0)
+		{
+			IgniteLocker(X.RL, X.U, K, Box, X.Now, X.Preview);
+			return;
+		}
+		if (X.U.CardTab == 1)
+		{
+			IgniteStickerBook(X.RL, X.U, K, Box, X.Now, X.Preview);
+			return;
+		}
+		if (X.U.CardTab == 3)
+		{
+			// RIVALS: your Beef history and the Headliners you've scalped (yours only).
+			C.Text("BEEF", Box.X + 24.0f, Box.Y + 44.0f, IgniteBi(22.0f, Hex(IgRed)));
+			C.Text("Who keeps busting you here, and who you keep busting (the last 30 days).", Box.X + 110.0f, Box.Y + 42.0f, IgniteTx(13.0f, 600, pal::Muted));
+			if (Lp.Beefs.empty())
+			{
+				C.Text(IgniteBeefNone, Box.X + 24.0f, Box.Y + 90.0f, IgniteTx(15.0f, 600, pal::Muted));
+			}
+			for (size_t I = 0; I < Lp.Beefs.size() && I < 5; ++I)
+			{
+				const site::play::Beef& B = Lp.Beefs[I];
+				const float Y = Box.Y + 70.0f + static_cast<float>(I) * 60.0f;
+				const bool Now0 = B.Name == Lp.BeefName;
+				C.FillRoundRect({Box.X + 24.0f, Y, Box.W - 48.0f, 52.0f}, 16.0f, IgniteHx(Now0 ? 0x3a1420 : K.Well));
+				DrawAvatar(C, Box.X + 54.0f, Y + 26.0f, 16.0f, AvatarFor(B.Name));
+				C.Text(B.Name, Box.X + 84.0f, Y + 32.0f, IgniteTx(16.0f, 800, Hex(K.Cream), Align::Left, Baseline::Alphabetic, 400.0f));
+				if (Now0)
+				{
+					C.FillRoundRect({Box.X + 500.0f, Y + 16.0f, 64.0f, 20.0f}, 10.0f, Hex(IgRed));
+					C.Text("BEEF", Box.X + 532.0f, Y + 30.0f, IgniteTx(10.5f, 900, Hex(IgDarkInk), Align::Center));
+				}
+				C.Text("you " + std::to_string(B.YouKo) + " \xC2\xB7 them " + std::to_string(B.TheyKo), Box.X + Box.W - 48.0f, Y + 33.0f, IgniteBi(18.0f, B.TheyKo > B.YouKo ? Hex(IgRed) : Hex(IgLime), Align::Right));
+			}
+			const float Sy = Box.Y + 420.0f;
+			C.Text("SCALPS", Box.X + 24.0f, Sy, IgniteBi(22.0f, Hex(IgSun)));
+			C.Text(Grouped(Lp.ScalpLife) + (Lp.ScalpLife == 1 ? " Headliner knocked out" : " Headliners knocked out"), Box.X + 24.0f, Sy + 36.0f, IgniteTx(16.0f, 700, Hex(K.Cream)));
+			C.Text("THIS MONTH'S HEADLINERS", Box.X + 24.0f, Sy + 84.0f, IgniteTx(11.0f, 900, pal::Muted));
+			for (size_t I = 0; I < Lp.Headliners.size() && I < 6; ++I)
+			{
+				const float Hx = Box.X + 24.0f + static_cast<float>(I % 3) * 320.0f;
+				const float Hy = Sy + 116.0f + static_cast<float>(I / 3) * 52.0f;
+				DrawAvatar(C, Hx + 16.0f, Hy, 15.0f, AvatarFor(Lp.Headliners[I]));
+				C.FillPolygon(IgniteStar(Hx + 30.0f, Hy - 12.0f, 7.0f, 3.2f, 5), Hex(IgSun));
+				C.Text(Lp.Headliners[I], Hx + 42.0f, Hy + 5.0f, IgniteTx(15.0f, 800, Hex(K.Cream), Align::Left, Baseline::Alphabetic, 260.0f));
+			}
+			return;
+		}
 	}
 	// RECORDS: from the account and History (best finish, biggest cash, titles, the last results here).
 	{
@@ -2922,6 +3404,98 @@ void IgniteResults(IgniteCtx& X)
 			C.Text(Net, 376.0f + Bw + Lw, Y, IgniteTx(15.0f, 800, R.SessionNetCents >= 0 ? Hex(IgLime) : pal::Red));
 		}
 	}
+	// G2 (SPEC §2.4 G): the rewards ticker for the entry this result closed: its Sparks counting up with the multiplier
+	// explained, the Dares it ticked (0.25 s apart), the wheel's ring it lit, the Level and the Wristband's tier; and the Beef.
+	{
+		const IgniteLoops& Lp = IgniteLoopsOf(X.RL, X.Now);
+		bool Ours = Lp.Live && !Lp.Last.EventId.empty() && Lp.Last.Sparks > 0;
+		if (Ours)
+		{
+			// Only the entry this result closed (W4, W5): a ticket entry earns nothing, so a later ticket entry of the same event
+			// (or a ticket FUSE at the same stake) must never wear the last paid entry's Sparks. An MTT: History's newest line is
+			// the event this result closed, by its instance id. A FUSE (never in History): the stake's last FUSE entered, by its
+			// ordinal, is the paid one.
+			if (fuse::IsFuse(Lp.Last.EventId))
+			{
+				const int Tier = fuse::TierOf(Lp.Last.EventId);
+				Ours = Tier >= 0 && Tier < 3 && R.EventName == fuse::NameOf(Tier) && fuse::OrdinalOf(Lp.Last.EventId) == Lp.Fuse.N[static_cast<size_t>(Tier)];
+			}
+			else
+			{
+				Ours = !X.S.History.empty() && X.S.History.front().Name == R.EventName && X.S.History.front().EventId == Lp.Last.EventId;
+			}
+		}
+		if (Ours)
+		{
+			const IgniteEntry& E = Lp.Last;
+			const float Ty = 452.0f;
+			C.FillRoundRect({340.0f, Ty - 26.0f, 920.0f, 38.0f}, 19.0f, IgniteHx(0x1b2610, 0.85f));
+			const double Shown = motion::CountUp(0.0, static_cast<double>(E.Sparks), X.Preview ? 1.0e9 : X.Now, X.U.ResultAt + 0.5, 0.9);
+			IgniteSpark(C, 362.0f, Ty - 6.0f, 9.0f, Hex(IgLime));
+			const float Sw = C.Text("+" + Grouped(static_cast<int64_t>(std::llround(Shown))) + " SPARKS", 378.0f, Ty, IgniteBi(20.0f, Hex(IgLime)));
+			std::string Why = Grouped(E.Base);
+			if (E.Flame > 1.0001)
+			{
+				Why += " x " + Fixed(E.Flame, 2) + " FLAME";
+			}
+			if (E.Theme > 1.0001)
+			{
+				Why += " x " + Fixed(E.Theme, 1) + " THEME NIGHT";
+			}
+			if (E.Banked)
+			{
+				Why += " \xC2\xB7 BANKED FOR MONDAY";
+			}
+			float Tx = 390.0f + Sw;
+			Tx += IgniteLineTimes(C, "(" + Why + ")", Tx, Ty - 1.0f, IgniteTx(11.5f, 800, IgniteHx(IgLime, 0.8f))) + 18.0f; // "610 x 1.20" with the vector cross
+			// The Dares this entry moved, ticking 0.25 s apart (IgSpark each).
+			for (int I = 0; I < 3; ++I)
+			{
+				if (E.DareTicks[static_cast<size_t>(I)] <= 0)
+				{
+					continue;
+				}
+				const double At = X.U.ResultAt + 1.0 + 0.25 * static_cast<double>(I);
+				const bool On = X.Preview || X.Now >= At;
+				C.FillCircle(Tx + 8.0f, Ty - 6.0f, 8.0f, On ? Hex(IgLime) : IgniteHx(K.Well));
+				if (On)
+				{
+					C.StrokePolyline({{Tx + 4.0f, Ty - 6.0f}, {Tx + 7.0f, Ty - 3.0f}, {Tx + 12.0f, Ty - 10.0f}}, false, Hex(IgDarkInk), 2.0f, true);
+					IgniteCue(X.S, X.U, Key + ":dare" + std::to_string(I), SoundId::IgSpark, 0.3f, X.Preview);
+				}
+				Tx += 22.0f;
+			}
+			if (E.RingLit > 0)
+			{
+				Tx += C.Text(std::string(IgniteRingName(E.RingLit)) + " LIT", Tx + 6.0f, Ty - 1.0f, IgniteTx(11.5f, 900, Hex(IgSun))) + 18.0f;
+			}
+			if (E.LevelTo > E.LevelFrom)
+			{
+				Tx += C.Text("LEVEL " + std::to_string(E.LevelTo) + "!", Tx + 6.0f, Ty - 1.0f, IgniteTx(11.5f, 900, Hex(IgViolet))) + 18.0f;
+			}
+			else
+			{
+				const double Fr = Lp.LevelTo > Lp.LevelFrom ? Clamp01(static_cast<double>(Lp.LevelSparks - Lp.LevelFrom) / static_cast<double>(Lp.LevelTo - Lp.LevelFrom)) : 0.0;
+				C.FillRoundRect({Tx + 6.0f, Ty - 10.0f, 80.0f, 6.0f}, 3.0f, IgniteHx(K.Well));
+				C.FillRoundRect({Tx + 6.0f, Ty - 10.0f, 80.0f * static_cast<float>(Fr), 6.0f}, 3.0f, Hex(IgViolet));
+				Tx += 98.0f;
+			}
+			if (E.TierTo > E.TierFrom)
+			{
+				C.Text("WRISTBAND T" + std::to_string(E.TierTo), Tx, Ty - 1.0f, IgniteTx(11.5f, 900, Hex(K.Coral)));
+			}
+			if (!Lp.BeefName.empty())
+			{
+				for (const site::play::Beef& B : Lp.Beefs)
+				{
+					if (B.Name == Lp.BeefName)
+					{
+						C.Text("BEEF " + B.Name + " \xC2\xB7 " + std::to_string(B.YouKo) + "-" + std::to_string(B.TheyKo), 1252.0f, 404.0f, IgniteTx(13.0f, 900, Hex(IgRed), Align::Right));
+					}
+				}
+			}
+		}
+	}
 	// How you played it: the decision accuracy (your own decisions only), the XP, the grades and the worst three spots.
 	{
 		const float Gx = 440.0f;
@@ -2993,19 +3567,33 @@ void IgniteResults(IgniteCtx& X)
 	// Play again (the next start of the same family, through the sheet and its strike gate) and back to PLAY.
 	{
 		net::EventInstance Next;
-		const bool Again = !X.S.History.empty() && X.S.History.front().Name == R.EventName && IgniteAgain(X.S.History.front().EventId, X.World, Next);
+		// A FUSE never enters History: its Play again is the next FUSE at the same stake (§2.4 G), lit on the FUSE page.
+		int FuseTier = -1;
+		for (int Ti = 0; Ti < 3; ++Ti)
+		{
+			FuseTier = R.EventName == fuse::NameOf(Ti) ? Ti : FuseTier;
+		}
+		const bool Again = FuseTier >= 0 || (!X.S.History.empty() && X.S.History.front().Name == R.EventName && IgniteAgain(X.S.History.front().EventId, X.World, Next));
 		const rlsites_detail::SiteLook& Look = rlsites_detail::SitesLook(net::SiteId::Ignite);
 		ButtonOpts Go;
 		Go.Kind = ButtonKind::Primary;
 		Go.Size = 19.0f;
 		Go.Enabled = Again && !X.Preview;
-		Go.Sub = Again ? net::ForEvent(Next.Id).TemplateOf(Next).Name + " \xC2\xB7 " + IgniteWhen(Next.Start, X.World) : std::string("Nothing like it on the floor right now");
+		Go.Sub = FuseTier >= 0 ? fuse::NameOf(FuseTier) : Again ? net::ForEvent(Next.Id).TemplateOf(Next).Name + " \xC2\xB7 " + IgniteWhen(Next.Start, X.World) : std::string("Nothing like it on the floor right now");
 		if (rlsites_detail::SitesButton(UI, C, "again", {352.0f, 776.0f, 440.0f, 72.0f}, "Play again", Go, Look) && Again)
 		{
 			X.S.LeaveResults();
 			X.S.ShowLobby();
-			Access::OpenPage(X.RL, RiverLine::Page::Lobby, X.Now);
-			IgniteOpenSheet(X.RL, Next.Id, X.Now);
+			Access::ShowSite(X.RL, net::SiteId::Ignite); // FUSE is Ignite's page (SitesPageHome sends it home on any other)
+			if (FuseTier >= 0)
+			{
+				Access::OpenPage(X.RL, RiverLine::Page::Fuse, X.Now);
+			}
+			else
+			{
+				Access::OpenPage(X.RL, RiverLine::Page::Lobby, X.Now);
+				IgniteOpenSheet(X.RL, Next.Id, X.Now);
+			}
 		}
 		ButtonOpts Back;
 		Back.Kind = ButtonKind::Secondary;
@@ -3110,12 +3698,80 @@ void RiverLine::IgniteFrame(double Now, bool Preview)
 	{
 		rlauto_detail::AutoClosePanel(this);
 	}
+	if (S.CurrentScreen == Screen::Boot)
+	{
+		HomeFrame(Now, Preview);
+		return;
+	}
+	// G2: the loops this frame. A level-up drops its banner (F6); a reveal whose table has gone ends with it.
+	const rlignite_detail::IgniteLoops& Lp = rlignite_detail::IgniteLoopsOf(*this, Now);
+	if (Lp.Live && !Preview)
+	{
+		if (U.LevelSeen == 0 || Lp.Level < U.LevelSeen)
+		{
+			U.LevelSeen = Lp.Level;
+		}
+		else if (Lp.Level > U.LevelSeen)
+		{
+			U.LevelSeen = Lp.Level;
+			U.LevelShown = Lp.Level;
+			U.LevelAt = Now;
+			rlignite_detail::IgniteCue(S, U, "level:" + std::to_string(Lp.Level), SoundId::IgPop, 0.5f, Preview);
+		}
+	}
+	if (!U.RevealEvent.empty() && (U.RevealTable < 0 || U.RevealTable >= S.TableCount() || S.Glance(U.RevealTable).EventId != U.RevealEvent))
+	{
+		U.RevealEvent.clear();
+		U.RevealTable = -1;
+	}
+	// A FUSE whose reveal hasn't been seen (a laptop rebuilt mid-reveal, a reload) carries on from when it was lit: the
+	// multiplier is core's, only the stage is the laptop's (§2.4 D).
+	if (Lp.Live && Lp.FuseOn && U.RevealEvent.empty() && !Preview)
+	{
+		for (int T = 0; T < S.TableCount(); ++T)
+		{
+			const std::string Id = S.Glance(T).EventId;
+			if (!fuse::IsFuse(Id) || U.RevealsDone.count(Id) > 0)
+			{
+				continue;
+			}
+			const fuse::Reveal Rv = S.FuseReveal(T);
+			if (Rv.M > 0 && !Rv.Seen)
+			{
+				rlignite_detail::IgniteStartReveal(U, S, T, Now);
+				U.RevealAt = Rv.PaidAt > 0.0 && Rv.PaidAt <= Now ? Rv.PaidAt : Now;
+				break;
+			}
+			U.RevealsDone.insert(Id);
+		}
+	}
+	// House law 3: the overlay that's up (one at a time) holds the pointer before anything under it draws; the level-up
+	// banner holds its own rect.
+	const int Overlay = Preview ? 0 : rlignite_detail::IgniteOverlay(*this, U, Now);
+	rlsites_detail::SitesBlocked Held;
+	if (Overlay > 0)
+	{
+		Held = rlsites_detail::SitesBlockUnder(UI, rlignite_detail::IgniteOverlayRect(Overlay, U), true);
+	}
+	else if (rlignite_detail::IgniteBannerUp(U, Now) && !Preview)
+	{
+		Held = rlsites_detail::SitesBlockUnder(UI, rlignite_detail::IgniteBannerRect, false);
+	}
 	switch (S.CurrentScreen)
 	{
 	case Screen::Lobby: rlignite_detail::IgniteLobby(X); break;
 	case Screen::Table: U.Sheet = false; rlignite_detail::IgniteTables(X); break;
 	case Screen::Results: U.Sheet = false; rlignite_detail::IgniteResults(X); break;
-	case Screen::Boot: HomeFrame(Now, Preview); return;
+	case Screen::Boot: break;
+	}
+	rlsites_detail::SitesUnblock(UI, Held);
+	if (Overlay > 0)
+	{
+		rlignite_detail::IgniteOverlayDraw(*this, U, X.K, Now, Preview, Held.Scrim);
+	}
+	else
+	{
+		rlignite_detail::IgniteBanner(*this, U, X.K, Now, Preview);
 	}
 	if (!Preview)
 	{
@@ -3137,6 +3793,84 @@ void RiverLine::IgniteTableLayer(double Now)
 	rlignite_detail::IgniteUi& U = rlignite_detail::IgniteOf(this);
 	const bool Still = Previewing;
 	const bool HandOver = S.CurHand && S.CurHand->bComplete;
+	// G2 (SPEC §2.5, F7-F9): the FUSE table's prize marquee and fuse clock; the Headliners' spotlights and star pins, your
+	// Beef's pin; PAYBACK, SCALP and the Ouch bubble, each slammed once as core records it.
+	const rlignite_detail::IgniteLoops& Lp = rlignite_detail::IgniteLoopsOf(*this, Now);
+	if (Lp.Live)
+	{
+		const IgniteTones Tones = IgniteTonesFor(site::show::IgniteMood(World));
+		rlignite_detail::IgniteFuseTable(*this, U, Tones, Now, Still);
+		for (const SeatVis& Seat : S.Seats)
+		{
+			if (!Seat.Present || Seat.IsHero)
+			{
+				continue;
+			}
+			const Vec2 P = SlotPos(Seat.Seat);
+			const bool Head = std::find(Lp.Headliners.begin(), Lp.Headliners.end(), Seat.Name) != Lp.Headliners.end();
+			if (Head)
+			{
+				// The spotlight: a cone from above, fading in toward the bubble.
+				C->FillPolygon({{P.X - 10.0f, P.Y - 170.0f}, {P.X + 10.0f, P.Y - 170.0f}, {P.X + 56.0f, P.Y + 8.0f}, {P.X - 56.0f, P.Y + 8.0f}},
+					Paint::Linear({P.X, P.Y - 170.0f}, {P.X, P.Y + 8.0f}, Hex(IgSun, 0.0f), Hex(IgSun, 0.13f)));
+				C->FillPolygon(IgniteStar(P.X - 28.0f, P.Y - 34.0f, 10.0f, 4.5f, 5), Hex(IgSun));
+			}
+			if (!Lp.BeefName.empty() && Seat.Name == Lp.BeefName)
+			{
+				C->FillRoundRect({P.X - 66.0f, P.Y - 48.0f, 50.0f, 18.0f}, 9.0f, Hex(IgRed));
+				C->Text("BEEF", P.X - 41.0f, P.Y - 35.0f, IgniteTx(10.0f, 900, Hex(IgDarkInk), Align::Center));
+			}
+		}
+		for (const rlignite_detail::IgniteMoment& M : Lp.Moments)
+		{
+			const std::string Key = "moment:" + std::to_string(M.Kind) + ":" + M.HandId;
+			auto It = U.Stickers.find(Key);
+			if (It == U.Stickers.end())
+			{
+				// Only a moment from the last few world minutes slams; an older one (a page reopened) is already history.
+				if (World - M.World > 5.0)
+				{
+					continue;
+				}
+				It = U.Stickers.emplace(Key, Now).first;
+			}
+			const double Since = Now - It->second;
+			if (Since < 0.0 || Since > 2.6 || Still)
+			{
+				continue;
+			}
+			const float Pop = static_cast<float>(motion::Spring(Now, It->second));
+			const float A0 = C->GetAlpha();
+			C->SetAlpha(A0 * static_cast<float>(Clamp01((2.6 - Since) / 0.4)));
+			if (M.Kind == 2)
+			{
+				// The Ouch bubble: a band-aid and the line, over the hero's seat.
+				const Vec2 Hp = SlotPos(HeroSeatNo());
+				const int Pc = static_cast<int>(std::lround(M.Equity * 100.0));
+				const std::string Pct = std::to_string(Pc);
+				const bool An = Pct.front() == '8' || Pc == 11 || Pc == 18; // "an 87%", "an 11%"
+				C->Save();
+				// Up and to the right of the hero's bubble (clear of a PAYBACK or SCALP slam on the left), its tail to the hero.
+				C->Translate(Hp.X + 250.0f, Hp.Y - 120.0f);
+				C->Scale(Pop, Pop);
+				C->FillRoundRect({-240.0f, -34.0f, 480.0f, 68.0f}, 26.0f, Hex(IgCream));
+				C->FillPolygon({{-210.0f, 30.0f}, {-180.0f, 30.0f}, {-224.0f, 56.0f}}, Hex(IgCream));
+				C->FillRoundRect({-226.0f, -12.0f, 40.0f, 18.0f}, 8.0f, Hex(0xe8b88a));
+				C->Text(rlsites_detail::SitesFill(rlignite_detail::IgniteOuchLine, {{"An", An ? "an" : "a"}, {"Pct", Pct}}), 16.0f, -4.0f,
+					IgniteTx(13.0f, 800, Hex(IgDarkInk), Align::Center, Baseline::Alphabetic, 400.0f));
+				C->Text("+" + Grouped(M.Sparks) + " SPARKS" + (M.Held ? " \xC2\xB7 ON THE GUEST LIST" : ""), 10.0f, 18.0f, IgniteBi(14.0f, Hex(0x3a7a10), Align::Center));
+				C->Restore();
+			}
+			else
+			{
+				const bool Pay = M.Kind == 0;
+				IgniteSticker(*C, Pay ? 380.0f : 820.0f, Pay ? 520.0f : 300.0f, 96.0f, Pay ? "PAYBACK" : "SCALP", Pay ? Hex(IgRed) : Hex(IgSun), Hex(IgDarkInk), 30.0f, 18, 0.78f, Pop);
+				C->Text("+" + Grouped(M.Sparks) + (Pay ? " SPARKS \xC2\xB7 " : " \xC2\xB7 ") + M.Name, Pay ? 380.0f : 820.0f, (Pay ? 520.0f : 300.0f) + 40.0f * Pop, IgniteTx(12.5f, 900, Hex(IgDarkInk), Align::Center));
+			}
+			C->SetAlpha(A0);
+			rlignite_detail::IgniteCue(S, U, Key, SoundId::IgPop, 0.5f, Still);
+		}
+	}
 	for (const SeatVis& Seat : S.Seats)
 	{
 		if (!Seat.Present)
@@ -3209,22 +3943,44 @@ void RiverLine::IgniteTableLayer(double Now)
 	}
 	if (!Still)
 	{
+		// A split pot flies a fountain to each winner at once, over the showdown's glowing cards (G2_AUDIT M5: a 3-way split
+		// was the busiest real frame). Past one fountain in the air each flies lighter (IgniteFountainFor: 5 chips each for
+		// two, 4 for three or more) and only the first trails its sparklets. A fountain's weight is fixed at its launch (the
+		// fountains in the air then, itself and a split's siblings included): side pots awarded 0.2 s apart (a fast pace, the
+		// hero out of the hand) never thin one already flying, nor does one landing thicken the rest, so no chip or trail
+		// blinks in or out mid-flight. A pot launched as another's last chip fades (back-to-back pots, 0.9 s apart) is alone.
+		const auto InAir = [](const rlignite_detail::IgniteUi::PotWin& Q, double At) {
+			const double Up = At - Q.Start;
+			return Up >= 0.0 && Up < Q.Dur + 0.25;
+		};
 		for (const auto& Entry : U.Pots)
 		{
 			const rlignite_detail::IgniteUi::PotWin& P = Entry.second;
+			int Flying = 0;
+			bool Trails = true;
+			for (const auto& Other : U.Pots)
+			{
+				if (InAir(Other.second, P.Start))
+				{
+					++Flying;
+					Trails = Trails && !(Other.second.Start < P.Start || (Other.second.Start == P.Start && Other.first < Entry.first));
+				}
+			}
+			const int Fountain = rlignite_detail::IgniteFountainFor(Flying);
 			const Vec2 From = FlightPoint(FlightEnd::AtPot());
 			const Vec2 To = FlightPoint(FlightEnd::AtSeat(P.Seat));
 			const uint32_t Seed = Fnv1a(Entry.first);
-			for (int K = 0; K < rlignite_detail::IgniteFountainChips; ++K)
+			const double Up = Now - P.Start;
+			for (int K = 0; K < Fountain; ++K)
 			{
-				const rlignite_detail::IgniteHop H = rlignite_detail::IgniteHopAt(Now - P.Start, P.Dur, K, Seed);
+				const rlignite_detail::IgniteHop H = rlignite_detail::IgniteHopAt(Up, P.Dur, K, Seed);
 				if (!H.Shown)
 				{
 					continue;
 				}
 				const float X = From.X + (To.X - From.X) * H.Along + H.Spread;
 				const float Y = From.Y + (To.Y - From.Y) * H.Along - H.Lift;
-				if (K == 0 && H.Along < 1.0f)
+				if (K == 0 && Trails && H.Along < 1.0f)
 				{
 					// The trail: six sparklets back along the first chip's arc, smaller and fainter the further back.
 					for (int J = 1; J <= 6; ++J)
@@ -3239,7 +3995,20 @@ void RiverLine::IgniteTableLayer(double Now)
 						IgniteSpark(*C, Bx, By, 5.0f - 0.55f * static_cast<float>(J), IgniteA(Hex(J % 2 == 0 ? IgPink : IgSun), 0.9f - 0.12f * static_cast<float>(J)));
 					}
 				}
-				IgniteCandyChip(*C, X, Y, 8.5f, static_cast<int>((Seed + static_cast<uint32_t>(K)) % 6u), H.Alpha);
+				if ((rlsites_detail::SitesTableLook(S).ChipSet & 15) == 3)
+				{
+					// The Locker's Arcade Tokens are worn (ui-tablestyle's chip set 3): a struck token flies instead of candy.
+					const float Ta = C->GetAlpha();
+					C->SetAlpha(Ta * H.Alpha);
+					C->FillCircle(X, Y, 8.5f, Hex((Seed + static_cast<uint32_t>(K)) % 2u == 0 ? 0xd9b45a : 0xc8ccd6));
+					C->StrokeArc(X, Y, 7.0f, 0.0f, 2.0f * Pi, Hex(0x6a5020, 0.8f), 1.2f);
+					IgniteSpark(*C, X, Y, 4.0f, Hex(IgCream));
+					C->SetAlpha(Ta);
+				}
+				else
+				{
+					IgniteCandyChip(*C, X, Y, 8.5f, static_cast<int>((Seed + static_cast<uint32_t>(K)) % 6u), H.Alpha);
+				}
 			}
 			// "+4,200": the pot's chips, floating up beside the winner once they've landed.
 			const double Since = Now - (P.Start + P.Dur);
@@ -3938,7 +4707,15 @@ std::vector<std::string> IgniteInventory()
 	std::vector<std::string> Out = {IgniteStaysHere, IgniteStartsIt, IgniteAllYours, IgniteWindowShut, IgniteBonusRule, IgniteNoneOpen, IgniteSeatsOpen, IgniteNoRegulars, IgniteClauseLine,
 		IgniteNoNews, IgniteNoCash, IgniteNoRecords, IgniteNoLines, IgniteNothingComing, IgniteDepositHow, IgniteWithdrawHow, IgniteOnlyBank, IgniteNoBoard, IgniteCleanGame, IgniteNoGrades,
 		IgniteDecisionsXp, IgniteNoShouts, "Your first deposit starts it.", "The 60 days are up.", "Top of the board.", "A final table here puts you on the board.",
-		"Deposited {Amount}. It's on Ignite now.", "Requested. {Amount} is on its way to your bank."};
+		"Deposited {Amount}. It's on Ignite now.", "Requested. {Amount} is on its way to your bank.",
+		// G2 (the loops' pages and overlays)
+		IgniteFlameNeeds, IgniteOnIce, IgniteSpinReady, IgniteSpinDone, IgniteSpinNone, IgniteAllThree, IgniteNoCrackers, IgniteShelfFull, IgniteNeverSold, IgniteSparksRule,
+		IgniteSparksStay, IgniteTicketsEarn, IgniteDaresGrey, IgniteMondayGood, IgniteGuestRule, IgniteFineRule, IgniteFineWelcome, IgniteNoHolds, IgniteFuseSkip, IgniteFuseKeyed,
+		IgniteFuseOdds, IgniteNoWall, IgniteWheelOdds, IgniteBuyAsk, IgniteLockerEmpty, IgniteOuchLine, IgniteBeefNone, IgniteSecretSticker, "Your FUSEs land here as you light them.",
+		"Filled by the base Sparks you earn at the tables this month.", "Who keeps busting you here, and who you keep busting (the last 30 days).",
+		"Ignite gave back {Promo} of your {Rake} rake in the last 30 days ({Pct}%).", "A {Prize} first prize, three seats, one fuse.", "And took it down.", "Finished {Place}.",
+		// The G2 fix round: the Crackers' odds drawer (W5).
+		IgniteCrackerOddsLine, IgniteCrackerOwned};
 	for (const std::string& L : IgniteShouts())
 	{
 		Out.push_back(L);
@@ -3968,7 +4745,32 @@ std::vector<std::string> IgniteLabels()
 		"This sitting", "tournaments", "net", "Withdrawal of", "requested", "arriving", "to your bank", "YOUR TURN", "LIVE", "SERIES", "NEW", "RECORD",
 		"PEOPLE", "BIG WIN", "PROMO", "LAUNCH", "OVERLAY", "pts", "pts to pass", "DAY", "OF", "100% of your first deposit, up to $100", "Expires", "left",
 		"Expired", "of rake paid here so far", "YOUR GAME ON IGNITE", "TOURNAMENTS HERE", "RAKE THIS MONTH", "RAKE ALL TIME", "Open the Wallet", "up to $100",
-		"still pending", "released", "Card", "lands at once", "Let's go"};
+		"still pending", "released", "Card", "lands at once", "Let's go",
+		// G2: the loops' labels (signs, pills, tabs, stickers, buttons).
+		"SPARKS", "FLAME", "THE FLAME", "DAYS", "Best", "DARES", "EASY", "MEDIUM", "HARD", "DARE", "DONE", "CLAIMED", "ON THE GUEST LIST", "Claim", "CLAIM", "reset in",
+		"SPARK WHEEL", "GLOW", "SHINE", "DAZZLE", "LIT", "SPIN READY", "SPUN TODAY", "ON ICE", "ALL THREE LIT", "MORE FOR", "Spin", "Spun today", "ODDS", "1st paid entry",
+		"2nd paid entry", "4th paid entry", "CRACKERS", "Open all", "OPEN", "Paper", "Neon", "Gold", "CRACKER", "PULL THEM ALL", "Pull", "Not now", "Skip", "Nice", "AND A STICKER",
+		"ADDED", "RING", "WRISTBAND", "DAY LEFT", "DAYS LEFT", "day left", "days left", "ALL 30", "T", "THEME NIGHTS", "MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN", "FLIP", "MANIA",
+		"BOUNTY", "NIGHT", "FUSE", "TURBO", "THURSDAY", "FIREWORKS", "FRIDAY", "AFTER", "DARK", "BLAZE", "Tonight", "REST", "SPARE MATCHES", "Today", "Wristband", "Prize Counter",
+		"FINE PRINT", "Tickets", "Looks", "Extras", "TICKET", "Buy", "Cancel", "Close", "Tickets \xC2\xB7 Looks", "THE FUSE BOOTH", "LIGHT A FUSE", "3 PLAYERS", "LAST 3", "LAST 10",
+		"HOW IT WORKS", "THE FUSE WALL", "PLAYED", "WON", "NET", "BEST", "Light it", "Use a ticket", "held", "next at this tier", "80 / 12 / 8 from x25", "PRIZE", "FUSE ODDS",
+		"House edge", "above $1.10", "THE WHEEL'S ODDS", "PRIZE POOL", "BIG FUSE", "pays 80 / 12 / 8", "winner takes all", "THREE PLAYERS \xC2\xB7 ONE FUSE", "Take your seat",
+		"at this tier", "BLINDS UP!", "LEVEL", "THE GUEST LIST", "CEILING", "This week", "back", "EARNS", "HEADLINER", "HEADLINERS", "BEEF", "SPECIAL GUEST", "Fuse Wall",
+		"BIG HIT", "LOCKER", "STICKER BOOK", "RIVALS", "Card backs", "Felts", "Chip sets", "Frames", "Win effects", "Wear", "WEARING", "Secret", "BEST FLAME", "BEST FUSE",
+		"HEADLINERS SCALPED", "SCALPS", "THIS MONTH'S HEADLINERS", "Headliner knocked out", "Headliners knocked out", "PAYBACK", "SCALP", "you", "them", "BANKED FOR MONDAY",
+		"THEME NIGHT", "WRISTBAND T", "LEVELS", "Rookie", "Local", "Hotshot", "Star", "Legend", "Icon", "or spin now", IgniteFuseHow, IgniteFuseLine,
+		"Monday bonus: +{Sparks} Sparks banked", "{What} clears after {Rake} more rake (about {N} Flip & Runs)", "{Winner} hit x{M} at your table", "BIG FUSE: {Hero} lit a x{M}",
+		"You're a {Title} now", "A {Kind} Cracker drops", "Clear all 3: a {Kind} Cracker", "Dare Week {N} of 5: a Gold Cracker", "{N} more Sparks", "In your Locker",
+		"{N} on the shelf \xC2\xB7 it holds 12", "{Ring} ring lit", "all three rings lit", "spin waits till 6 AM", "on base Sparks", "keeps your flame", "lights {Ring}",
+		"1 more entry lights {Ring}", "2 more light {Ring}", "{N} Sparks to Level {L}", "This week: {Face} of {Cap}", "{Month}: {Amount} back", "Tonight: {Theme}",
+		"BEEF {Name} \xC2\xB7 {You}-{Them}", "LEVEL {N} \xC2\xB7 {Title}", "#{N} next at this tier", "FUSE \xC2\xB7 #{N} at this tier", "SPIN READY \xC2\xB7 {Ring} LIT",
+		"EARNS {N} SPARKS", "SPECIAL GUEST: {Hero}", "{Ring} RING", "PULL THEM ALL", "{N} of {M}", "clears at the next 6 AM", "Dares: {List}", "{N} Sparks",
+		"SPIN READY", "LEVEL {N} \xC2\xB7 {Sb}/{Bb}", "BLINDS UP!\n{Sb}/{Bb}",
+		// The G2 review: a Dare met but short of today's paid entries; a ticket entry's sheet.
+		"MORE ENTRY", "MORE ENTRIES", "{N} MORE ENTRY", "{N} MORE ENTRIES", "{Tier} DARE \xC2\xB7 {N} MORE ENTRIES", "TICKET ENTRY \xC2\xB7 NO SPARKS", "your ticket plays this one",
+		"2 held \xC2\xB7 the most",
+		// The G2 fix round: the reveal's odds line and pill (the mockup's "1 in 250 at $1.10"); the Crackers' odds drawer.
+		"1 in {N} at {BuyIn}", "{Pct}% at {BuyIn}", "CRACKERS' ODDS", "WORTH {N} SPARKS ON AVERAGE", "+ {Prize}", "+ a look piece (one of {N}, {Pct}% each)"};
 	for (const char* Chip : IgniteChipNames)
 	{
 		Out.push_back(Chip);

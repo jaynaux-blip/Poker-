@@ -1257,6 +1257,8 @@ std::vector<const world::World*>& LiveWorlds()
 
 Session::~Session()
 {
+	// Update 3 (§2.6 F7): FUSE's per-session side (the reveal's clocks, a dev-forced multiplier) goes with the session.
+	fuse::Forget(this);
 	std::vector<const world::World*>& Worlds = session_detail::LiveWorlds();
 	Worlds.erase(std::remove(Worlds.begin(), Worlds.end(), &LivingWorld), Worlds.end());
 	// Every site's network shows the same world (update 2 §5.8). If any of them still shows this one (RiverLine's, or a
@@ -2073,7 +2075,13 @@ std::string Session::RegisterEvent(const LobbyEvent& Listing, StrikeConfirm Conf
 			Bounties[P.Id] = Ev.Spec.BountyCents;
 		}
 	}
-	if (Ev.Spec.SeatValueCents > 0)
+	if (FuseTable)
+	{
+		// Update 3 (§2.6 F7; S-J §6 item 11): a FUSE says what it is, three players and the prize the reel landed on, never an
+		// MTT's "3 players, 1 paid".
+		SystemLine("Welcome to " + Ev.Spec.Name + ". Three players, a " + Money(Ev.Spec.GuaranteeCents) + " prize.");
+	}
+	else if (Ev.Spec.SeatValueCents > 0)
 	{
 		SystemLine("Welcome to " + Ev.Spec.Name + ". " + ChipsText(Ev.Spec.Entrants) + " players, " + std::to_string(SeatsInPlay()) + " seats.");
 	}
@@ -2086,7 +2094,15 @@ std::string Session::RegisterEvent(const LobbyEvent& Listing, StrikeConfirm Conf
 		SystemLine(Ev.Spec.MysteryBounty ? "Mystery bounties: knock players out in the money to open an envelope." : "Progressive knockout: " + Money(Ev.Spec.BountyCents) + " on every head. Half is paid, half goes on yours.");
 	}
 	const Level& L0 = T->CurrentLevel();
-	SystemLine("Blinds " + std::to_string(L0.Sb) + "/" + std::to_string(L0.Bb) + ", ante " + std::to_string(L0.Ante) + ". Good luck!");
+	if (FuseTable)
+	{
+		// No ante at a FUSE; the fuse is the blind clock.
+		SystemLine("Blinds " + std::to_string(L0.Sb) + "/" + std::to_string(L0.Bb) + ", up every " + std::to_string(static_cast<int>(Ev.Spec.LevelMinutes)) + " minutes. Good luck!");
+	}
+	else
+	{
+		SystemLine("Blinds " + std::to_string(L0.Sb) + "/" + std::to_string(L0.Bb) + ", ante " + std::to_string(L0.Ante) + ". Good luck!");
+	}
 	Sound(SoundId::Alert, 1.0);
 	StartNextHand();
 	return std::string();
@@ -2438,6 +2454,14 @@ void Session::TableStep()
 	}
 	if (!CurHand)
 	{
+		return;
+	}
+	// Update 3 (§2.4 D; G2 M3): a FUSE's first hand waits until its reveal has been seen (TAKE YOUR SEAT, or 1 s after the
+	// boom), so nothing is dealt, auto-folded or put on the player's clock under the reveal; then it deals on the usual beat.
+	// SessionFuse.cpp decides (a plan or a skip never waits).
+	if (Cursor == 0 && fuse::HoldFirstDeal(*this))
+	{
+		NextAt = Now + 0.25;
 		return;
 	}
 	Hand& H = *CurHand;
@@ -3250,10 +3274,12 @@ void Session::HeroHandDone(const Hand& H, const HandFacts& F)
 
 void Session::BustBanner(const TPlayer& Hero, const char* NoCashSub)
 {
-	const bool Cashed = Hero.PrizeCents > 0;
+	// Update 3 (§2.6 F7; S-J §6 item 12): a FUSE's places are the session's split (80/12/8 from x25), not the engine's.
+	const Chips Prize = T && fuse::IsFuse(T->Spec.Id) ? fuse::PrizeAt(T->Spec, Hero.Place) : Hero.PrizeCents;
+	const bool Cashed = Prize > 0;
 	CurrentBanner.Active = true;
 	CurrentBanner.Title = Cashed ? "You finished " + Ordinal(Hero.Place) : "Eliminated in " + Ordinal(Hero.Place);
-	CurrentBanner.Sub = Cashed ? "Won " + Money(Hero.PrizeCents) : NoCashSub;
+	CurrentBanner.Sub = Cashed ? "Won " + Money(Prize) : NoCashSub;
 	CurrentBanner.At = Now;
 	CurrentBanner.Color = Cashed ? session_detail::Gold : session_detail::Red;
 }
@@ -3304,29 +3330,33 @@ void Session::EndHand()
 		BustPrize = Hero.PrizeCents;
 		BustAt = Now + 3.0;
 		Sound(SoundId::Bust, 1.0);
-		StreamMoment(Hero.PrizeCents > 0 ? kast::Moment::Cashed : kast::Moment::Bust, Ordinal(Hero.Place));
+		// Update 3 (§2.6 F7): at a FUSE a 2nd or 3rd place is a cash from x25 up (the session's split, paid in ShowResults).
+		const Chips Paid = fuse::IsFuse(T->Spec.Id) ? fuse::PrizeAt(T->Spec, Hero.Place) : Hero.PrizeCents;
+		StreamMoment(Paid > 0 ? kast::Moment::Cashed : kast::Moment::Bust, Ordinal(Hero.Place));
 		if (Stream.Live)
 		{
-			Stream.Resolve(Channel, StreamInputs(), Hero.PrizeCents > 0);
+			Stream.Resolve(Channel, StreamInputs(), Paid > 0);
 		}
 		BustBanner(Hero, "Better luck next time");
 		return;
 	}
 	if (T->bFinished)
 	{
+		const bool FuseWon = fuse::IsFuse(T->Spec.Id);
+		const Chips Won = FuseWon ? fuse::PrizeAt(T->Spec, 1) : Hero.PrizeCents;
 		HasBustInfo = true;
 		BustPlace = 1;
 		BustPrize = Hero.PrizeCents;
 		BustAt = Now + 4.0;
 		Hooks.Celebrate();
-		StreamMoment(kast::Moment::Win, T->Spec.Name, 1.0 + static_cast<double>(Hero.PrizeCents) / 50000.0);
+		StreamMoment(kast::Moment::Win, T->Spec.Name, 1.0 + static_cast<double>(Won) / 50000.0);
 		if (Stream.Live)
 		{
 			Stream.Resolve(Channel, StreamInputs(), true);
 		}
 		CurrentBanner.Active = true;
-		CurrentBanner.Title = "YOU WON THE TOURNAMENT";
-		CurrentBanner.Sub = Money(Hero.PrizeCents);
+		CurrentBanner.Title = FuseWon ? "YOU WON THE FUSE" : "YOU WON THE TOURNAMENT";
+		CurrentBanner.Sub = Money(Won);
 		CurrentBanner.At = Now;
 		CurrentBanner.Color = session_detail::Gold;
 		const char* Then = !Evicted() ? "Pay the rent." : (BankrollCents >= Life.RentDueCents ? "Go get your key back." : "Put it toward your key.");
@@ -3335,7 +3365,11 @@ void Session::EndHand()
 			// A rival site's prize sits on that site, and site money never pays rent (update 2 §5.5).
 			Then = !Evicted() ? "Get it off that site and pay the rent." : "Get it off that site and put it toward your key.";
 		}
-		StoryText("won-" + T->Spec.Id, "Dee", std::string("You did WHAT?! ") + Then + " Then come see me. We need to talk about your future.", false);
+		// A FUSE is a three-player sit-and-go Dee doesn't text about (S-J §6 item 12: it texted on every win).
+		if (!FuseWon)
+		{
+			StoryText("won-" + T->Spec.Id, "Dee", std::string("You did WHAT?! ") + Then + " Then come see me. We need to talk about your future.", false);
+		}
 		return;
 	}
 	// Hourly can of energy drink.
@@ -3373,13 +3407,21 @@ void Session::HandleTourneyEvents(const std::vector<TEvent>& Events)
 			break;
 		case TEventType::Level:
 			StreamMoment(kast::Moment::LevelUp);
-			SystemLine("Blinds are now " + ChipsText(static_cast<double>(E.Blinds.Sb)) + "/" + ChipsText(static_cast<double>(E.Blinds.Bb)) + ", ante " + ChipsText(static_cast<double>(E.Blinds.Ante)) + ".");
+			// A FUSE has no ante (§2.6 F7): its level line says the blinds alone.
+			SystemLine("Blinds are now " + ChipsText(static_cast<double>(E.Blinds.Sb)) + "/" + ChipsText(static_cast<double>(E.Blinds.Bb)) +
+				(fuse::IsFuse(T->Spec.Id) ? std::string(".") : ", ante " + ChipsText(static_cast<double>(E.Blinds.Ante)) + "."));
 			TimeBank = Min(60.0, TimeBank + 5.0);
 			LastLevelUpAt = Now;
 			Sound(SoundId::Level, 1.0);
 			break;
 		case TEventType::HandForHand:
 		{
+			// Update 3 (§2.6 F7; S-J §6 item 11): a FUSE is one 3-handed table with one paid place, so the engine calls hand
+			// for hand at its first hand, the bubble at its last bust and a final table at the start; none of it is said there.
+			if (fuse::IsFuse(T->Spec.Id))
+			{
+				break;
+			}
 			// Hand for hand starts two from the money (three with seven tables and more); the bubble is one from it, as the
 			// card room's floor says it (room::Director).
 			const int Away = T->Remaining - T->PaidPlaces();
@@ -3398,6 +3440,10 @@ void Session::HandleTourneyEvents(const std::vector<TEvent>& Events)
 			break;
 		}
 		case TEventType::Bubble:
+			if (fuse::IsFuse(T->Spec.Id))
+			{
+				break;
+			}
 			SystemLine(E.Name + " bursts the bubble. Everyone left is in the money!");
 			if (!T->Hero().Busted)
 			{
@@ -3412,7 +3458,7 @@ void Session::HandleTourneyEvents(const std::vector<TEvent>& Events)
 			}
 			break;
 		case TEventType::FinalTable:
-			if (!T->Hero().Busted)
+			if (!T->Hero().Busted && !fuse::IsFuse(T->Spec.Id))
 			{
 				SystemLine("Final table! Good luck to all nine players.");
 				CurrentBanner.Active = true;
@@ -3474,6 +3520,14 @@ void Session::ShowResults()
 	const bool FuseResult = fuse::IsFuse(T->Spec.Id);
 	if (FuseResult)
 	{
+		// Update 3 (S-J §6 item 10): the player out before the end, the other two play it out on the tournament's own draws
+		// (nothing else is drawn), so the FUSE's winner is known (SettleFacts::FuseWinner: the Fuse Wall, BUZZ's Big hits) and
+		// the FUSE took the whole table's world time, as its watched and skipped paths both do.
+		const Profile FusePilot = SprintProfile();
+		for (int Guard = 0; !T->bFinished && Guard < 20000; ++Guard)
+		{
+			T->SimulateTick(&FusePilot);
+		}
 		const int FuseM = T->Spec.BuyInCents > 0 ? static_cast<int>(T->Spec.GuaranteeCents / T->Spec.BuyInCents) : 0;
 		const std::array<Chips, 3> Places = fuse::Payout(session_detail::FuseTierOf(T->Spec.Id), FuseM);
 		BustPrize = BustPlace >= 1 && BustPlace <= 3 ? Places[static_cast<size_t>(BustPlace - 1)] : 0;

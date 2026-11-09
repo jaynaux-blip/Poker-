@@ -3,8 +3,8 @@
 // ids and seeds that never meet RiverLine's, and net::SiteOf reads the site off any of them. Rivals have no regulars and
 // no past: their people and results come from the living world, from the day their lobby opened.
 //
-// Ignite Poker: 18 dailies from $1.10 to $22 (Flip & Run every hour, the Flip & Run Bounty every two, the $5.50 Spark Jackpot
-// at 8 PM), the $11 Sunday Blaze, and Wildfire in February and August (24 events each), about 800 templates through 2040 with
+// Ignite Poker: 18 dailies from $1.10 to $22 (Flip & Run every hour, the Flip & Run Bounty every two, the $5.50 The Spark at
+// 8 PM, id "spark-jackpot"), the $11 Sunday Blaze, and Wildfire in February and August (24 events each), about 800 templates through 2040 with
 // its launch week. RunItTwice: 22 dailies from $3.30 to $215, three Sunday majors (the $22 Sunday Grind, the $109 Sunday 100K,
 // the $530 High Bridge), the RunItTwice Open in April and November (40 events; Nov 13-29 in 2026) and the Ironworks PKO series
 // in July (24), about 1,500.
@@ -128,7 +128,7 @@ void NetSitesShape(EventTemplate& T, const char* Speed)
 const int NetSitesEvery = 0x7f;
 const int NetSitesSunday = 1 << 6;
 
-// Ignite: bright, soft, loud. Flips around the clock, a jackpot at night, a blaze on Sundays. ("Flip & Run", never the real
+// Ignite: bright, soft, loud. Flips around the clock, The Spark at night, a blaze on Sundays. ("Flip & Run", never the real
 // format name the internal ids "flip-go" come from: the ids stay, as saves and tickets key on them.)
 const NetSitesDaily IgniteDailies[] = {
 	{"flip-go", "Flip & Run", 1.10, Format::Flip, "Hyper", 60, 0, 60, NetSitesAt(23, 0), NetSitesEvery, false, false, 2000, 8,
@@ -146,7 +146,9 @@ const NetSitesDaily IgniteDailies[] = {
 	{"happy-hour-pko", "Happy Hour PKO", 5.50, Format::Bounty, "Regular", 190, NetSitesAt(18, 0), 0, 1439, NetSitesEvery, true, false, 0, 0, ""},
 	{"sky-high", "Sky High", 22.0, Format::ReEntry, "Regular", 110, NetSitesAt(19, 0), 0, 1439, NetSitesEvery, true, true, 0, 0,
 		"Ignite's top shelf. Twenty-two dollars, deep enough to play, and the regulars all show up for it."},
-	{"spark-jackpot", "Spark Jackpot", 5.50, Format::Freezeout, "Regular", 410, NetSitesAt(20, 0), 0, 1439, NetSitesEvery, true, true, 0, 0,
+	// Update 3 G2 (SPEC §1.10, W10): shown as "The Spark" ("Spark" names the currency and this MTT only; nothing FUSE-like says
+	// "jackpot"); the id "spark-jackpot" stays, as saves, tickets, EventArt and every instance's seed key on it.
+	{"spark-jackpot", "The Spark", 5.50, Format::Freezeout, "Regular", 410, NetSitesAt(20, 0), 0, 1439, NetSitesEvery, true, true, 0, 0,
 		"The nightly headliner. Five-fifty in, a few hundred runners, and somebody's night changes at the final table."},
 	{"confetti-cannon", "Confetti Cannon", 16.50, Format::Bounty, "Turbo", 90, NetSitesAt(20, 30), 0, 1439, NetSitesEvery, true, false, 0, 0, ""},
 	{"big-wave", "The Big Wave", 11.0, Format::Bounty, "Regular", 230, NetSitesAt(21, 0), 0, 1439, NetSitesEvery, true, false, 0, 0, ""},

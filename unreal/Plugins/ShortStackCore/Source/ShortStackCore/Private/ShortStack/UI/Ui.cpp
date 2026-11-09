@@ -2,6 +2,7 @@
 #include "../StrictFloat.h"
 
 #include "ShortStack/Cards.h"
+#include "ShortStack/Game/SitePlay.h"
 
 #include <cmath>
 #include <cstring>
@@ -195,9 +196,34 @@ void DrawSuit(Canvas& C, int Suit, float X, float Y, float S, const Color& Col)
 
 namespace ui_detail
 {
-void CardFace(Canvas& C, int Card, float X, float Y, float W, float H)
+/**
+ * G2 fix (M5; §10: Ignite's table within 22k vertices at its busiest): a soft glow round a round rect with its core's corners
+ * at two segments (the canvas's GlowPolygon), for the rival decks' shadows and highlights. The fringe (1.3 blurs wide) hides
+ * the core's facets: 25 vertices where GlowRoundRect's curve takes 41-65. A core with no corner left after the inset (the
+ * radius inside a third of the blur) is GlowRoundRect's own 9-vertex one. Review fix (review-g2f-tablestyle): shadows only
+ * (a 6 blur); under a wide one (the winner's 18) the fringe fanned over 45-degree steps shows a ray along each diagonal.
+ */
+void TblLowGlow(Canvas& C, const Rect& R, float Radius, const Color& Col, float Blur)
 {
-	C.GlowRoundRect({X, Y + 2.0f, W, H}, W * 0.1f, Rgba(0, 0, 0, 0.45f), 6.0f);
+	if (Radius <= Blur * 0.3f + 0.01f)
+	{
+		C.GlowRoundRect(R, Radius, Col, Blur);
+		return;
+	}
+	C.GlowPolygon(Canvas::RoundRectPath(R, Radius, 2), Col, Blur);
+}
+
+/** A face: Low draws its shadow through TblLowGlow (a rival deck's, G2 fix M5); RiverLine's is today's. */
+void CardFace(Canvas& C, int Card, float X, float Y, float W, float H, bool Low = false)
+{
+	if (Low)
+	{
+		TblLowGlow(C, {X, Y + 2.0f, W, H}, W * 0.1f, Rgba(0, 0, 0, 0.45f), 6.0f);
+	}
+	else
+	{
+		C.GlowRoundRect({X, Y + 2.0f, W, H}, W * 0.1f, Rgba(0, 0, 0, 0.45f), 6.0f);
+	}
 	C.FillRoundRect({X, Y, W, H}, W * 0.1f, Paint::Linear({0.0f, Y}, {0.0f, Y + H}, Hex(0xffffff), Hex(0xe9edf3)));
 	C.StrokeRoundRect({X, Y, W, H}, W * 0.1f, Rgba(0, 0, 0, 0.18f), 1.0f);
 	const int Suit = SuitOf(Card);
@@ -223,6 +249,8 @@ const uint32_t TblCoral = 0xff6b57, TblPink = 0xff3d8b, TblViolet = 0x8b5cff, Tb
 			   TblPlum = 0x1a1220;
 const uint32_t TblOnyx = 0x0c0c0f, TblGloss = 0x202026, TblSignal = 0xd2141a, TblChrome = 0xb6bbc5, TblWhite = 0xffffff, TblCarbon = 0x16161a, TblStatusGold = 0xe6c66a, TblDeep = 0x7a0a12,
 			   TblLacquerTop = 0xe3262c;
+// G2 (ui-tablestyle): Ignite's Neon Grid back on Afterburner's night (its Panel and Bg, §2.3).
+const uint32_t TblNightTop = 0x1a1230, TblNightLow = 0x120c1f;
 
 /** Sutherland-Hodgman: a convex polygon clipped to a rect (the backs' bands and rays stay inside their panel). */
 std::vector<Vec2> TblClip(const std::vector<Vec2>& Poly, const Rect& Box)
@@ -272,14 +300,101 @@ void TblFlame(Canvas& C, float Cx, float Base, float S, const Color& Outer, cons
 	C.FillPolygon({P(0.0f, 0.04f), P(-0.3f, 0.24f), P(-0.16f, 0.52f), P(0.02f, 0.62f), P(0.12f, 0.44f), P(0.3f, 0.3f), P(0.22f, 0.08f)}, Inner);
 }
 
-/** The rivals' backs (Back 1 Ignite's Sunset, 2 RunItTwice's Twin Stripe, 3 its lacquer variant), drawn around (X, Y). */
+/**
+ * Ignite's looks as the table wears them (G2, §2.4 L's Locker; core-siteplay's site::play::LookOf): a look's design (its base:
+ * a card back's 0 Sunset, 1 Neon Grid; a chip set's 0 candy, 1 Arcade Tokens) and its two Wristband colours (0: its own).
+ */
+struct TblWorn
+{
+	int Base = 0;
+	uint32_t A = 0, B = 0;
+};
+
+TblWorn TblWornLook(int Slot, int Look)
+{
+	TblWorn W;
+	if (Look >= 0 && Look < site::play::LookCount(Slot))
+	{
+		const site::play::LookView V = site::play::LookOf(Slot, Look);
+		W.Base = V.Base;
+		W.A = V.ColorA;
+		W.B = V.ColorB;
+	}
+	return W;
+}
+
+/**
+ * The rivals' backs (Back 1 Ignite's Sunset, 2 RunItTwice's Twin Stripe, 3 its lacquer variant, 4 Ignite's Neon Grid; G2:
+ * SitesIgBackLooks + n, Ignite's card back look n from the Locker, its design and its Wristband colours), drawn around (X, Y).
+ */
 void TblBack(Canvas& C, float X, float Y, float W, float H, int Back)
 {
 	const float Rad = W * 0.1f;
 	const bool Lod = W <= 58.0f; // small: ground, stripes or bands, border
+	TblWorn Worn;
+	if (Back >= 64)
+	{
+		Worn = TblWornLook(0, Back - 64);
+		Back = Worn.Base == 1 ? 4 : 1;
+	}
+	if (Back == 4)
+	{
+		// Neon Grid (Ignite's second back, G2; core-siteplay's name): the cream border round a night panel, a neon sun on the
+		// horizon cut by three night bars, and a hot pink grid running to it. A month's colours (not in the G2 catalog) would
+		// light the grid in the first and the sun in the second.
+		C.FillRoundRect({X, Y, W, H}, Rad, Hex(TblCream));
+		const Rect In{X + W * 0.07f, Y + W * 0.07f, W - W * 0.14f, H - W * 0.14f};
+		C.FillRoundRect(In, W * 0.06f, Paint::Linear({In.X, In.Y}, {In.X + In.W, In.Y + In.H}, Hex(TblNightTop), Hex(TblNightLow)));
+		const float Hz = In.Y + In.H * 0.46f;
+		const float Bottom = In.Y + In.H;
+		const float Cx = In.X + In.W / 2.0f;
+		const Color Grid = Worn.A ? Hex(Worn.A) : Hex(TblPink);
+		const float Lw = std::max(1.0f, W * 0.012f);
+		if (!Lod)
+		{
+			// The sun: a half disc on the horizon, sunflower to coral, three night bars across its lower half.
+			const float Rs = In.W * 0.3f;
+			std::vector<Vec2> Sun;
+			for (int K = 0; K <= 16; ++K)
+			{
+				const float A = Pi + Pi * static_cast<float>(K) / 16.0f;
+				Sun.push_back({Cx + Rs * std::cos(A), Hz + Rs * std::sin(A)});
+			}
+			C.FillPolygon(Sun, Paint::Linear({Cx, Hz - Rs}, {Cx, Hz}, Worn.B ? Hex(Worn.B) : Hex(TblSun), Worn.B ? Hex(Worn.B) : Hex(TblCoral)));
+			for (int K = 0; K < 3; ++K)
+			{
+				const float By = Hz - Rs * (0.12f + 0.16f * static_cast<float>(K));
+				C.FillRect({Cx - Rs, By, 2.0f * Rs, Rs * (0.07f - 0.015f * static_cast<float>(K))}, Hex(TblNightLow));
+			}
+			// The grid: rows closing toward the horizon, and lines from its middle (each cut at the panel's sides).
+			for (int K = 1; K <= 5; ++K)
+			{
+				const float T = static_cast<float>(K) / 5.0f;
+				const float Ry = Hz + (Bottom - Hz) * T * T;
+				C.StrokePolyline({{In.X, Ry}, {In.X + In.W, Ry}}, false, Color{Grid.R, Grid.G, Grid.B, 0.75f}, Lw);
+			}
+			for (int K = -3; K <= 3; ++K)
+			{
+				const float Dx = In.W * 0.34f * static_cast<float>(K);
+				const float T = std::fabs(Dx) > In.W / 2.0f ? In.W / 2.0f / std::fabs(Dx) : 1.0f;
+				C.StrokePolyline({{Cx, Hz}, {Cx + Dx * T, Hz + (Bottom - Hz) * T}}, false, Color{Grid.R, Grid.G, Grid.B, 0.75f}, Lw);
+			}
+		}
+		else
+		{
+			for (int K = 2; K <= 4; K += 2)
+			{
+				const float T = static_cast<float>(K) / 5.0f;
+				C.FillRect({In.X, Hz + (Bottom - Hz) * T * T, In.W, Lw}, Color{Grid.R, Grid.G, Grid.B, 0.75f});
+			}
+		}
+		C.FillRect({In.X, Hz - Lw * 0.75f, In.W, Lw * 1.5f}, Grid);
+		return;
+	}
 	if (Back == 1)
 	{
 		// Sunset (§2.5): a cream border around a plum panel, sunburst rays at 0.18, a coral and a violet diagonal band, the flame.
+		// A Wristband month's card back (G2: Sunset restyled) paints the band pair in its two colours.
 		C.FillRoundRect({X, Y, W, H}, Rad, Hex(TblCream));
 		const Rect In{X + W * 0.07f, Y + W * 0.07f, W - W * 0.14f, H - W * 0.14f};
 		C.FillRoundRect(In, W * 0.06f, Paint::Linear({In.X, In.Y}, {In.X + In.W, In.Y + In.H}, Hex(TblGrape), Hex(TblPlum)));
@@ -300,15 +415,19 @@ void TblBack(Canvas& C, float X, float Y, float W, float H, int Back)
 		// The band pair, bottom-left to top-right.
 		const float Bw = In.W * 0.22f;
 		const float Lean = In.H * 0.55f;
-		const std::vector<Vec2> Coral = TblClip({{Mid.X - Bw * 1.1f - Lean, In.Y + In.H}, {Mid.X - Bw * 0.1f - Lean, In.Y + In.H}, {Mid.X - Bw * 0.1f + Lean, In.Y}, {Mid.X - Bw * 1.1f + Lean, In.Y}}, In);
-		const std::vector<Vec2> Violet = TblClip({{Mid.X + Bw * 0.1f - Lean, In.Y + In.H}, {Mid.X + Bw * 0.7f - Lean, In.Y + In.H}, {Mid.X + Bw * 0.7f + Lean, In.Y}, {Mid.X + Bw * 0.1f + Lean, In.Y}}, In);
-		if (Coral.size() >= 3)
+		const std::vector<Vec2> First = TblClip({{Mid.X - Bw * 1.1f - Lean, In.Y + In.H}, {Mid.X - Bw * 0.1f - Lean, In.Y + In.H}, {Mid.X - Bw * 0.1f + Lean, In.Y}, {Mid.X - Bw * 1.1f + Lean, In.Y}}, In);
+		const std::vector<Vec2> Second = TblClip({{Mid.X + Bw * 0.1f - Lean, In.Y + In.H}, {Mid.X + Bw * 0.7f - Lean, In.Y + In.H}, {Mid.X + Bw * 0.7f + Lean, In.Y}, {Mid.X + Bw * 0.1f + Lean, In.Y}}, In);
+		// Sunset's first band runs coral to pink; a month's is flat in its first colour, the second band in its second.
+		const Color A0 = Worn.A ? Hex(Worn.A) : Hex(TblCoral);
+		const Color A1 = Worn.A ? A0 : Hex(TblPink);
+		const Color B0 = Worn.B ? Hex(Worn.B) : Hex(TblViolet);
+		if (First.size() >= 3)
 		{
-			C.FillPolygon(Coral, Paint::Linear({In.X, In.Y + In.H}, {In.X + In.W, In.Y}, Hex(TblCoral), Hex(TblPink)));
+			C.FillPolygon(First, Paint::Linear({In.X, In.Y + In.H}, {In.X + In.W, In.Y}, A0, A1));
 		}
-		if (Violet.size() >= 3)
+		if (Second.size() >= 3)
 		{
-			C.FillPolygon(Violet, Hex(TblViolet));
+			C.FillPolygon(Second, B0);
 		}
 		if (!Lod)
 		{
@@ -343,19 +462,41 @@ void TblBack(Canvas& C, float X, float Y, float W, float H, int Back)
 	C.StrokeRoundRect({X + W * 0.04f, Y + W * 0.04f, W - W * 0.08f, H - W * 0.08f}, Rad * 0.6f, Rgba(182, 187, 197, 0.8f), 1.0f);
 }
 
+/** A rival back's art at (X, Y) without its shadow, cached by back and size (its own constants: no skin in the key). */
+void TblBackCached(Canvas& C, float X, float Y, float W, float H, int Back)
+{
+	uint32_t Wb = 0;
+	uint32_t Hb = 0;
+	std::memcpy(&Wb, &W, sizeof(Wb));
+	std::memcpy(&Hb, &H, sizeof(Hb));
+	const uint64_t Key = (0x7b1ac5e3d9f20000ull ^ (static_cast<uint64_t>(Back) << 8)) * 0x100000001b3ull ^ (static_cast<uint64_t>(Wb) << 32 | Hb);
+	C.Cached(Key, X, Y, [W, H, Back](Canvas& Cv) { TblBack(Cv, 0.0f, 0.0f, W, H, Back); });
+}
+
+/**
+ * G2 fix (M5): a rival back with no shadow, turned Rotate about its centre as DrawCard turns one: a crowded felt's small backs
+ * (RiverLine.cpp's TblHoleCards, with four or more stickers up), 25 vertices fewer each.
+ */
+void TblBackBare(Canvas& C, float X, float Y, float W, float H, float Rotate, int Back)
+{
+	C.Save();
+	C.Translate(X + W / 2.0f, Y + H / 2.0f);
+	if (Rotate != 0.0f)
+	{
+		C.Rotate(Rotate);
+	}
+	TblBackCached(C, -W / 2.0f, -H / 2.0f, W, H, Back);
+	C.Restore();
+}
+
 void CardBack(Canvas& C, float X, float Y, float W, float H, int Back)
 {
 	// Update 3 (§2.5, §3.5): a site look's back (Back > 0: Ignite's Sunset, RunItTwice's Twin Stripe and its lacquer variant),
-	// cached by back and size (its own constants: no skin in the key); 0 is today's.
+	// cached by back and size; 0 is today's.
 	if (Back > 0)
 	{
-		C.GlowRoundRect({X, Y + 2.0f, W, H}, W * 0.1f, Rgba(0, 0, 0, 0.45f), 6.0f);
-		uint32_t Wb = 0;
-		uint32_t Hb = 0;
-		std::memcpy(&Wb, &W, sizeof(Wb));
-		std::memcpy(&Hb, &H, sizeof(Hb));
-		const uint64_t Key = (0x7b1ac5e3d9f20000ull ^ (static_cast<uint64_t>(Back) << 8)) * 0x100000001b3ull ^ (static_cast<uint64_t>(Wb) << 32 | Hb);
-		C.Cached(Key, X, Y, [W, H, Back](Canvas& Cv) { TblBack(Cv, 0.0f, 0.0f, W, H, Back); });
+		TblLowGlow(C, {X, Y + 2.0f, W, H}, W * 0.1f, Rgba(0, 0, 0, 0.45f), 6.0f); // G2 fix M5: the rival decks' shadow
+		TblBackCached(C, X, Y, W, H, Back);
 		return;
 	}
 	C.GlowRoundRect({X, Y + 2.0f, W, H}, W * 0.1f, Rgba(0, 0, 0, 0.45f), 6.0f);
@@ -423,6 +564,10 @@ void DrawCard(Canvas& C, int Card, float X, float Y, float W, float H, const Car
 		C.Rotate(Opts.Rotate);
 	}
 	C.Scale(Sx, 1.0f);
+	// G2 fix (M5): a rival deck (Back > 0, the rival tables' every card) draws its shadow through TblLowGlow; RiverLine's
+	// cards (Back 0) are today's. Review fix (review-g2f-tablestyle): the winner's glow stays at the canvas's curve on every
+	// deck (an 18 blur over two segments a corner lit a ray along each corner's diagonal; RiverLine.cpp's TblRunGlow).
+	const bool Rival = Opts.Back > 0;
 	if (Opts.Highlight)
 	{
 		// The winner's glow in the skin's gold (fix2-auto: RiverLine's own f2c14e at home, the same floats as Rgba(242, 193, 78);
@@ -431,7 +576,7 @@ void DrawCard(Canvas& C, int Card, float X, float Y, float W, float H, const Car
 	}
 	if (ShowFace)
 	{
-		CardFace(C, Card, -W / 2.0f, -H / 2.0f, W, H);
+		CardFace(C, Card, -W / 2.0f, -H / 2.0f, W, H, Rival);
 	}
 	else
 	{
@@ -458,17 +603,12 @@ void ChipColors(Chips Value, Color& Face, Color& Edge)
 	else { Face = Hex(0xe84a5f); Edge = Hex(0xffffff); }
 }
 
-/**
- * The rivals' stacks (§2.5, §3.5), up to three columns of up to eight as today's. Candy (Set 1): 5 coral, 25 sky, 100 violet,
- * 500 lime, 1k sunflower, 5k pink, 25k cream with coral stripes, 100k grape with sunflower; six edge stripes; a stack leans one
- * unit a chip. Lacquer (Set 2): Carbon, Chrome, Signal Red, Hot White, Status Gold in turn up the denominations, flat, the top
- * chip with eight fine edge marks in the contrasting colour.
- */
-void TblChipStack(Canvas& C, Chips Amount, float X, float Y, float Scale, float Alpha, int Set)
+/** A stack's columns, as today's (up to three denominations, up to eight chips a column): (denomination's index, chips). */
+std::vector<std::pair<int, int>> TblStackColumns(Chips Amount)
 {
 	static const Chips TblDenoms[8] = {100000, 25000, 5000, 1000, 500, 100, 25, 5};
 	Chips Rem = Amount;
-	std::vector<std::pair<int, int>> Cols; // (denomination's index, chips)
+	std::vector<std::pair<int, int>> Cols;
 	for (int K = 0; K < 8; ++K)
 	{
 		const Chips N = Rem / TblDenoms[K];
@@ -486,53 +626,222 @@ void TblChipStack(Canvas& C, Chips Amount, float X, float Y, float Scale, float 
 	{
 		Cols.push_back({7, 1});
 	}
+	return Cols;
+}
+
+/** A point on a chip's rim: the ellipse (Rx, Ry) round (Cx, Cy) at angle A (0 right, Pi/2 the front, Pi left). */
+Vec2 TblRim(float Cx, float Cy, float Rx, float Ry, float A)
+{
+	return {Cx + Rx * std::cos(A), Cy + Ry * std::sin(A)};
+}
+
+/** A rim's front half (angle 0 to Pi) in Segs segments; Close adds nothing (the caller closes the shape). */
+void TblFront(std::vector<Vec2>& Out, float Cx, float Cy, float Rx, float Ry, int Segs)
+{
+	for (int K = 0; K <= Segs; ++K)
+	{
+		Out.push_back(TblRim(Cx, Cy, Rx, Ry, Pi * static_cast<float>(K) / static_cast<float>(Segs)));
+	}
+}
+
+/** A whole rim in N points. */
+std::vector<Vec2> TblRing(float Cx, float Cy, float Rx, float Ry, int N)
+{
+	std::vector<Vec2> Out;
+	for (int K = 0; K < N; ++K)
+	{
+		Out.push_back(TblRim(Cx, Cy, Rx, Ry, 2.0f * Pi * static_cast<float>(K) / static_cast<float>(N)));
+	}
+	return Out;
+}
+
+/**
+ * One column of a rival's stack, merged (G1_AUDIT N12), its bottom chip centred on the origin: a shadow, the side as one shape
+ * in the chip's ground shaded, a seam at every chip's edge, the top chip's face and its marks. Detail 0 is the full look; 1
+ * (a busy felt) fewer points, the front stripes or marks only and no inner ring; 2 (the busiest) the side, the face and its
+ * front marks, no shadow or seams. Vertices (TblColumnVertices): candy 180 + 20 a chip past the first at detail 0, 101 + 16 at
+ * 1, 63 at 2; lacquer 163 + 20, 79 + 16, 52; tokens 120 + 20, 79 + 16, 64 (a chip-by-chip column was ~224 a chip), so nine
+ * stacks of three columns fit a felt's 1,800 at detail 2 in any set. Look (G2) is an Ignite chip set look + 1 from the
+ * Locker (0: none): a Wristband month's two colours would restyle candy (the stripes in the first, the inner ring in the
+ * second), the denominations' own grounds kept (core-siteplay's catalog has no monthly chip set at G2).
+ */
+void TblColumn(Canvas& C, int Set, int Di, int N, float Scale, int Detail, int Look)
+{
 	static const uint32_t Candy[8][2] = {{TblGrape, TblSun}, {TblCream, TblCoral}, {TblPink, TblCream}, {TblSun, 0x5a3a00}, {TblLime, 0x2a3a10}, {TblViolet, TblCream}, {TblSky, TblCream},
 		{TblCoral, TblCream}};
 	static const uint32_t Lacquer[5][2] = {{TblCarbon, TblWhite}, {TblChrome, TblOnyx}, {TblSignal, TblWhite}, {TblWhite, TblOnyx}, {TblStatusGold, TblOnyx}};
+	// Set 3 (Ignite's Arcade Tokens, G2's second chip set): struck metal tokens, flat, a stamped rim and a star in the middle,
+	// one metal a denomination (100k violet anodised, 25k black and gold, 5k rose gold, 1k silver, 500 nickel, 100 brass, 25
+	// verdigris, 5 copper).
+	static const uint32_t Tokens[8][2] = {{0x8a63c9, 0xe9e2f7}, {0x2b2b30, 0xe0b24a}, {0xe7a093, 0x8a4f43}, {0xdfe3e8, 0x7b828c}, {0x9fb4d6, 0x4c5d78}, {0xd1a646, 0x7a5a18},
+		{0x6fae9a, 0x2f5a4c}, {0xc56b45, 0x6e3220}};
+	const bool Token = Set == 3;
+	const TblWorn Worn = Look > 0 ? TblWornLook(2, Look - 1) : TblWorn{};
+	const uint32_t* Pair = Set == 1 ? Candy[Di] : Token ? Tokens[Di] : Lacquer[(7 - Di) % 5];
+	const Color Ground = Hex(Pair[0]);
+	const Color Mark = Set == 1 && Worn.A ? Hex(Worn.A) : Hex(Pair[1]);
+	const Color Ring = Set == 1 && Worn.B ? Hex(Worn.B) : Mark;
+	const Color Black = Hex(0x000000);
+	const float Rr = 13.0f * Scale;
+	const float Ry = Rr * 0.55f;
+	const float Step = 3.2f * Scale;
+	const float Lean = Set == 1 ? Scale : 0.0f;
+	const float Tx = Lean * static_cast<float>(N - 1);
+	const float Ty = -Step * static_cast<float>(N - 1);
+	const int Arc = Detail == 0 ? 6 : 4;
+	std::vector<Vec2> P;
+	if (Detail < 2)
+	{
+		// The shadow: the bottom rim's front half, two units down (the side covers its top).
+		TblFront(P, 0.0f, 2.0f * Scale, Rr, Ry, Arc);
+		C.FillPolygon(P, Rgba(0, 0, 0, 0.35f));
+	}
+	if (N > 1)
+	{
+		// The side: the bottom rim's front half up to the top chip's rim ends, shaded.
+		P.clear();
+		TblFront(P, 0.0f, 0.0f, Rr, Ry, Arc);
+		P.push_back(TblRim(Tx, Ty, Rr, Ry, Pi));
+		P.push_back(TblRim(Tx, Ty, Rr, Ry, 0.0f));
+		C.FillPolygon(P, Mix(Ground, Black, Token ? 0.32f : 0.22f));
+		if (Set == 1 && Detail < 2)
+		{
+			// Candy's edge stripes down the side (a sixth of the rim apart, 20 degrees wide), cut into chips by the seams.
+			const Color Side = Mix(Mark, Black, 0.22f);
+			for (int K = 0; K < 3; ++K)
+			{
+				const float Mid = (15.0f + 60.0f * static_cast<float>(K)) * Pi / 180.0f;
+				const float H = 10.0f * Pi / 180.0f;
+				C.FillPolygon({TblRim(0.0f, 0.0f, Rr, Ry, Mid - H), TblRim(0.0f, 0.0f, Rr, Ry, Mid + H), TblRim(Tx, Ty, Rr, Ry, Mid + H), TblRim(Tx, Ty, Rr, Ry, Mid - H)}, Side);
+			}
+		}
+		if (Detail < 2)
+		{
+			// A seam at every chip's edge (its shadow on the chip below).
+			const Color Seam = Rgba(0, 0, 0, Token ? 0.4f : 0.32f);
+			for (int I = 1; I < N; ++I)
+			{
+				P.clear();
+				TblFront(P, Lean * static_cast<float>(I), -Step * static_cast<float>(I) + Scale, Rr, Ry, Detail == 0 ? 4 : 3);
+				C.StrokePolyline(P, false, Seam, 1.4f * Scale);
+			}
+		}
+	}
+	// The top chip's face.
+	C.FillPolygon(TblRing(Tx, Ty, Rr, Ry, Detail == 0 ? 12 : Token && Detail == 2 ? 8 : 10), Ground);
+	if (Set == 1)
+	{
+		// Six stripes round the edge (the front three on a busy felt), from the rim to 0.7 of the way in; the inner ring.
+		for (int K = 0; K < 6; ++K)
+		{
+			const float Mid = (15.0f + 60.0f * static_cast<float>(K)) * Pi / 180.0f;
+			if (Detail > 0 && Mid > Pi)
+			{
+				continue;
+			}
+			const float H = 10.0f * Pi / 180.0f;
+			C.FillPolygon({TblRim(Tx, Ty, Rr, Ry, Mid - H), TblRim(Tx, Ty, Rr, Ry, Mid + H), TblRim(Tx, Ty, 0.7f * Rr, 0.7f * Ry, Mid + H), TblRim(Tx, Ty, 0.7f * Rr, 0.7f * Ry, Mid - H)}, Mark);
+		}
+		if (Detail == 0)
+		{
+			C.StrokePolyline(TblRing(Tx, Ty, Rr * 0.62f, Rr * 0.34f, 10), true, Color{Ring.R, Ring.G, Ring.B, 0.7f}, 1.0f);
+		}
+		return;
+	}
+	if (Token)
+	{
+		// The stamped rim and, at full detail, the star struck in the middle.
+		C.StrokePolyline(TblRing(Tx, Ty, Rr * 0.8f, Ry * 0.8f, Detail == 0 ? 10 : 8), true, Color{Mark.R, Mark.G, Mark.B, 0.8f}, 1.2f * Scale);
+		if (Detail == 0)
+		{
+			std::vector<Vec2> Star;
+			for (int K = 0; K < 10; ++K)
+			{
+				const float A = -Pi / 2.0f + Pi * static_cast<float>(K) / 5.0f;
+				const float Rs = (K % 2 == 0 ? 0.42f : 0.18f) * Rr;
+				Star.push_back({Tx + Rs * std::cos(A), Ty + Rs * 0.55f * std::sin(A)});
+			}
+			C.FillPolygon(Star, Color{Mark.R, Mark.G, Mark.B, 0.85f});
+		}
+		return;
+	}
+	// Lacquer: eight fine edge marks in the contrasting colour (four on a busy felt, the front two on the busiest), the inner
+	// ring at full detail.
+	for (int M = 0; M < (Detail == 2 ? 4 : 8); M += Detail == 0 ? 1 : 2)
+	{
+		const float A = (static_cast<float>(M) * 45.0f + 22.5f) * Pi / 180.0f;
+		C.StrokePolyline({TblRim(Tx, Ty, Rr * 0.8f, Rr * 0.44f, A), TblRim(Tx, Ty, Rr * 0.98f, Rr * 0.54f, A)}, false, Mark, std::max(1.2f, 2.2f * Scale));
+	}
+	if (Detail == 0)
+	{
+		C.StrokePolyline(TblRing(Tx, Ty, Rr * 0.62f, Rr * 0.34f, 10), true, Color{Mark.R, Mark.G, Mark.B, 0.45f}, 0.8f);
+	}
+}
+
+/**
+ * The rivals' stacks (§2.5, §3.5), up to three columns of up to eight as today's. Candy (Set 1): 5 coral, 25 sky, 100 violet,
+ * 500 lime, 1k sunflower, 5k pink, 25k cream with coral stripes, 100k grape with sunflower; six edge stripes; a stack leans one
+ * unit a chip. Lacquer (Set 2): Carbon, Chrome, Signal Red, Hot White, Status Gold in turn up the denominations, flat, the top
+ * chip with eight fine edge marks in the contrasting colour. Arcade Tokens (Set 3, Ignite's second chip set, G2): struck metal
+ * tokens with a stamped rim and a star. G1_AUDIT N12: each column is one merged shape (TblColumn), replayed from the canvas's
+ * cache by set, denomination, height, size, detail and look; Detail (0-2) is the felt's (RiverLine.cpp's TblChipDetail), Look
+ * an Ignite chip set look + 1 (G2; 0 none).
+ */
+void TblChipStack(Canvas& C, Chips Amount, float X, float Y, float Scale, float Alpha, int Set, int Detail, int Look)
+{
+	const std::vector<std::pair<int, int>> Cols = TblStackColumns(Amount);
 	C.Save();
 	C.SetAlpha(C.GetAlpha() * Alpha);
 	const float Rr = 13.0f * Scale;
+	uint32_t Sb = 0;
+	std::memcpy(&Sb, &Scale, sizeof(Sb));
 	for (size_t Si = 0; Si < Cols.size(); ++Si)
 	{
 		const float Sx = X + (static_cast<float>(Si) - static_cast<float>(Cols.size() - 1) / 2.0f) * Rr * 2.1f;
 		const int Di = Cols[Si].first;
-		const uint32_t* Pair = Set == 1 ? Candy[Di] : Lacquer[(7 - Di) % 5];
-		const Color Ground = Hex(Pair[0]);
-		const Color Mark = Hex(Pair[1]);
-		for (int I = 0; I < Cols[Si].second; ++I)
-		{
-			const float Lean = Set == 1 ? static_cast<float>(I) * Scale : 0.0f;
-			const float Cx = Sx + Lean;
-			const float Cy = Y - static_cast<float>(I) * 3.2f * Scale;
-			C.FillEllipse(Cx, Cy + 2.0f * Scale, Rr, Rr * 0.55f, Rgba(0, 0, 0, 0.35f));
-			C.FillEllipse(Cx, Cy, Rr, Rr * 0.55f, Ground);
-			if (Set == 1)
-			{
-				// Six stripes round the edge (a dash a twelfth of the rim), an inner ring.
-				C.StrokeEllipse(Cx, Cy, Rr, Rr * 0.55f, Mark, 2.4f * Scale, 5.4f * Scale);
-				if (I + 1 == Cols[Si].second)
-				{
-					C.StrokeEllipse(Cx, Cy, Rr * 0.62f, Rr * 0.34f, Color{Mark.R, Mark.G, Mark.B, 0.7f}, 1.0f);
-				}
-				continue;
-			}
-			C.StrokeEllipse(Cx, Cy, Rr, Rr * 0.55f, Color{Mark.R, Mark.G, Mark.B, 0.35f}, 1.0f);
-			if (I + 1 == Cols[Si].second)
-			{
-				for (int M = 0; M < 8; ++M)
-				{
-					const float A = (static_cast<float>(M) * 45.0f + 22.5f) * Pi / 180.0f;
-					const float Ca = std::cos(A);
-					const float Sa = std::sin(A);
-					C.StrokePolyline({{Cx + Ca * Rr * 0.8f, Cy + Sa * Rr * 0.44f}, {Cx + Ca * Rr * 0.98f, Cy + Sa * Rr * 0.54f}}, false, Mark, std::max(1.2f, 2.2f * Scale));
-				}
-				C.StrokeEllipse(Cx, Cy, Rr * 0.62f, Rr * 0.34f, Color{Mark.R, Mark.G, Mark.B, 0.45f}, 0.8f);
-			}
-		}
+		const int N = Cols[Si].second;
+		const uint64_t Key = (0x3c41f7d2b98e0000ull ^ static_cast<uint64_t>(Look << 16 | Set << 12 | Di << 8 | N << 4 | Detail)) * 0x100000001b3ull ^ (static_cast<uint64_t>(Sb) << 24);
+		C.Cached(Key, Sx, Y, [Set, Di, N, Scale, Detail, Look](Canvas& Cv) { TblColumn(Cv, Set, Di, N, Scale, Detail, Look); });
 	}
 	C.Restore();
 }
+
+/** TblColumn's vertices (a polygon of n points is 2n + 1, a line of n points 4n): any denomination, any size. */
+int TblColumnVertices(int Set, int N, int Detail)
+{
+	const int Side = N > 1 ? 1 : 0;
+	if (Detail >= 2)
+	{
+		return Side * 15 + (Set == 1 ? 21 + 27 : Set == 3 ? 17 + 32 : 21 + 16);
+	}
+	const bool Full = Detail == 0;
+	const int Shadow = Full ? 15 : 11;
+	const int Body = (Full ? 19 : 15) + (Set == 1 ? 27 : 0) + (N - 1) * (Full ? 20 : 16);
+	const int Face = Full ? 25 : 21;
+	const int Marks = Set == 1 ? (Full ? 54 + 40 : 27) : Set == 3 ? (Full ? 40 + 21 : 32) : (Full ? 64 + 40 : 32);
+	return Shadow + Side * Body + Face + Marks;
+}
 } // namespace ui_detail
+
+namespace rlsites_detail
+{
+// Declared in RiverLineShared.h (the shared table's felt budget, G1_AUDIT N12).
+int SitesChipVertices(Chips Amount, int Set, int Detail);
+
+int SitesChipVertices(Chips Amount, int Set, int Detail)
+{
+	if (Amount <= 0)
+	{
+		return 0;
+	}
+	int V = 0;
+	for (const std::pair<int, int>& Col : ui_detail::TblStackColumns(Amount))
+	{
+		V += ui_detail::TblColumnVertices(Set & 15, Col.second, Detail);
+	}
+	return V;
+}
+} // namespace rlsites_detail
 
 void DrawChipStack(Canvas& C, Chips Amount, float X, float Y, float Scale, float Alpha, int Set)
 {
@@ -540,10 +849,12 @@ void DrawChipStack(Canvas& C, Chips Amount, float X, float Y, float Scale, float
 	{
 		return;
 	}
-	// Update 3 (§2.5, §3.5): a site look's chips (Set 1: Ignite's candy, 2: RunItTwice's lacquer); 0 is today's.
+	// Update 3 (§2.5, §3.5): a site look's chips (Set 1: Ignite's candy, 2: RunItTwice's lacquer, 3: Ignite's Neon); 0 is today's.
+	// G1_AUDIT N12: bits 4-5 carry the felt's detail; G2: bits 8-15 an Ignite chip set look + 1 (RiverLineShared.h,
+	// SitesChipVertices and SitesIgChipSet).
 	if (Set > 0)
 	{
-		TblChipStack(C, Amount, X, Y, Scale, Alpha, Set);
+		TblChipStack(C, Amount, X, Y, Scale, Alpha, Set & 15, (Set >> 4) & 3, (Set >> 8) & 0xff);
 		return;
 	}
 	static const Chips Denoms[8] = {100000, 25000, 5000, 1000, 500, 100, 25, 5};

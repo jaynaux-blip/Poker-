@@ -787,15 +787,19 @@ void Session::SkipMoments(const Hand& H, const HandFacts& F)
 	const TPlayer& Hero = T->Hero();
 	if (Hero.Busted)
 	{
-		StreamMoment(Hero.PrizeCents > 0 ? kast::Moment::Cashed : kast::Moment::Bust, Ordinal(Hero.Place));
+		// Update 3 (§2.6 F7): at a FUSE a 2nd or 3rd place is a cash from x25 up (the session's split, not the engine's).
+		const Chips Paid = fuse::IsFuse(T->Spec.Id) ? fuse::PrizeAt(T->Spec, Hero.Place) : Hero.PrizeCents;
+		StreamMoment(Paid > 0 ? kast::Moment::Cashed : kast::Moment::Bust, Ordinal(Hero.Place));
 		if (Stream.Live)
 		{
-			Stream.Resolve(Channel, StreamInputs(), Hero.PrizeCents > 0);
+			Stream.Resolve(Channel, StreamInputs(), Paid > 0);
 		}
 	}
 	else if (T->bFinished)
 	{
-		StreamMoment(kast::Moment::Win, T->Spec.Name, 1.0 + static_cast<double>(Hero.PrizeCents) / 50000.0);
+		// Update 3 (§2.6 F7): a FUSE's first prize is the session's (80% of the pool from x25 up), as the watch path's EndHand says.
+		const Chips FirstPrize = fuse::IsFuse(T->Spec.Id) ? fuse::PrizeAt(T->Spec, 1) : Hero.PrizeCents;
+		StreamMoment(kast::Moment::Win, T->Spec.Name, 1.0 + static_cast<double>(FirstPrize) / 50000.0);
 		if (Stream.Live)
 		{
 			Stream.Resolve(Channel, StreamInputs(), true);
@@ -812,7 +816,9 @@ void Session::AutoRecord(const Results& Res)
 	{
 		return;
 	}
-	const std::string Id = T->Spec.Id.find('@') != std::string::npos ? T->Spec.Id : std::string();
+	// Update 3 (§2.6 F7; S-J §6 item 14): a FUSE has no History row to badge, and a 30-a-day FUSE grinder on autoplay would
+	// push every MTT's played line out of the 200 kept within a week: FUSE ids write none.
+	const std::string Id = T->Spec.Id.find('@') != std::string::npos && !fuse::IsFuse(T->Spec.Id) ? T->Spec.Id : std::string();
 	if (!Id.empty() && (AutoRun.AiHands > 0 || AutoRun.AiDecisions > 0))
 	{
 		autoplay::Record(Life.Auto, Id, 0, static_cast<int>(net::SiteOf(T->Spec.Id)), Auto, AutoRun);

@@ -632,6 +632,26 @@ const site::Invitation* SitesInvite(const Session& S, net::SiteId Site)
 	}
 	return Out;
 }
+
+/**
+ * The nudge's flame (G2, §2.6 F2): a Night badge with a coral rim at (Cx, Cy), 7.5 round, and Ignite's flame in it, coral round
+ * a sunflower core, flickering on the real clock (its height and light; two sines out of step, never on the world's clock).
+ */
+void SitesNudgeFlame(Canvas& C, float Cx, float Cy, double Now)
+{
+	const float Flick = static_cast<float>(0.5 + 0.3 * std::sin(Now * 11.0) + 0.2 * std::sin(Now * 27.0 + 1.3));
+	C.FillCircle(Cx, Cy, 7.5f, Hex(SitesIgNight));
+	C.StrokeArc(Cx, Cy, 7.5f, 0.0f, 2.0f * Pi, Hex(SitesIgCoral, 0.55f + 0.45f * Flick), 1.0f);
+	const float A0 = C.GetAlpha();
+	C.SetAlpha(A0 * (0.62f + 0.38f * Flick));
+	const float S = 11.0f * (0.9f + 0.1f * Flick);
+	const float Base = Cy + 5.0f;
+	const auto P = [&](float U, float V) { return Vec2{Cx + U * 7.0f, Base - V * S}; };
+	C.FillPolygon({P(0.0f, 0.0f), P(-0.62f, 0.32f), P(-0.5f, 0.62f), P(-0.3f, 0.78f), P(-0.26f, 0.58f), P(-0.06f, 1.0f), P(0.26f, 0.7f), P(0.36f, 0.86f), P(0.62f, 0.4f), P(0.48f, 0.1f)},
+		Paint::Linear({0.0f, Base}, {0.0f, Base - S}, Hex(SitesIgCoral), Hex(SitesIgPink)));
+	C.FillPolygon({P(0.0f, 0.04f), P(-0.3f, 0.24f), P(-0.16f, 0.52f), P(0.02f, 0.62f), P(0.12f, 0.44f), P(0.3f, 0.3f), P(0.22f, 0.08f)}, Hex(SitesIgSun));
+	C.SetAlpha(A0);
+}
 } // namespace rlsites_detail
 
 using namespace rlsites_detail;
@@ -665,6 +685,13 @@ void RiverLine::PokerButton(const Rect& R, double Now)
 	else
 	{
 		siteart::Logo(*C, {R.X + 6.0f, R.Y + 3.0f, 24.0f, 24.0f}, Site);
+	}
+	// G2 (§2.6 F2 "The nudge"): after 6 PM with no flame day yet on Ignite, Ignite's flame flickers on the button's mark (its
+	// bottom right; the taskbar's your-turn dot keeps the top right), whichever site is in front. No push, no Mail; the Today
+	// strip says the rest.
+	if (SitesFlameNudge(this, S, World))
+	{
+		SitesNudgeFlame(*C, R.X + 28.0f, R.Y + 21.0f, Now);
 	}
 	UI.Text(SitesShortName(Site), R.X + 38.0f, R.Y + R.H / 2.0f + 1.0f, Ts(13.0f, 700, On ? pal::Ink : Hex(0x9aa7bd), Align::Left, Baseline::Middle));
 	if (On)
@@ -1298,15 +1325,130 @@ const SiteLook& SitesLook(net::SiteId S)
 	return S == net::SiteId::Ignite ? SitesIgnite : S == net::SiteId::RunItTwice ? SitesRit : SitesTodayLook;
 }
 
-SiteLook SitesLookFor(const Session& /*S*/, net::SiteId Site)
+// ---- G2 (ui-tablestyle; §2.4 L, §2.5): Ignite's looks as worn. Look 0 of every slot is the look's own (Sunset, Plum Velvet,
+// candy), so a player who equips nothing sits at G1's table exactly.
+
+/** Midnight Boardwalk (Ignite's second felt; core-siteplay's name): midnight blue, its downlight and its edge. */
+const uint32_t SitesIgMidnight = 0x1d2246, SitesIgMidnightLight = 0x2e3a78, SitesIgMidnightDark = 0x121633;
+
+int SitesIgBack(int Look)
 {
-	// G2 (ui-tablestyle's small part): Ignite's equipped back, felt and chips over its look.
-	return SitesLook(Site);
+	return Look > 0 && Look < site::play::LookCount(0) ? SitesIgBackLooks + Look : 1;
+}
+
+int SitesIgChipSet(int Look)
+{
+	if (Look <= 0 || Look >= site::play::LookCount(2) || Look > 254)
+	{
+		return 1;
+	}
+	return (site::play::LookOf(2, Look).Base == 1 ? 3 : 1) | (Look + 1) << 8;
+}
+
+/** A colour Mix'd toward another, as a hex (the felt's three tones from a Wristband month's colours). */
+uint32_t SitesMixHex(uint32_t A, uint32_t B, float T)
+{
+	uint32_t Out = 0;
+	for (int Shift = 16; Shift >= 0; Shift -= 8)
+	{
+		const float Ca = static_cast<float>((A >> Shift) & 0xff);
+		const float Cb = static_cast<float>((B >> Shift) & 0xff);
+		Out |= static_cast<uint32_t>(std::lround(Ca + (Cb - Ca) * T)) << Shift;
+	}
+	return Out;
+}
+
+void SitesIgFelt(int Look, uint32_t& Felt, uint32_t& Light, uint32_t& Dark)
+{
+	const SiteLook& Own = SitesLook(net::SiteId::Ignite);
+	Felt = Own.Felt;
+	Light = Own.FeltLight;
+	Dark = Own.FeltDark;
+	if (Look <= 0 || Look >= site::play::LookCount(1))
+	{
+		return;
+	}
+	const site::play::LookView V = site::play::LookOf(1, Look);
+	if (V.Base == 1)
+	{
+		Felt = SitesIgMidnight;
+		Light = SitesIgMidnightLight;
+		Dark = SitesIgMidnightDark;
+	}
+	if (V.ColorA != 0)
+	{
+		// A Wristband month's felt (Plum Velvet restyled): its first colour deep in the Night rail's dark, the downlight pool in
+		// its second where that reads lighter than the felt (a dark second colour, as Bonfire's, lights it with the first).
+		const auto Luma = [](uint32_t C) { return 0.2126f * static_cast<float>((C >> 16) & 0xff) + 0.7152f * static_cast<float>((C >> 8) & 0xff) + 0.0722f * static_cast<float>(C & 0xff); };
+		Felt = SitesMixHex(V.ColorA, SitesIgNight, 0.7f);
+		const uint32_t Second = V.ColorB != 0 ? SitesMixHex(V.ColorB, SitesIgNight, 0.5f) : 0;
+		Light = Second != 0 && Luma(Second) > Luma(Felt) + 8.0f ? Second : SitesMixHex(V.ColorA, SitesIgNight, 0.5f);
+		Dark = SitesMixHex(V.ColorA, SitesIgNight, 0.82f);
+	}
+}
+
+/** The look a session's player wears on a site (its own but Ignite's, which wears the Locker's back, felt and chips). */
+const SiteLook& SitesWornLook(const Session& S, net::SiteId Site)
+{
+	const SiteLook& Own = SitesLook(Site);
+	const site::play::Looks& W = S.Life.SitePlay.Ig.L;
+	if (Site != net::SiteId::Ignite || (W.Back == 0 && W.Felt == 0 && W.Chips == 0))
+	{
+		return Own;
+	}
+	// Built once a combination (the catalog is static), kept for the program's life on this thread: the address is stable.
+	const uint32_t Key = static_cast<uint32_t>(static_cast<uint8_t>(W.Back)) | static_cast<uint32_t>(static_cast<uint8_t>(W.Felt)) << 8 |
+						 static_cast<uint32_t>(static_cast<uint8_t>(W.Chips)) << 16;
+	thread_local std::map<uint32_t, SiteLook> Worn;
+	const auto Found = Worn.find(Key);
+	if (Found != Worn.end())
+	{
+		return Found->second;
+	}
+	SiteLook L = Own;
+	L.CardBack = SitesIgBack(W.Back);
+	SitesIgFelt(W.Felt, L.Felt, L.FeltLight, L.FeltDark);
+	L.ChipSet = SitesIgChipSet(W.Chips);
+	return Worn.emplace(Key, L).first->second;
+}
+
+SiteLook SitesLookFor(const Session& S, net::SiteId Site)
+{
+	return SitesWornLook(S, Site);
 }
 
 const SiteLook& SitesTableLook(const Session& S)
 {
-	return SitesLook(SitesOfTable(S));
+	// The table in front wears what the player wears on its site (G2): every shared table piece reads this.
+	return SitesWornLook(S, SitesOfTable(S));
+}
+
+bool SitesFlameNudge(const RiverLine* RL, const Session& S, double World)
+{
+	if (!SitesRegistered(net::SiteId::Ignite) || !SitesAccount(S, net::SiteId::Ignite))
+	{
+		return false;
+	}
+	// Core's view, asked again only when what the nudge reads can have moved: the world hour (6 PM, midnight and 6 AM are on
+	// the hour), the flame's day, streak and ice, the book's first day and the clause (a full view is too much to build every
+	// frame, and a skip at the tables moves the world minute nearly every frame). G2 fix (G2_AUDIT L10): and core's cheap
+	// answer (site::play::FlameNudge, every frame), so a book started without a paid entry (a ticket's FUSE, Sparks) nudges at
+	// once, not up to a world hour late.
+	SitesUi& U = SitesOf(RL);
+	const site::play::Ignite& I = S.Life.SitePlay.Ig;
+	const bool Clause = sponsor::WouldStrike(S.Life.Sponsors, static_cast<int>(net::SiteId::Ignite), false, false);
+	const bool Cheap = site::play::FlameNudge(S.Life.SitePlay, S.Life.Sponsors, World);
+	uint64_t Key = static_cast<uint64_t>(static_cast<int64_t>(std::floor(World / 60.0)));
+	for (const int Part : {I.F.LastDay, I.F.Streak, I.F.IceSince, I.S.DayKey, Clause ? 1 : 0, Cheap ? 1 : 0})
+	{
+		Key = (Key ^ static_cast<uint64_t>(static_cast<uint32_t>(Part))) * 0x100000001b3ull;
+	}
+	if (Key != U.NudgeKey)
+	{
+		U.NudgeKey = Key;
+		U.Nudge = S.SitePlayView(net::SiteId::Ignite).Ig.Nudge;
+	}
+	return U.Nudge;
 }
 
 const SiteLook& SitesClientLook(const RiverLine& RL, const Session& S)
@@ -1970,8 +2112,8 @@ bool SitesControl(Ui& UI, Canvas& C, const SiteLook& L, const std::string& Id, c
 		}
 		else
 		{
-			C.FillRoundRect(R, Rr, St.Hover ? pal::Line : pal::Panel2);
-			C.StrokeRoundRect(R, Rr, St.Hover ? Lite : pal::Line, 1.2f);
+			// G2 fix (M5): the rim and the body as two fills (a stroke takes four vertices a point, a fill two).
+			SitesOutlined(C, R, Rr, St.Hover ? pal::Line : pal::Panel2, St.Hover ? Lite : pal::Line, 1.2f);
 		}
 	}
 	// The label in the look's face, brought down to fit (never truncated: these are short).

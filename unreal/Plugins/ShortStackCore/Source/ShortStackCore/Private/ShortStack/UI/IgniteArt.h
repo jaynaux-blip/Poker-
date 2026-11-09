@@ -8,6 +8,7 @@
 
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/SitePlay.h"
 #include "ShortStack/Game/SiteShow.h"
 #include "ShortStack/UI/Canvas.h"
 #include "ShortStack/UI/RiverLine.h"
@@ -114,6 +115,37 @@ void IgniteFuseSpark(Canvas& C, float X0, float X1, float Y, float Amp, double T
 /** A glow under a neon stroke: a few widening strokes at falling alpha (a cheap bloom). */
 void IgniteNeonRoundRect(Canvas& C, const Rect& R, float Radius, const Color& Col, float Width, float Bloom);
 
+// ------------------------------------------------------------------ G2's art (SPEC §2.4 H, §2.6; IgniteArt.cpp)
+/** The ring names (F4): GLOW, SHINE, DAZZLE; Ring 1..3. */
+const char* IgniteRingName(int Ring);
+/** The Flame by streak (F2): small 1-2 days, medium 3-6, big 7-13, roaring 14-29, blue from 30; on ice a frosted grey-blue.
+ * X its centre, BaseY its foot, S the size the streak's band scales. */
+void IgniteFlameLook(Canvas& C, float X, float BaseY, float S, int Streak, bool Ice);
+/** The Spark Wheel face (REWARDS and the spin): N wedges in alternating grape and violet round a hub, its three rings
+ * (GLOW outer, SHINE middle, DAZZLE inner) lit up to Lit, turned by Angle (radians). */
+void IgniteWheelFace(Canvas& C, float Cx, float Cy, float R, int Wedges, int Lit, float Angle, const IgniteTones& K, float Glow);
+/** The face's rings sit at R + 6 (GLOW, the rim), 0.7 R (SHINE) and 0.4 R (DAZZLE), a lit one stroked 4 wide. The prizes
+ * ride the band between SHINE and the rim, off every ring (G2_AUDIT L9): its middle radius, and how far a label may reach
+ * either side of it (the strokes' half widths and 3 px of clear felt, so "1,050" across the wheel never touches the rim). */
+constexpr float IgniteWheelBandMid(float R)
+{
+	return (R * 0.7f + R + 6.0f) * 0.5f;
+}
+constexpr float IgniteWheelBandRoom(float R)
+{
+	return (R + 6.0f - R * 0.7f) * 0.5f - 5.0f;
+}
+/** A cracker (F5: Paper 0, Neon 1, Gold 2) centred at (Cx, Cy), W wide; Tug (0..1) pulls its ends apart. */
+void IgniteCracker(Canvas& C, float Cx, float Cy, float W, int Tier, float Tug);
+/** A matchstick (a Spare Match), Lit: its head burning; Spent: burnt down. */
+void IgniteMatch(Canvas& C, float X, float Y, float H, bool Lit, bool Spent);
+/** The Wristband's violet rope from (X0, Y) to (X1, Y), filled up to T (0..1) in lime. */
+void IgniteRope(Canvas& C, float X0, float X1, float Y, float Amp, double T, uint32_t Seed);
+/** A level's hexagon badge with its number (the ring's, the card's, the banner's). */
+void IgniteLevelBadge(Canvas& C, float Cx, float Cy, float R, int Level);
+/** FUSE's multiplier chip colours (§2.4 C): x2-x3 cream, x5-x10 sky, x25 coral, x100 and up sunflower. */
+uint32_t IgniteFuseTint(int M, const IgniteTones& K);
+
 // ------------------------------------------------------------------ the Boardwalk (SPEC §2.4 A; IgniteArt.cpp)
 /** What the band's live layer and signs know this frame. */
 struct IgniteBand
@@ -190,6 +222,230 @@ inline constexpr const char* IgniteCleanGame = "Clean game. No real mistakes fou
 inline constexpr const char* IgniteNoGrades = "No decisions graded.";
 inline constexpr const char* IgniteDecisionsXp = "XP comes from decisions, not results.";
 inline constexpr const char* IgniteNoShouts = "The boardwalk's quiet right now.";
+// G2 (SPEC §2.3's voice: playful, warm, second person, short; every sentence in IgniteInventory)
+inline constexpr const char* IgniteFlameNeeds = "Your flame needs one entry today.";
+inline constexpr const char* IgniteOnIce = "On ice: your flame waits.";
+inline constexpr const char* IgniteSpinReady = "Spin's ready.";
+inline constexpr const char* IgniteSpinDone = "Today's spin is done. The wheel lights again at 6 AM.";
+inline constexpr const char* IgniteSpinNone = "One paid entry today lights GLOW.";
+inline constexpr const char* IgniteAllThree = "That's 3 of 3: pull your cracker.";
+inline constexpr const char* IgniteNoCrackers = "No crackers on the shelf. Clearing all three Dares drops one.";
+inline constexpr const char* IgniteShelfFull = "The shelf holds 12. A 13th opens itself into Sparks.";
+inline constexpr const char* IgniteNeverSold = "Crackers are never sold. They drop from Dares, levels and the Wristband.";
+inline constexpr const char* IgniteSparksRule = "10 Sparks for every cent of rake on a paid entry. Sparks never expire.";
+inline constexpr const char* IgniteSparksStay = "Sparks buy tickets and looks here. Money never buys Sparks.";
+inline constexpr const char* IgniteTicketsEarn = "Ticket and freeroll entries earn nothing.";
+inline constexpr const char* IgniteDaresGrey = "Under your deal, a Dare's entry here is a strike.";
+inline constexpr const char* IgniteMondayGood = "Past this week's cap your base Sparks still count, and they land on Monday at 6 AM.";
+inline constexpr const char* IgniteGuestRule = "Nothing on the Guest List expires. The oldest item always moves first.";
+inline constexpr const char* IgniteFineRule = "Ignite gives back at most half the rake you pay here, counted over 30 days. The rest waits on the Guest List.";
+inline constexpr const char* IgniteFineWelcome = "Inside your 60 welcome days the ceiling is 75%: the welcome bonus counts in it.";
+inline constexpr const char* IgniteNoHolds = "Nothing waiting. Every reward so far has landed.";
+inline constexpr const char* IgniteFuseHow = "{Stack} chips \xC2\xB7 {Blinds} \xC2\xB7 3-minute levels \xC2\xB7 winner takes all to x10; x25 and up pay 80 / 12 / 8 \xC2\xB7 the fuse is the blind clock \xC2\xB7 it earns Sparks";
+inline constexpr const char* IgniteFuseLine = "three players \xC2\xB7 one fuse \xC2\xB7 light it and see what you're playing for";
+inline constexpr const char* IgniteFuseSkip = "A click skips to the boom. The table opens itself a second after.";
+inline constexpr const char* IgniteFuseKeyed = "Drawn when you lit it. A reload replays this reveal.";
+inline constexpr const char* IgniteFuseOdds = "Every FUSE is drawn from this table. The pool is exactly the multiplier times the buy-in.";
+inline constexpr const char* IgniteNoWall = "No FUSE of x10 or more yet. Your first one goes up here.";
+inline constexpr const char* IgniteWheelOdds = "The wheel stops where it was drawn. These are its chances at your stake.";
+inline constexpr const char* IgniteCrackerOddsLine = "A cracker's prize is drawn the moment you pull it, from these chances. A reload never changes it.";
+inline constexpr const char* IgniteCrackerOwned = "A look you already own comes as {N} Sparks instead.";
+inline constexpr const char* IgniteBuyAsk = "Spend the Sparks? This can't be undone.";
+inline constexpr const char* IgniteLockerEmpty = "Wear what you've got. Locked looks say how they're had.";
+inline constexpr const char* IgniteOuchLine = "Ouch. That was {An} {Pct}% favourite. Have some Sparks.";
+inline constexpr const char* IgniteBeefNone = "Nobody's got your number yet.";
+inline constexpr const char* IgniteSecretSticker = "A secret. Nobody says how.";
+
+/**
+ * The loops as Ignite's G2 pages draw them (SPEC §2.6): Session::SitePlayView(Ignite)'s fields (core-siteplay's View) with
+ * the Governor's figure (the Fine print), read through IgniteLoopsOf, the one adapter. Every number here is core's: the
+ * pages only animate it (W2). While Live is false (no G2 View yet) every surface keeps its G1 state.
+ */
+struct IgniteDare
+{
+	int Id = -1;
+	int Tier = 0; // 0 Easy, 1 Medium, 2 Hard
+	std::string Label;
+	int Prog = 0, Needs = 1;
+	int Entries = 1; // the paid entries today it needs before it can complete (1 Easy, 2 Medium, 3 Hard: core's floor)
+	int64_t Sparks = 0;
+	bool Done = false, Claimed = false, Held = false;
+};
+/** The paid entries a Dare still needs today before it completes, once its own target is met (0: none, or not yet met). */
+inline int IgniteDareShort(const IgniteDare& D, int EntriesToday)
+{
+	return D.Id >= 0 && !D.Done && !D.Claimed && D.Prog >= D.Needs && EntriesToday < D.Entries ? D.Entries - EntriesToday : 0;
+}
+struct IgniteWedge
+{
+	std::string Label;
+	int64_t Sparks = 0;
+	std::string TicketId;
+	Chips FaceCents = 0;
+	double P = 0.0;
+};
+struct IgniteTier
+{
+	int Tier = 0;
+	int64_t Needs = 0;
+	std::string Reward;
+	int Kind = 0; // 0 nothing, 1 ticket, 2 cracker, 3 Spare Match, 4 look, 5 the month's title
+	bool Reached = false, Claimed = false, Held = false;
+};
+struct IgnitePrize
+{
+	int Item = 0;
+	std::string Label;
+	int64_t Sparks = 0;
+	std::string TicketId;
+	Chips FaceCents = 0;
+	int LookSlot = -1, Look = -1;
+	int Tab = 0; // 0 Tickets, 1 Looks, 2 Extras
+	bool Owned = false;
+};
+struct IgniteLook
+{
+	int Slot = 0, Look = 0;
+	std::string Name, How;
+	uint32_t ColorA = 0, ColorB = 0; // a Wristband month's two theme colours (0: the base design's own)
+	bool Owned = false, Worn = false;
+};
+struct IgniteStickerRow
+{
+	int Id = 0;
+	std::string Name, How;
+	bool Got = false, Secret = false;
+};
+struct IgniteMoment
+{
+	int Kind = 0; // 0 Payback, 1 Scalp, 2 Ouch
+	std::string Name, HandId;
+	int64_t Sparks = 0;
+	double Equity = 0.0, World = 0.0;
+	bool Held = false;
+};
+struct IgniteOpened
+{
+	std::string BoxId;
+	int Tier = 0;
+	std::string Prize;
+	int64_t Sparks = 0;
+	std::string TicketId;
+	int LookSlot = -1, Look = -1;
+	bool Sticker = false, Held = false;
+};
+struct IgniteEntry
+{
+	std::string EventId;
+	int64_t Base = 0, Sparks = 0;
+	double Flame = 1.0, Theme = 1.0;
+	bool Banked = false;
+	std::array<int, 3> DareTicks{};
+	int RingLit = 0;
+	int LevelFrom = 0, LevelTo = 0, TierFrom = 0, TierTo = 0;
+};
+/** A Cracker's Odds (F5, W5; G2_AUDIT M2): core's site::play::CrackerOddsView in the pages' shape. Part 0 rows are the
+ * Sparks (exactly one, their chances summing to 1), a Part 1 row the ticket on top, Part 2 rows the look pieces on top. */
+struct IgniteCrackerRow
+{
+	int Part = 0;
+	std::string Label;
+	int64_t Sparks = 0;
+	std::string TicketId;
+	Chips FaceCents = 0;
+	int LookSlot = -1, Look = -1;
+	double P = 0.0;
+};
+struct IgniteCrackerOdds
+{
+	int Tier = 0;
+	std::string Name, From;
+	std::vector<IgniteCrackerRow> Rows;
+	double TicketP = 0.0, LookP = 0.0;
+	int64_t DuplicateSparks = 0;
+	double EvSparks = 0.0;
+};
+/** Core's view of a Cracker's Odds in the pages' shape (the adapter's copy; the drawer reads core's pure CrackerOdds when a
+ * stand-in left them empty). */
+IgniteCrackerOdds IgniteCrackerOddsFrom(const site::play::CrackerOddsView& V);
+struct IgniteHold
+{
+	std::string What;
+	Chips Cents = 0, Covered = 0, RakeLeft = 0;
+	int Entries = 0; // about how many of the site's cheapest paid entries the rake left is (core's)
+	int Day = 0;
+	int64_t Sparks = 0; // the "Sparks owed" line's Sparks
+	bool SparksOwed = false, Reset = false;
+};
+struct IgniteLoops
+{
+	bool Live = false;    // G2's View is here; false: every surface keeps its G1 state
+	bool Started = false; // the book exists
+	bool FuseOn = false;  // FUSE is lit; false: the centre button reads FLIP
+	bool OnIce = false;   // a clause strikes Ignite
+	int Band = 0;
+	int64_t Sparks = 0;
+	// The Flame
+	int Streak = 0, Best = 0, Matches = 0;
+	double Mult = 1.0;
+	bool LitToday = false;
+	bool Nudge = false; // after 6 PM with no flame day yet (core's)
+	std::array<int, 7> Week{};
+	// Dares
+	std::array<IgniteDare, 3> Dares{};
+	double DaresReset = 0.0;
+	int WeekClears = 0;
+	int ClearCracker = 0;
+	bool ClearPaid = false;
+	// The Spark Wheel
+	int EntriesToday = 0, RingsLit = 0;
+	bool SpinReady = false, Spun = false, SpunHeld = false;
+	int SpunRing = 0, SpunWedge = -1, MoreForNext = 1;
+	std::string NearRing; // core's "1 more entry lights SHINE" ("" at DAZZLE; IgniteNearRing words it when core hasn't)
+	std::array<std::vector<IgniteWedge>, 3> Rings;
+	// Crackers
+	std::vector<site::play::Box> Crackers;
+	std::vector<IgniteOpened> Opened;
+	std::array<IgniteCrackerOdds, 3> CrackerOdds{}; // Paper, Neon, Gold: core's Odds (W5, G2_AUDIT M2)
+	// The Wristband and the Level
+	int Tier = 0;
+	int64_t BandSparks = 0;
+	std::string Theme;
+	int DaysLeft = 0;
+	std::array<IgniteTier, 30> Tiers{};
+	int Level = 1;
+	std::string Title = "Rookie";
+	int64_t LevelSparks = 0, LevelFrom = 0, LevelTo = 100;
+	// The Prize Counter, the Locker, the Sticker Book
+	std::vector<IgnitePrize> Prizes;
+	site::play::Looks Worn;
+	std::vector<IgniteLook> Locker;
+	std::vector<IgniteStickerRow> Book;
+	// FUSE
+	site::play::FuseRec Fuse;
+	std::array<std::string, 3> FuseTicketIds;
+	// People
+	std::vector<std::string> Headliners;
+	std::vector<site::play::Beef> Beefs;
+	std::string BeefName;
+	int ScalpLife = 0;
+	bool Guest = false;
+	bool CrowdKnows = false; // a first Ignite cash of $100 or more: shouts may use the handle
+	std::vector<IgniteMoment> Moments;
+	// The night
+	int ThemeNight = 0;
+	std::string ThemeName, ThemeTwist;
+	IgniteEntry Last;
+	// The Governor on Ignite (the Fine print)
+	Chips Rake30 = 0, Promo30 = 0;
+	double Share = 0.0, Ceiling = 0.5;
+	bool Welcome = false;
+	Chips WeekFace = 0, WeekCap = 0;
+	int64_t MondayBank = 0;
+	std::vector<IgniteHold> Holds;
+	std::vector<std::pair<std::string, Chips>> Months;
+	std::string GovLine; // core's "Ignite gave back $3.65 of your $8.72 rake in the last 30 days (42%)."
+};
 
 /** The client's own small choices, by laptop (RiverLine.h is frozen: the SitesStates pattern). */
 struct IgniteUi
@@ -266,6 +522,54 @@ struct IgniteUi
 	int ChatLines = 0;
 	int ChatBubbles = 0;
 	long long ChatFrames = 0;
+
+	// ---- G2 (SPEC §2.4, §2.6): the loops' side state. Every outcome here is core's; these are only stages and choices.
+	/** The loops this frame (IgniteLoopsOf reads the View once a frame), and a test's stand-in (IgniteFakeLoops). */
+	IgniteLoops Loops;
+	double LoopsAt = -1.0;
+	bool Faked = false;
+	IgniteLoops Fake;
+	/** REWARDS' sub-page (0 Today, 1 Wristband, 2 Prize Counter, 3 Welcome bonus) and the Prize Counter's tab. */
+	int PrizeTab = 0;
+	/** The Prize Counter's confirm card (an item, -1 none): a BUY opens it, so a one-frame click never spends Sparks. */
+	int BuyItem = -1;
+	double BuyAt = -100.0;
+	/** The overlays: the wheel's spin, a cracker's open (OPEN ALL chains them), the level-up banner, the drawers. */
+	bool Spin = false;
+	double SpinAt = -100.0;
+	int SpinRing = 0, SpinWedge = -1;
+	bool Crack = false;
+	std::string CrackId;     // the cracker up ("*": OPEN ALL); pulled when CrackAt is stamped
+	double CrackAt = -100.0; // when core opened it (the tug and the bang run from here); < 0: waiting on PULL
+	size_t CrackShown = 0; // OPEN ALL: which of the opened is up
+	std::vector<IgniteOpened> Cracked;
+	int LevelSeen = 0;
+	double LevelAt = -100.0;
+	int LevelShown = 0;
+	int64_t SparksSeen = -1;
+	int64_t SparksDelta = 0;
+	double SparksAt = -100.0;
+	int Drawer = 0; // 0 none, 1 the wheel's odds, 2 FUSE's odds, 3 the Fine print, 4 the Crackers' odds
+	double DrawerAt = -100.0;
+	/** The FUSE reveal (§2.4 D): the FUSE's event id, the table it sat at, when it started; RevealSkip: when the odds drawer
+	 * opened over it closed (-1 none), the table opening itself a second after. */
+	std::string RevealEvent;
+	int RevealTable = -1;
+	double RevealAt = -100.0;
+	double RevealSkip = -1.0;
+	std::set<std::string> RevealsDone;
+	/** The FUSE table's blind clock: the level it last slammed "BLINDS UP!" for, and when. */
+	std::string BlindsTable;
+	int BlindsLevel = 0;
+	double BlindsAt = -100.0;
+	/** A claim core refused ("" none): its reason under the button for a few seconds. */
+	std::string Note;
+	std::string NoteId;
+	double NoteAt = -100.0;
+	/** The Player Card's Locker slot shown. */
+	int LockerSlot = 0;
+	/** BOARDS: the Fuse Wall tab is up (G2). */
+	bool BoardWall = false;
 };
 IgniteUi& IgniteOf(const RiverLine* RL);
 /** Drops a laptop's Ignite state (~RiverLine: ui-tablestyle's patch adds the call). */
@@ -276,8 +580,92 @@ void IgniteOpenSheet(RiverLine& RL, const std::string& EventId, double Now);
 bool IgniteSheetOpen(const RiverLine* RL);
 /** Plays an Ignite cue once for Key (a stage crossed), never while previewing. */
 void IgniteCue(Session& S, IgniteUi& U, const std::string& Key, SoundId Id, float Vol, bool Preview);
-/** REWARDS (Page::Promotions; RiverLineIgnitePlay.cpp). G1: the Welcome bonus sub-page with the Fuel Gauge (SPEC §2.6 F11). */
+/** REWARDS (Page::Promotions; RiverLineIgnitePlay.cpp): Today (Dares, the Flame, the Spark Wheel, Crackers, the Wristband's
+ * next tiers, the theme nights), the Wristband, the Prize Counter and the Welcome bonus with its Fuel Gauge (SPEC §2.4 H). */
 void IgniteRewards(RiverLine& RL, IgniteUi& U, const igniteart::IgniteTones& K, double Now, bool Preview);
+
+// ------------------------------------------------------------------ G2: the loops (RiverLineIgnitePlay.cpp)
+/** The loops this frame: core's View through the one adapter (once a frame), or a test's stand-in. */
+const IgniteLoops& IgniteLoopsOf(RiverLine& RL, double Now);
+/** A test's stand-in for the View (until core-siteplay's lands, and for states a fresh career can't reach); null drops it. */
+void IgniteFakeLoops(const RiverLine* RL, const IgniteLoops* L);
+/** Copies core's View into the pages' shape (the adapter; Live stays false while the View is G1's empty struct). */
+IgniteLoops IgniteLoopsFrom(const Session& S, double World);
+/** The base Sparks an entry earns at this buy-in on Ignite (10 a cent of its rake, SPEC §2.6 F1): the cabinets' "+610". */
+int64_t IgniteBaseSparks(Chips BuyInCents);
+/** A Wristband tier that waits on CLAIM: reached, not claimed, and with something on it (core refuses a claim on a tier
+ * with nothing, Kind 0, and never marks one claimed, so such a tier is simply done once reached). */
+inline bool IgniteTierClaimable(const IgniteTier& T)
+{
+	return T.Reached && !T.Claimed && T.Kind != 0;
+}
+/** A multiplier as the glyph rule draws it: a vector cross, then the number in BlackItalic ("x25"); returns the width. */
+float IgniteTimes(Canvas& C, float X, float Y, float Size, int M, const Color& Col, Align A);
+/** The same with a figure as written ("1.20", "1.5"). */
+float IgniteTimesText(Canvas& C, float X, float Y, float Size, const std::string& N, const Color& Col, Align A);
+/**
+ * The glyph rule for copy that carries a multiplier (SPEC §1.10, G2_AUDIT L9): strings write "x25", and a drawn label draws
+ * the vector cross in its place. IgniteHasTimes says whether S has one (an 'x' starting a word, then a digit); IgniteLineTimes
+ * draws a line with each one crossed (a line without draws exactly as C.Text; one past St.MaxWidth falls back to it), and
+ * IgniteParagraphTimes is NetParagraph's wrap with each line drawn so. Both return what their plain forms return.
+ */
+bool IgniteHasTimes(const std::string& S);
+float IgniteLineTimes(Canvas& C, const std::string& S, float X, float Y, const TextStyle& St);
+float IgniteParagraphTimes(Canvas& C, const std::string& Text, float X, float Y, float MaxW, float Size, int Weight, const Color& Col, float LineH, int MaxLines = 99);
+/** FUSE (Page::Fuse, SPEC §2.4 C): the three cabinets, LIGHT IT through the two presses, the last ten, the Fuse Wall. */
+void IgniteFusePage(RiverLine& RL, IgniteUi& U, const igniteart::IgniteTones& K, double Now, bool Preview);
+/** The Fuse Wall (your FUSEs of x10 and up) with your FUSE numbers: the FUSE page's right card, BOARDS' Fuse Wall tab. */
+void IgniteFuseWallCard(RiverLine& RL, const IgniteLoops& L, const igniteart::IgniteTones& K, const Rect& R);
+/** Which overlay is up (one at a time): 0 none, 1 the FUSE reveal, 2 the wheel's spin, 3 a cracker, 4 the Prize Counter's
+ * confirm, 5 a drawer (odds, the Fine print). */
+int IgniteOverlay(const RiverLine& RL, const IgniteUi& U, double Now);
+/** The overlay's rect (its SitesBlockUnder: modal ones hold the whole client). */
+Rect IgniteOverlayRect(int Overlay, const IgniteUi& U);
+/** Draws the overlay that's up, after the page; a scrim click (B.Scrim) closes or skips it. */
+void IgniteOverlayDraw(RiverLine& RL, IgniteUi& U, const igniteart::IgniteTones& K, double Now, bool Preview, bool Scrim);
+/** The level-up banner (SPEC §2.4 H: drops from the marquee, blocks its rect, dismisses itself at 3.5 s). */
+constexpr Rect IgniteBannerRect{500.0f, 90.0f, 600.0f, 150.0f};
+bool IgniteBannerUp(const IgniteUi& U, double Now);
+void IgniteBanner(RiverLine& RL, IgniteUi& U, const igniteart::IgniteTones& K, double Now, bool Preview);
+/** Starts the wheel's spin overlay on core's draw (after Session::SpinWheel said ""). */
+void IgniteStartSpin(IgniteUi& U, const IgniteLoops& L, double Now);
+/** Starts a cracker's open overlay on what core opened (after Session::OpenCracker said ""). */
+void IgniteStartCrack(IgniteUi& U, const IgniteLoops& L, double Now);
+/** Starts the FUSE reveal for the FUSE at table Table (after Session::LightFuse said ""). */
+void IgniteStartReveal(IgniteUi& U, const Session& S, int Table, double Now);
+/** The reveal's stages for a multiplier (§2.4 D): when the fuse is out, the reel lands, the boom ends (seconds). */
+struct IgniteRevealTimes
+{
+	double FuseEnd = 0.6, ReelEnd = 1.2, BoomEnd = 1.5;
+};
+IgniteRevealTimes IgniteRevealTimesFor(int M);
+/** How rare multiplier M is at a tier (the reveal's line under BIG FUSE, W5), from its own row of core's table: "1 in 250 at
+ * $1.10" where the chance is a whole one-in to within 0.5% ("1 in 1,667 at $3.30" for 0.06%), else "6.5% at $1.10"; "" for a
+ * multiplier not on the tier's table. */
+std::string IgniteRevealOdds(int M, int Tier);
+/** The reel's strip (W5): the symbol at position I (it lands at IgniteReelFinal), the six before the result the rungs below it. */
+int IgniteReelFinal(int M, int Tier);
+int IgniteReelAt(int M, int Tier, int I);
+/** The 3-max FUSE table's prize marquee and fuse clock, over the shared table (RiverLine::IgniteTableLayer calls it). */
+void IgniteFuseTable(RiverLine& RL, IgniteUi& U, const igniteart::IgniteTones& K, double Now, bool Preview);
+/** The Player Card's G2 tabs: the Locker and the Sticker Book (RiverLineIgnitePlay.cpp). */
+void IgniteLocker(RiverLine& RL, IgniteUi& U, const igniteart::IgniteTones& K, const Rect& Box, double Now, bool Preview);
+void IgniteStickerBook(RiverLine& RL, IgniteUi& U, const igniteart::IgniteTones& K, const Rect& Box, double Now, bool Preview);
+/** A claim core refused: its reason under the button (Id) for 3 s. */
+void IgniteNoteRefusal(IgniteUi& U, const std::string& Id, const std::string& Why, double Now);
+/** "1 more entry lights SHINE" (always "1 more" or "2 more"); "" at DAZZLE. Core's words when it has them. */
+std::string IgniteNearRing(const IgniteLoops& L);
+/** The same in the pages' own short words (the dock's strip and any line core's words don't fit). */
+std::string IgniteNearRingShort(const IgniteLoops& L);
+/** The marquee's Flame pill and Sparks pill, and the dock's Wristband and wheel strips (RiverLineIgnitePlay.cpp). */
+void IgniteSparksPill(RiverLine& RL, IgniteUi& U, const IgniteLoops& L, const igniteart::IgniteTones& K, double Now, bool Preview, double World);
+void IgniteFlamePill(RiverLine& RL, IgniteUi& U, const IgniteLoops& L, const igniteart::IgniteTones& K, double Now, bool Preview, double World);
+void IgniteDockBand(RiverLine& RL, IgniteUi& U, const IgniteLoops& L, const igniteart::IgniteTones& K, double Now, bool Preview);
+void IgniteDockWheel(RiverLine& RL, IgniteUi& U, const IgniteLoops& L, const igniteart::IgniteTones& K, double Now, bool Preview);
+/** The Today strip at G2 (the Flame, three Dare chips, the near-goal line; SPEC §2.4 A). */
+void IgniteTodayLoops(RiverLine& RL, IgniteUi& U, const IgniteLoops& L, const igniteart::IgniteTones& K, double Now, bool Preview, double World);
+/** The near-goal line (the most useful one this minute): "1 more entry lights SHINE", "380 Sparks to Level 8", ... */
+std::string IgniteNearGoal(const IgniteLoops& L, double World);
 /** The welcome bonus as the Fuel Gauge reads it (core-sites-look's site::show::Welcome, the account's own figures behind it). */
 struct IgniteWelcome
 {
@@ -300,6 +688,13 @@ int IgniteShoutAt(uint64_t WorldSeed, double World);
 /** A pot won at the table (SPEC §2.5): six candy chips fountain from the pot to the winner, then "+4,200" floats for 1.4 s. */
 constexpr int IgniteFountainChips = 6;
 constexpr double IgniteFloatFor = 1.4;
+/** The chips each fountain flies while Flying fountains are in the air at once (G2_AUDIT M5: a split pot's fountains fly over
+ * the showdown's glows, the table's busiest frames): 6 for one, 5 each for two, 4 each for three or more; only the first
+ * of them trails sparklets. */
+constexpr int IgniteFountainFor(int Flying)
+{
+	return Flying <= 1 ? IgniteFountainChips : Flying == 2 ? 5 : 4;
+}
 /** Where fountain chip K is Since seconds into a pot's flight of Dur: how far along (0 the pot, 1 the winner), how high
  * over the straight line (its parabola, then one bounce where it lands), its sideways fan and its alpha; not shown before
  * its launch or once it has settled into the stack. Seed (the pot's) keys each chip's arc. */
@@ -370,17 +765,22 @@ struct Access
 	using ListRow = RiverLine::ListRow;
 	using FeatureSlide = RiverLine::FeatureSlide;
 	static Session& S(RiverLine& RL) { return RL.S; }
+	static const Session& SessionOf(const RiverLine& RL) { return RL.S; }
 	static Canvas& C(RiverLine& RL) { return *RL.C; }
 	static double World(const RiverLine& RL) { return RL.World; }
 	static double Dt(const RiverLine& RL) { return RL.Dt; }
 	static double PageAt(const RiverLine& RL) { return RL.PageAt; }
 	static bool Previewing(const RiverLine& RL) { return RL.Previewing; }
+	/** The stream preview's flag, for rivals_ui's stills (the client draws a settled still and asks core for nothing). */
+	static void SetPreviewing(RiverLine& RL, bool On) { RL.Previewing = On; }
 	static Page Shown(const RiverLine& RL) { return RL.PageShown; }
 	/** The page a frame settles on (one Ignite hasn't got goes to PLAY): no OpenPage side effects. */
 	static void SetPage(RiverLine& RL, Page P) { RL.PageShown = P; }
 	static const std::string& EventId(const RiverLine& RL) { return RL.EventId; }
 	static double EventAt(const RiverLine& RL) { return RL.EventAt; }
 	static void OpenPage(RiverLine& RL, Page P, double Now) { RL.OpenPage(P, Now); }
+	/** The lobby's site (as RunItTwice's results set it): Ignite's pages stay Ignite's once the results close. */
+	static void ShowSite(RiverLine& RL, net::SiteId Site) { RL.SiteShown = Site; }
 	static void SelectEvent(RiverLine& RL, const std::string& Id) { RL.SelectEvent(Id); }
 	/** An empty selection taken up by "always select something" (NetLobby's rule), without SelectEvent's scroll request. */
 	static void TakeEventId(RiverLine& RL, const std::string& Id) { RL.EventId = Id; }

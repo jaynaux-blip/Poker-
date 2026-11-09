@@ -1165,6 +1165,159 @@ void IgniteEventMark(Canvas& C, const net::EventTemplate& T, float Cx, float Cy,
 	}
 	eventart::DrawGlyph(C, G, Cx, Cy, R * 1.22f, IgSun);
 }
+
+// ------------------------------------------------------------------ G2's art (SPEC §2.4 H, §2.6)
+
+const char* IgniteRingName(int Ring)
+{
+	return Ring >= 3 ? "DAZZLE" : Ring == 2 ? "SHINE" : "GLOW";
+}
+
+void IgniteFlameLook(Canvas& C, float X, float BaseY, float S, int Streak, bool Ice)
+{
+	// The streak's band sets the size (small 1-2, medium 3-6, big 7-13, roaring 14-29) and the colours; from 30 the flame is
+	// blue, on ice frosted (SPEC §2.6 F2). No streak: a cold wick's ember (a grey flame, small).
+	const float Band = Streak <= 0 ? 0.62f : Streak <= 2 ? 0.74f : Streak <= 6 ? 0.88f : Streak <= 13 ? 1.0f : 1.12f;
+	const float Sz = S * Band;
+	if (Ice)
+	{
+		IgniteFlame(C, X, BaseY, Sz, Hex(0x9fc9e6), Hex(0xcfe8f6), Hex(0xf2fbff));
+		return;
+	}
+	if (Streak <= 0)
+	{
+		IgniteFlame(C, X, BaseY, Sz, Hex(0x6a5a7a), Hex(0x8a7a9a), Hex(0xb3a6c2));
+		return;
+	}
+	if (Streak >= 30)
+	{
+		IgniteFlame(C, X, BaseY, Sz, Hex(0x3f7bff), Hex(0x6fb0ff), Hex(0xd8f0ff));
+		return;
+	}
+	if (Streak >= 14)
+	{
+		C.GlowRoundRect({X - Sz * 0.7f, BaseY - Sz * 1.4f, Sz * 1.4f, Sz * 1.5f}, Sz * 0.7f, Hex(IgTang, 0.28f), Sz * 0.4f);
+	}
+	IgniteFlame(C, X, BaseY, Sz, Hex(IgCoral), Hex(IgTang), Hex(IgSun));
+}
+
+void IgniteWheelFace(Canvas& C, float Cx, float Cy, float R, int Wedges, int Lit, float Angle, const IgniteTones& K, float Glow)
+{
+	const int N = std::max(4, Wedges);
+	// The wedges, alternating grape and violet, each a fan of a few points (a wedge's arc at 6 steps).
+	for (int I = 0; I < N; ++I)
+	{
+		const float A0 = Angle + static_cast<float>(I) * 2.0f * Pi / static_cast<float>(N);
+		const float A1 = A0 + 2.0f * Pi / static_cast<float>(N);
+		std::vector<Vec2> P{{Cx, Cy}};
+		for (int S = 0; S <= 6; ++S)
+		{
+			const float A = A0 + (A1 - A0) * static_cast<float>(S) / 6.0f;
+			P.push_back({Cx + R * std::cos(A), Cy + R * std::sin(A)});
+		}
+		C.FillPolygon(P, Hex(I % 2 == 0 ? IgGrape : 0x4a2a78));
+		C.StrokePolyline({{Cx, Cy}, {Cx + R * std::cos(A0), Cy + R * std::sin(A0)}}, false, Hex(IgNight, 0.8f), 1.5f);
+	}
+	// The three rings: GLOW the rim, SHINE inside it, DAZZLE innermost; a lit ring glows lime, sunflower, pink.
+	const uint32_t Lights[3] = {IgLime, IgSun, IgPink};
+	const float Radii[3] = {R + 6.0f, R * 0.7f, R * 0.4f};
+	for (int Ring = 0; Ring < 3; ++Ring)
+	{
+		const bool On = Ring < Lit;
+		if (On && Glow > 0.0f)
+		{
+			C.StrokeArc(Cx, Cy, Radii[Ring], 0.0f, 2.0f * Pi, Hex(Lights[Ring], 0.18f * Glow), 14.0f);
+		}
+		C.StrokeArc(Cx, Cy, Radii[Ring], 0.0f, 2.0f * Pi, On ? Hex(Lights[Ring]) : Hex(0x6a5590, 0.7f), On ? 4.0f : 2.0f);
+	}
+	// The bulbs on the rim (still), the hub and its spark.
+	for (int I = 0; I < 24; ++I)
+	{
+		const float A = static_cast<float>(I) * Pi / 12.0f;
+		C.FillCircle(Cx + (R + 6.0f) * std::cos(A), Cy + (R + 6.0f) * std::sin(A), 2.6f, Lit > 0 ? Hex(I % 2 == 0 ? IgSun : IgCream) : Hex(0x8a78b5, 0.6f));
+	}
+	C.FillCircle(Cx, Cy, R * 0.16f, Hex(0x8a78b5));
+	C.FillCircle(Cx, Cy, R * 0.14f, Hex(0x2a1a46));
+	IgniteSpark(C, Cx, Cy, R * 0.1f, Hex(Lit > 0 ? IgLime : 0x8a78b5));
+	(void)K;
+}
+
+void IgniteCracker(Canvas& C, float Cx, float Cy, float W, int Tier, float Tug)
+{
+	// A party cracker: a body with a band and two twisted ends (bow ties), the ends pulled apart by Tug. Paper is cream and
+	// coral, Neon pink and lime, Gold sunflower.
+	const uint32_t Body[3] = {0xf2e6d8, IgPink, IgSun};
+	const uint32_t Band[3] = {IgCoral, IgLime, 0xfff4c2};
+	const uint32_t Ends[3] = {0xe0cfbd, 0xd8306f, 0xd9a52c};
+	const int T = std::min(2, std::max(0, Tier));
+	const float H = W * 0.32f;
+	const float Bw = W * 0.5f;
+	const float Pull = Tug * W * 0.12f;
+	for (int Side = -1; Side <= 1; Side += 2)
+	{
+		const float Inner = Cx + static_cast<float>(Side) * (Bw / 2.0f + Pull);
+		const float Neck = Inner + static_cast<float>(Side) * W * 0.06f;
+		const float Outer = Inner + static_cast<float>(Side) * W * 0.24f;
+		C.FillPolygon({{Inner, Cy - H / 2.0f}, {Neck, Cy - H * 0.16f}, {Neck, Cy + H * 0.16f}, {Inner, Cy + H / 2.0f}}, Hex(Ends[T]));
+		C.FillPolygon({{Neck, Cy - H * 0.16f}, {Outer, Cy - H * 0.62f}, {Outer, Cy + H * 0.62f}, {Neck, Cy + H * 0.16f}}, Hex(Body[T]));
+		C.FillRect({std::min(Outer, Outer - static_cast<float>(Side) * 4.0f), Cy - H * 0.62f, 4.0f, H * 1.24f}, Hex(Band[T]));
+	}
+	const Rect Core{Cx - Bw / 2.0f - Pull, Cy - H / 2.0f, Bw + 2.0f * Pull, H};
+	C.FillRoundRect(Core, H * 0.3f, Paint::Linear({0.0f, Core.Y}, {0.0f, Core.Y + Core.H}, Hex(Body[T]), Mix(Hex(Body[T]), Hex(IgNight), 0.25f)));
+	C.FillRect({Cx - Bw * 0.12f, Core.Y, Bw * 0.24f, H}, Hex(Band[T]));
+	C.FillRect({Core.X + 6.0f, Core.Y + 4.0f, Core.W - 12.0f, 3.0f}, Rgba(255, 255, 255, 0.35f));
+	if (T >= 1)
+	{
+		IgniteSpark(C, Cx, Cy, H * 0.32f, Hex(T == 2 ? IgCream : IgNight));
+	}
+}
+
+void IgniteMatch(Canvas& C, float X, float Y, float H, bool Lit, bool Spent)
+{
+	// A matchstick standing: the stick, its red head, a flame when lit; burnt down to a black stub when spent.
+	const float Stick = Spent ? H * 0.45f : H;
+	C.FillRoundRect({X - 2.0f, Y - Stick, 4.0f, Stick}, 2.0f, Hex(Spent ? 0x4a3a3a : 0xe0c08a));
+	C.FillCircle(X, Y - Stick, 4.2f, Hex(Spent ? 0x241a1a : IgRed));
+	if (Lit && !Spent)
+	{
+		IgniteFlame(C, X, Y - Stick - 2.0f, 9.0f, Hex(IgCoral), Hex(IgTang), Hex(IgSun));
+	}
+}
+
+void IgniteRope(Canvas& C, float X0, float X1, float Y, float Amp, double T, uint32_t Seed)
+{
+	const float Tt = static_cast<float>(Clamp01(T));
+	std::vector<Vec2> Pts;
+	const int N = std::max(8, static_cast<int>((X1 - X0) / 8.0f));
+	const float Phase = static_cast<float>(Seed % 7u) * 0.4f;
+	for (int I = 0; I <= N; ++I)
+	{
+		const float U = static_cast<float>(I) / static_cast<float>(N);
+		Pts.push_back({X0 + (X1 - X0) * U, Y + Amp * std::sin(U * 12.0f + Phase)});
+	}
+	C.StrokePolyline(Pts, false, Hex(IgViolet, 0.55f), 4.0f, true);
+	const size_t Head = static_cast<size_t>(std::lround(Tt * static_cast<float>(N)));
+	if (Head > 0)
+	{
+		std::vector<Vec2> Done(Pts.begin(), Pts.begin() + static_cast<std::ptrdiff_t>(std::min(Head + 1, Pts.size())));
+		C.StrokePolyline(Done, false, Hex(IgLime), 4.0f, true);
+		const Vec2 P = Done.back();
+		IgniteSpark(C, P.X, P.Y, 7.0f, Hex(IgLime));
+	}
+}
+
+void IgniteLevelBadge(Canvas& C, float Cx, float Cy, float R, int Level)
+{
+	IgniteHexagon(C, Cx, Cy, R + 1.5f, Hex(IgNight));
+	IgniteHexagon(C, Cx, Cy, R, Paint::Linear({Cx, Cy - R}, {Cx, Cy + R}, Hex(0xa98bff), Hex(IgViolet)));
+	const std::string N = std::to_string(std::max(1, Level));
+	C.Text(N, Cx, Cy + R * 0.02f, IgniteTx(R * (N.size() > 1 ? 0.95f : 1.15f), 900, Hex(IgCream), Align::Center, Baseline::Middle));
+}
+
+uint32_t IgniteFuseTint(int M, const IgniteTones& K)
+{
+	return M >= 100 ? IgSun : M >= 25 ? K.Coral : M >= 5 ? K.Sky : IgCream;
+}
 } // namespace igniteart
 } // namespace ui
 } // namespace ss

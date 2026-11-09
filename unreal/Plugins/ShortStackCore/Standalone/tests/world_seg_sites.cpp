@@ -10,14 +10,17 @@
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/SitePlay.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/World.h"
+#include "ShortStack/Game/WorldLeague.h"
 #include "ShortStack/Rng.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <set>
 #include <sstream>
@@ -1555,6 +1558,1354 @@ void Copy(world::World& W)
 	W.Headline(Samples[1].first, Title, Body, Tag);
 	Check(Week && Body.find("Launch week") == std::string::npos, "sites: only a launch on its own date promises its launch week (" + Body + ")");
 }
+
+// ------------------------------------------------------------------ Update 3 G2: the League's world side (core-world)
+// SPEC §3.6 R2 and §7.7's living_world row: the group's world\tleague line written and read back exactly, within 2.5 KB; a
+// member's paid RunItTwice result recorded as a daily best through site::play::LeagueScore, a non-member's not; the
+// division's floor, the first 3 entries a day (or the group's pace), the best 8, the days and the form; a result after the
+// 1st's 6 AM turn left out of last month's book; nothing else in the world moving with a group; a world without the line
+// loading as today; a world built from the text alone (a card room's) recording the group too; the 30 days' budget with a
+// group (S-6'); and what core-siteplay reads from the world (monthly volumes, the pace, Team RunItTwice's six, Ignite's
+// Headliners). The points are whatever LeagueScore says, so these hold before core-siteplay's body lands (the stub scores
+// nothing, and says so) and after.
+
+/** RunItTwice's members at a tier (playing), the busiest this season first, then by id. */
+std::vector<int> LeaguePeople(const world::World& W, int Tier)
+{
+	std::vector<std::pair<int, int>> Ranked;
+	for (const world::Npc& N : W.People())
+	{
+		if (N.Playing() && (N.Sites & Bit(net::SiteId::RunItTwice)) != 0 && N.Tier == Tier)
+		{
+			const world::SiteRecord* R = W.SiteRecordOf(net::SiteId::RunItTwice, N.Id);
+			Ranked.push_back({-(R ? R->Events : 0), N.Id});
+		}
+	}
+	std::sort(Ranked.begin(), Ranked.end());
+	std::vector<int> Out;
+	for (const std::pair<int, int>& It : Ranked)
+	{
+		Out.push_back(It.second);
+	}
+	return Out;
+}
+
+/** The world text's League lines (Keep) or everything else, a line each. */
+std::string LeagueLines(const std::string& T, bool Keep)
+{
+	std::string Out;
+	for (const std::string& L : Lines(T))
+	{
+		if ((L.compare(0, 13, "world\tleague\t") == 0) == Keep)
+		{
+			Out += L + "\n";
+		}
+	}
+	return Out;
+}
+
+/** Who the world has registered for RunItTwice's events starting between two minutes (the days it has planned). */
+std::set<int> LeagueBusy(const world::World& W, double From, double To)
+{
+	std::set<int> Out;
+	for (const net::EventInstance& E : net::Site(net::SiteId::RunItTwice).Window(From, To))
+	{
+		for (const int Id : W.RegisteredNow(E.Id))
+		{
+			Out.insert(Id);
+		}
+	}
+	return Out;
+}
+
+/** The first instance of a RunItTwice template starting in [From, To). */
+bool LeagueEvent(const std::string& Template, double From, double To, net::EventInstance& Out)
+{
+	const net::Network& Net = net::Site(net::SiteId::RunItTwice);
+	for (const net::EventInstance& E : Net.Window(From, To))
+	{
+		if (Net.TemplateOf(E).Id == Template && E.Start >= From)
+		{
+			Out = E;
+			return true;
+		}
+	}
+	return false;
+}
+
+/** A day's slot in a member's best 8 (0: none). */
+int LeagueHeld(const world::LeagueMember& M, int Date)
+{
+	for (const std::pair<int8_t, int16_t>& Slot : M.Best)
+	{
+		if (Slot.second > 0 && Slot.first == Date)
+		{
+			return Slot.second;
+		}
+	}
+	return 0;
+}
+
+/** §7.4's bounds on a book: at most 19, each once; days and form in range; the best 8 sorted, the empty slots last. */
+bool LeagueSane(const world::LeagueBook& B, std::string& Why)
+{
+	std::set<int> Seen;
+	if (B.Members.size() > 19)
+	{
+		Why = "more than 19";
+		return false;
+	}
+	for (const world::LeagueMember& M : B.Members)
+	{
+		if (M.Npc < 0 || !Seen.insert(M.Npc).second || M.Days < 0 || M.Days > 31 || M.TodayCount < 0 || M.TodayCount > 3 || M.Form > 0x3ff)
+		{
+			Why = "member " + std::to_string(M.Npc) + "'s counts";
+			return false;
+		}
+		bool Empty = false;
+		for (size_t K = 0; K < M.Best.size(); ++K)
+		{
+			const std::pair<int8_t, int16_t>& S = M.Best[K];
+			const bool Held = S.second > 0;
+			if ((Empty && Held) || (Held && (S.first < 1 || S.first > 31)) || (!Held && (S.first != 0 || S.second != 0)) ||
+				(K > 0 && Held && (M.Best[K - 1].second < S.second || (M.Best[K - 1].second == S.second && M.Best[K - 1].first > S.first))))
+			{
+				Why = "member " + std::to_string(M.Npc) + "'s best days";
+				return false;
+			}
+			Empty = Empty || !Held;
+		}
+	}
+	return true;
+}
+
+/** The rules with no world: the 6 AM day and month, the packed division and pace, a member's points and form. */
+void LeagueRules()
+{
+	const int Dec1 = world::DayOn(2026, 12, 1);
+	Check(world::LeagueDay(Dec1 * Day + 359.9) == Dec1 - 1 && world::LeagueDay(Dec1 * Day + 360.0) == Dec1 && world::LeagueDay(Dec1 * Day + 1439.0) == Dec1,
+		"league: the League's day turns at 6 AM");
+	Check(world::LeagueMonth(Dec1 * Day + 359.0) == world::MonthKeyOf(Dec1 - 1) && world::LeagueMonth(Dec1 * Day + 360.0) == world::MonthKeyOf(Dec1),
+		"league: the League's month turns on the 1st at 6 AM");
+	bool Packs = world::LeagueDivision(world::LeaguePack(9, 7)) == 4 && world::LeagueFirst(world::LeaguePack(9, 7)) == 3 && world::LeaguePack(-2, -1) == 0;
+	for (int D = 0; D <= 4; ++D)
+	{
+		for (int P = 0; P <= 3; ++P)
+		{
+			const int Packed = world::LeaguePack(D, P);
+			Packs = Packs && Packed >= 0 && Packed <= 127 && world::LeagueDivision(Packed) == D && world::LeagueFirst(Packed) == (P > 0 ? P : 3);
+		}
+	}
+	Check(Packs, "league: the division and the group's pace pack into SetLeagueRoster's Div and come back out (pace 0: the first 3)");
+	world::LeagueMember M;
+	M.Npc = 3;
+	M.Days = 3;
+	M.Form = static_cast<uint16_t>((3 << 4) | (2 << 2) | 1);
+	M.Best[0] = {static_cast<int8_t>(5), static_cast<int16_t>(1234)};
+	M.Best[1] = {static_cast<int8_t>(3), static_cast<int16_t>(66)};
+	const std::vector<int> Form = world::LeagueForm(M);
+	Check(std::fabs(world::LeaguePoints(M) - 130.0) < 1e-9 && Form == std::vector<int>({1, 2, 3}),
+		"league: a member's points are their best days' tenths summed, their form newest first");
+}
+
+/**
+ * A group of 19 Steel members in December, recorded beside the same world with no group: one member wins five events on
+ * Dec 8 (the first under Steel's $11 floor) and The Sweat on Deadline Day, someone outside the group is second; then the
+ * line, the month's turn, the roster's own rules, a card room's world from the text, and January's group at a pace of 1.
+ * Base is a fresh world (Seed) that this plays to Dec 7 at noon and leaves there for LeagueQueries; DecemberText is it at
+ * Dec 1, 6 AM (LeagueBudget's start).
+ */
+void LeagueScoring(world::World& Base, uint32_t Seed, std::string& DecemberText)
+{
+	namespace play = ss::site::play;
+	const net::SiteId Rit = net::SiteId::RunItTwice;
+	const int Dec1 = world::DayOn(2026, 12, 1);
+	const int Dec8 = Dec1 + 7;
+	const int Dec31 = Dec1 + 30;
+	const int Jan1 = world::DayOn(2027, 1, 1);
+	const bool Live = play::LeagueScore(2, "runittwice.the-sweat", 1100, Dec8, 10.0, false, false) > 0.0;
+	std::printf("  league: site::play::LeagueScore %s\n", Live ? "scores (core-siteplay's body)" : "is the Phase A stub and scores nothing: the checks below hold with no points");
+	Base.Create(Seed, NightOne);
+	Base.AdvanceTo(27.0 * Day + 720.0); // Nov 1: Ignite opens tomorrow
+	Check(world::Headliners(Base, Base.Clock()).empty(), "league: Ignite has no Headliners before it opens");
+	Base.AdvanceTo(Dec1 * Day + 360.0);
+	DecemberText = Text(Base);
+	Base.AdvanceTo((Dec8 - 1) * Day + 720.0); // Dec 7 at noon: Dec 8's registrations are planned
+	const std::string Saved = Text(Base);
+	world::World Plain;
+	Load(Plain, Saved);
+	world::World Grouped;
+	Load(Grouped, Saved);
+	Check(LeagueLines(Saved, true).empty() && !Grouped.League(Rit) && Text(Grouped) == Saved,
+		"league: a world nobody drew a group in has no League line or book, and loads and writes back as it was");
+	// The group: Steel's busiest, with two people the world hasn't put in any RunItTwice event on Dec 7 or 8 (whose results there
+	// are the ones forced below): the member, and the outsider just past the 19.
+	const std::set<int> Busy = LeagueBusy(Grouped, (Dec8 - 1) * Day, (Dec8 + 1) * Day + 360.0);
+	const std::vector<int> Steel = LeaguePeople(Grouped, 2);
+	int Member = -1;
+	int Outsider = -1;
+	std::vector<int> Roster;
+	for (const int Id : Steel)
+	{
+		if (Member < 0 && Busy.count(Id) == 0)
+		{
+			Member = Id;
+			Roster.push_back(Id);
+		}
+	}
+	for (const int Id : Steel)
+	{
+		if (Roster.size() < 19 && Id != Member)
+		{
+			Roster.push_back(Id);
+		}
+	}
+	for (const int Id : Steel)
+	{
+		if (Outsider < 0 && Busy.count(Id) == 0 && std::find(Roster.begin(), Roster.end(), Id) == Roster.end())
+		{
+			Outsider = Id;
+		}
+	}
+	if (Member < 0 || Outsider < 0 || Roster.size() < 19)
+	{
+		Check(false, "league: 21 Steel members on RunItTwice in December, two of them free on Dec 8 (" + std::to_string(Steel.size()) + ")");
+		return;
+	}
+	const int Month = world::LeagueMonth(Grouped.Clock());
+	const int HeroRev = Grouped.HeroRevision();
+	Grouped.SetLeagueRoster(Rit, Month, world::LeaguePack(2, 0), Roster);
+	Check(Grouped.HeroRevision() != HeroRev, "league: handing the world a group moves its HeroRevision (the session's next save writes the world)");
+	const world::LeagueBook* Book = Grouped.League(Rit);
+	Check(Book && Book->Members.size() == 19 && Book->MonthKey == Month && world::LeagueDivision(Book->Div) == 2 && world::LeagueFirst(Book->Div) == 3,
+		"league: SetLeagueRoster keeps the month's group of 19 and League reads it back");
+	// Dec 8: the member wins five of RunItTwice's evening events and the outsider is second in The Sweat (both worlds).
+	struct Forced
+	{
+		std::string Template;
+		net::EventInstance E;
+		double Raw = 0.0;
+	};
+	std::vector<Forced> Force;
+	for (const char* T : {"runittwice.supper-stack", "runittwice.the-sweat", "runittwice.run-it-back", "runittwice.encore-pko", "runittwice.the-fifty-five"})
+	{
+		Forced F;
+		F.Template = T;
+		if (LeagueEvent(T, Dec8 * Day + 360.0, (Dec8 + 1) * Day, F.E) && !Grouped.RegisteredNow(F.E.Id).empty())
+		{
+			Force.push_back(F);
+		}
+	}
+	Check(Force.size() == 5, "league: Dec 8's five evening events are planned (" + std::to_string(Force.size()) + ")");
+	for (world::World* Each : {&Plain, &Grouped})
+	{
+		for (const Forced& F : Force)
+		{
+			std::vector<std::pair<int, int>> Places = {{Member, 1}};
+			if (F.Template == "runittwice.the-sweat")
+			{
+				Places.push_back({Outsider, 2});
+			}
+			Each->KnownPlaces(F.E.Id, Places);
+		}
+	}
+	std::stable_sort(Force.begin(), Force.end(), [](const Forced& A, const Forced& B) { return A.E.Start + A.E.Duration < B.E.Start + B.E.Duration; });
+	Plain.AdvanceTo(Dec8 * Day + 360.0);
+	Grouped.AdvanceTo(Dec8 * Day + 360.0);
+	const world::LeagueMember* Was = world::LeagueMemberOf(*Grouped.League(Rit), Member);
+	const world::LeagueMember Before = Was ? *Was : world::LeagueMember();
+	bool Alone = true;
+	for (Forced& F : Force)
+	{
+		// Each result in turn, the member's raw points read off their RunItTwice record across the event's end.
+		const double End = F.E.Start + F.E.Duration;
+		Plain.AdvanceTo(End - 0.5);
+		Grouped.AdvanceTo(End - 0.5);
+		const world::SiteRecord* R0 = Grouped.SiteRecordOf(Rit, Member);
+		const double Points0 = R0 ? R0->Points : 0.0;
+		const int Events0 = R0 ? R0->Events : 0;
+		Plain.AdvanceTo(End + 0.5);
+		Grouped.AdvanceTo(End + 0.5);
+		const world::SiteRecord* R1 = Grouped.SiteRecordOf(Rit, Member);
+		F.Raw = (R1 ? R1->Points : 0.0) - Points0;
+		Alone = Alone && R1 && R1->Events == Events0 + 1 && F.Raw > 0.0;
+	}
+	Check(Alone, "league: the member's five wins are their only RunItTwice results on Dec 8, each with points");
+	// What the rule says: entries at or above the floor, the first 3 of them as they ended, the day's best of those.
+	int Counted = 0;
+	double DayBest = 0.0;
+	for (const Forced& F : Force)
+	{
+		const net::EventTemplate& T = net::Site(Rit).TemplateOf(F.E);
+		const int Played = world::LeagueDay(F.E.Start + F.E.Duration); // the play day the result came in
+		if (Counted >= 3 || play::LeagueScore(2, F.Template, T.BuyInCents, Played, 1.0, false, false) <= 0.0)
+		{
+			continue;
+		}
+		++Counted;
+		DayBest = std::max(DayBest, play::LeagueScore(2, F.Template, T.BuyInCents, Played, F.Raw, !T.Series.empty(), false));
+	}
+	const int Tenths = static_cast<int>(std::min<long long>(32767, std::llround(DayBest * 10.0)));
+	const world::LeagueMember* After = world::LeagueMemberOf(*Grouped.League(Rit), Member);
+	Check(After && After->TodayKey == (Counted > 0 ? Dec8 : Before.TodayKey) && After->TodayCount == (Counted > 0 ? Counted : Before.TodayCount),
+		"league: a member's entries count from the first 3 a day at or above the division's floor (" + std::to_string(Counted) + " of 5)");
+	Check(After && After->Days == Before.Days + (Counted > 0 ? 1 : 0) && (Counted == 0 || (After->Form & 3) == 3),
+		"league: a League day is counted once, with its form (a win: a final table)");
+	Check(After && LeagueHeld(*After, 8) == (Tenths > 0 ? Tenths : 0), "league: the day's best is the best of those entries through LeagueScore, in tenths (" + std::to_string(Tenths) + ")");
+	Check(!world::LeagueMemberOf(*Grouped.League(Rit), Outsider) && Grouped.League(Rit)->Members.size() == 19, "league: someone outside the group isn't recorded");
+	Check(!Live || (Counted == 3 && Tenths > 0), "league: Steel's floor leaves out the $5.50 entry, and the 4th entry at it is past the first 3");
+	// A world built from the text alone (a card room's, with no session), from Dec 30 at noon: it reads the line back exactly
+	// and goes on recording the group as this one does.
+	Plain.AdvanceTo((Dec31 - 1) * Day + 720.0);
+	Grouped.AdvanceTo((Dec31 - 1) * Day + 720.0);
+	const std::string Dec30 = Text(Grouped);
+	world::World Room;
+	Load(Room, Dec30);
+	Check(Text(Room) == Dec30, "league: the League line reads back exactly");
+	// Deadline Day: a member the world has nothing planned for on the 31st wins The Sweat (featured events count x1.25 then, by
+	// the rule), in all three worlds.
+	net::EventInstance Last;
+	const bool Found = LeagueEvent("runittwice.the-sweat", Dec31 * Day + 360.0, (Dec31 + 1) * Day, Last);
+	const std::set<int> BusyLast = LeagueBusy(Grouped, Dec31 * Day, (Dec31 + 1) * Day + 360.0);
+	int Closer = -1;
+	for (const int Id : Roster)
+	{
+		Closer = Closer < 0 && BusyLast.count(Id) == 0 ? Id : Closer;
+	}
+	const bool Free = Found && Closer >= 0 && !Grouped.RegisteredNow(Last.Id).empty();
+	const std::vector<world::World*> Three = {&Plain, &Grouped, &Room};
+	for (world::World* Each : Three)
+	{
+		if (Free)
+		{
+			Each->KnownPlaces(Last.Id, {{Closer, 1}});
+		}
+		Each->AdvanceTo(Last.Start + Last.Duration - 0.5);
+	}
+	const world::SiteRecord* L0 = Grouped.SiteRecordOf(Rit, Closer);
+	const double LastPoints0 = L0 ? L0->Points : 0.0;
+	for (world::World* Each : Three)
+	{
+		Each->AdvanceTo(Last.Start + Last.Duration + 0.5);
+	}
+	const world::SiteRecord* L1 = Grouped.SiteRecordOf(Rit, Closer);
+	const double LastRaw = (L1 ? L1->Points : 0.0) - LastPoints0;
+	const net::EventTemplate& Sweat = net::Site(Rit).TemplateOf(Last);
+	const double Deadline = play::LeagueScore(2, Sweat.Id, Sweat.BuyInCents, world::LeagueDay(Last.Start + Last.Duration), LastRaw, !Sweat.Series.empty(), true);
+	const int DeadlineTenths = static_cast<int>(std::min<long long>(32767, std::llround(Deadline * 10.0)));
+	const world::LeagueMember* OnDeadline = world::LeagueMemberOf(*Grouped.League(Rit), Closer);
+	const int HeldLast = OnDeadline ? LeagueHeld(*OnDeadline, 31) : -1;
+	Check(Free && LastRaw > 0.0 && (HeldLast == DeadlineTenths || (HeldLast == 0 && OnDeadline && OnDeadline->Best.back().second >= DeadlineTenths)),
+		"league: Deadline Day's result is scored with the Deadline flag (" + std::to_string(DeadlineTenths) + " tenths)");
+	// Nothing else moved: the two worlds differ by the League line alone, all month; the card room's world kept up.
+	for (world::World* Each : Three)
+	{
+		Each->AdvanceTo(Dec31 * Day + 1380.0);
+	}
+	const std::string Month31 = Text(Grouped);
+	Check(LeagueLines(Text(Plain), false) == LeagueLines(Month31, false), "league: recording a group moves nothing else in the world (its text less the League line is the same)");
+	const std::string Line = LeagueLines(Month31, true);
+	Check(LeagueLines(Text(Room), true) == Line && (!Live || Line != LeagueLines(Dec30, true)), "league: a world built from the text (a card room's) records the group too");
+	std::printf("  league: the group's line at the month's end is %zu bytes (budget 2,500), the member's month %.1f points\n", Line.empty() ? 0 : Line.size() - 1,
+		world::LeagueMemberOf(*Grouped.League(Rit), Member) ? world::LeaguePoints(*world::LeagueMemberOf(*Grouped.League(Rit), Member)) : 0.0);
+	Check(!Line.empty() && Line.size() - 1 <= 2500, "league: the month's world\\tleague line is at most 2.5 KB");
+	// The longest line there can be: 19 members with 5-digit ids, every day of the month played, full form, today's 3, and all 8
+	// best days at the cap. It reads back exactly and still fits.
+	std::string Worst = "world\tleague\t2\t" + std::to_string(Month) + "\t" + std::to_string(world::LeaguePack(4, 3));
+	std::string Members;
+	for (int K = 0; K < 19; ++K)
+	{
+		Worst += "\t" + std::to_string(10000 + K);
+		Members += (K ? "," : "") + std::to_string(10000 + K) + ":31:1023:9999:3";
+		for (int B = 0; B < 8; ++B)
+		{
+			Members += ":" + std::to_string(31 - B) + "/32767";
+		}
+	}
+	Worst += "\t" + Members + "\n";
+	world::World Longest;
+	Load(Longest, LeagueLines(Dec30, false) + Worst);
+	std::printf("  league: the longest possible League line is %zu bytes\n", Worst.size() - 1);
+	Check(LeagueLines(Text(Longest), true) == Worst && Worst.size() - 1 <= 2500, "league: the longest possible League line reads back exactly and is at most 2.5 KB");
+	std::string Why;
+	Check(LeagueSane(*Grouped.League(Rit), Why), "league: the book keeps §7.4's bounds (" + Why + ")");
+	int Recorded = 0;
+	for (const world::LeagueMember& M : Grouped.League(Rit)->Members)
+	{
+		Recorded += M.Days > 0 ? 1 : 0;
+	}
+	Check(!Live || Recorded >= 10, "league: most of the group has League days by the month's end (" + std::to_string(Recorded) + " of 19)");
+	// The 1st's turn at 6 AM: nothing ended after it lands in December's book.
+	Room.AdvanceTo(Jan1 * Day + 359.0);
+	const std::string AtTurn = LeagueLines(Text(Room), true);
+	Room.AdvanceTo(Jan1 * Day + 1380.0);
+	Check(LeagueLines(Text(Room), true) == AtTurn, "league: a result after the 1st's 6 AM turn stays out of last month's book");
+	// Handing over the same month's group again keeps what's recorded; a new month's starts everyone at nothing; the guards.
+	const world::LeagueBook December = *Room.League(Rit);
+	std::vector<int> Reversed(Roster.rbegin(), Roster.rend());
+	Room.SetLeagueRoster(Rit, December.MonthKey, December.Div, Reversed);
+	bool Kept = Room.League(Rit)->Members.size() == 19;
+	for (const world::LeagueMember& M : December.Members)
+	{
+		const world::LeagueMember* Now = world::LeagueMemberOf(*Room.League(Rit), M.Npc);
+		Kept = Kept && Now && Now->Days == M.Days && Now->Form == M.Form && Now->Best == M.Best && Now->TodayKey == M.TodayKey;
+	}
+	Check(Kept, "league: the same month's group handed over again keeps what the world recorded");
+	std::vector<int> Messy = Roster;
+	Messy.insert(Messy.begin(), {Roster[0], -1, 1000000, Outsider});
+	Messy.push_back(Outsider);
+	Room.SetLeagueRoster(Rit, December.MonthKey + 1, world::LeaguePack(2, 1), Messy);
+	const world::LeagueBook* January = Room.League(Rit);
+	bool Fresh = January && January->MonthKey == December.MonthKey + 1 && January->Members.size() == 19 && world::LeagueFirst(January->Div) == 1;
+	std::set<int> Ids;
+	for (const world::LeagueMember& M : January ? January->Members : std::vector<world::LeagueMember>())
+	{
+		Fresh = Fresh && Ids.insert(M.Npc).second && Room.Get(M.Npc) && M.Days == 0 && M.Best[0].second == 0 && M.TodayKey == -1;
+	}
+	Check(Fresh, "league: a new month's group starts everyone at nothing: at most 19, each once, only people the world has");
+	// January at a pace of 1: the member's second entry of a day doesn't count.
+	const int Jan6 = Jan1 + 5;
+	Room.AdvanceTo((Jan6 - 1) * Day + 720.0);
+	std::vector<net::EventInstance> Two(2);
+	const bool Pair = LeagueEvent("runittwice.the-sweat", Jan6 * Day + 360.0, (Jan6 + 1) * Day, Two[0]) && LeagueEvent("runittwice.encore-pko", Jan6 * Day + 360.0, (Jan6 + 1) * Day, Two[1]) &&
+		LeagueBusy(Room, (Jan6 - 1) * Day, (Jan6 + 1) * Day + 360.0).count(Roster[0]) == 0 && !Room.RegisteredNow(Two[0].Id).empty() && !Room.RegisteredNow(Two[1].Id).empty();
+	if (Pair)
+	{
+		Room.KnownPlaces(Two[0].Id, {{Roster[0], 1}});
+		Room.KnownPlaces(Two[1].Id, {{Roster[0], 1}});
+	}
+	const world::LeagueMember* Unpaced = world::LeagueMemberOf(*Room.League(Rit), Roster[0]);
+	const int DaysBefore = Unpaced ? Unpaced->Days : -1;
+	Room.AdvanceTo((Jan6 + 1) * Day + 300.0);
+	const world::LeagueMember* Paced = world::LeagueMemberOf(*Room.League(Rit), Roster[0]);
+	Check(Pair && Paced && Paced->TodayCount == (Live ? 1 : 0) && Paced->Days == DaysBefore + (Live ? 1 : 0) && (!Live || Paced->TodayKey == Jan6),
+		"league: at the group's pace of 1 only a day's first entry counts");
+	Room.SetLeagueRoster(Rit, December.MonthKey + 1, world::LeaguePack(2, 0), {});
+	Room.SetLeagueRoster(net::SiteId::RiverLine, December.MonthKey + 1, 0, Roster);
+	Check(!Room.League(Rit) && !Room.League(net::SiteId::RiverLine) && LeagueLines(Text(Room), true).empty(), "league: an empty group clears the book (no line); RiverLine has none");
+}
+
+/**
+ * S-6' (budget): the world's 30 days from Dec 1, side by side, with a group of the 19 busiest Steel members recorded and
+ * without one. The two worlds take turns a day at a time (which goes first alternates), so a shared machine's load falls on
+ * both alike; Reps fresh pairs. The day's pair is timed back to back, so the median of the days' ratios shrugs off a spike
+ * the totals can't (under ctest -j and other builds the totals swing several percent either way). Measured with more pairs
+ * in S-6p.md.
+ */
+void LeagueBudget(const std::string& DecemberText, int Reps)
+{
+	double Plain = 0.0;
+	double Grouped = 0.0;
+	std::vector<double> Ratios;
+	size_t Line = 0;
+	for (int K = 0; K < Reps; ++K)
+	{
+		world::World A;
+		Load(A, DecemberText);
+		world::World B;
+		Load(B, DecemberText);
+		std::vector<int> Busiest = LeaguePeople(B, 2);
+		Busiest.resize(std::min<size_t>(19, Busiest.size()));
+		B.SetLeagueRoster(net::SiteId::RunItTwice, world::LeagueMonth(B.Clock()), world::LeaguePack(2, 0), Busiest);
+		const double Start = A.Clock();
+		for (int D = 1; D <= 30; ++D)
+		{
+			const double To = Start + static_cast<double>(D) * Day - 1.0;
+			double Took[2] = {0.0, 0.0};
+			for (int Turn = 0; Turn < 2; ++Turn)
+			{
+				const bool Group = (Turn == 0) == ((D + K) % 2 == 0);
+				const auto T0 = std::chrono::steady_clock::now();
+				(Group ? B : A).AdvanceTo(To);
+				Took[Group ? 1 : 0] = Seconds(T0);
+			}
+			Plain += Took[0];
+			Grouped += Took[1];
+			if (Took[0] > 0.0)
+			{
+				Ratios.push_back(Took[1] / Took[0]);
+			}
+		}
+		const std::string L = LeagueLines(Text(B), true);
+		Line = L.empty() ? 0 : L.size() - 1;
+	}
+	std::sort(Ratios.begin(), Ratios.end());
+	const double Median = Ratios.empty() ? 1.0 : Ratios[Ratios.size() / 2];
+	std::printf("  league: 30 days from Dec 1 (%d pairs, a day each in turn): %.3f s a month with no group, %.3f s with the 19 busiest Steel members (%+.2f%%; the "
+				"median day %+.2f%%); their line %zu B\n",
+		Reps, Plain / Reps, Grouped / Reps, (Grouped / Plain - 1.0) * 100.0, (Median - 1.0) * 100.0, Line);
+	Check(Median <= 1.05, "league: recording a group costs the world's 30 days next to nothing (S-6': +1%; the median day held to +5% here, wall clock)");
+}
+
+/**
+ * What core-siteplay reads: Ignite's Headliners, Team RunItTwice's six, the members' monthly volumes and the group's pace.
+ * W is LeagueScoring's world at Dec 7 at noon (Seed's), played on to Dec 20 and January 1 here.
+ */
+void LeagueQueries(world::World& W, uint32_t Seed)
+{
+	const net::SiteId Rit = net::SiteId::RunItTwice;
+	const int Dec3 = world::DayOn(2026, 12, 3);
+	const std::vector<world::Headliner> Early = world::Headliners(W, W.Clock(), 100000);
+	W.AdvanceTo((Dec3 + 17) * Day + 720.0);
+	const std::vector<world::Headliner> All = world::Headliners(W, W.Clock(), 100000);
+	const std::vector<world::Headliner> Six = world::Headliners(W, W.Clock());
+	bool Ordered = Six.size() == std::min<size_t>(6, All.size()) && !Six.empty();
+	for (size_t K = 0; K < All.size(); ++K)
+	{
+		const world::Npc* N = W.Get(All[K].Npc);
+		Ordered = Ordered && N && N->Playing() && (N->Sites & Bit(net::SiteId::Ignite)) != 0 && N->Followers == All[K].Followers;
+		Ordered = Ordered && (All[K].Followers > 0 || All[K].PointsBefore > 0.0 || All[K].WonBefore > 0 || All[K].PointsMonth > 0.0);
+		const world::SiteRecord* Rk = W.SiteRecordOf(net::SiteId::Ignite, All[K].Npc);
+		Ordered = Ordered && All[K].WonBefore == (Rk ? std::max<ss::Chips>(0, Rk->Lifetime - Rk->Won) : 0);
+		if (K > 0)
+		{
+			const world::Headliner& P = All[K - 1];
+			const world::Headliner& H = All[K];
+			const bool Rest = P.WonBefore > H.WonBefore ||
+				(P.WonBefore == H.WonBefore && (P.PointsMonth > H.PointsMonth || (P.PointsMonth == H.PointsMonth && P.Npc < H.Npc)));
+			Ordered = Ordered && (P.Followers > H.Followers || (P.Followers == H.Followers && (P.PointsBefore > H.PointsBefore || (P.PointsBefore == H.PointsBefore && Rest))));
+		}
+		Ordered = Ordered && (K >= Six.size() || Six[K].Npc == All[K].Npc);
+	}
+	Check(Ordered, "league: Ignite's Headliners are its playing members by followers, then points before the month, Ignite money before the season, this month's points, then id (six)");
+	std::map<int, double> EarlyBefore;
+	for (const world::Headliner& H : Early)
+	{
+		EarlyBefore[H.Npc] = H.PointsBefore;
+	}
+	int Same = 0;
+	int Moved = 0;
+	for (const world::Headliner& H : All)
+	{
+		const auto It = EarlyBefore.find(H.Npc);
+		if (It != EarlyBefore.end())
+		{
+			(It->second == H.PointsBefore ? Same : Moved) += 1;
+		}
+	}
+	Check(Same > 0 && Moved == 0, "league: a Headliner's points before the month stay put all month (" + std::to_string(Moved) + " moved of " + std::to_string(Same + Moved) + ")");
+	std::string Names;
+	for (const world::Headliner& H : Six)
+	{
+		Names += (Names.empty() ? "" : ", ") + W.Get(H.Npc)->Name + " (" + std::to_string(H.Followers) + ")";
+	}
+	std::printf("  league: Ignite's Headliners on Dec 20: %s\n", Names.c_str());
+	// Team RunItTwice's six: the people the world signed (Npc::Sponsor), by id; nobody else's team.
+	const std::vector<int> Team = world::SiteTeamNow(W, Rit);
+	int Signed = 0;
+	for (const world::Npc& N : W.People())
+	{
+		Signed += OnTeam(N, Rit) ? 1 : 0;
+	}
+	bool Pros = static_cast<int>(Team.size()) == Signed && Team.size() == 6 && std::is_sorted(Team.begin(), Team.end());
+	for (const int Id : Team)
+	{
+		Pros = Pros && OnTeam(*W.Get(Id), Rit);
+	}
+	Check(Pros && world::SiteTeamNow(W, net::SiteId::Ignite).empty() && world::SiteTeamNow(W, net::SiteId::RiverLine).empty(),
+		"league: Team RunItTwice's current six are the world's signed pros (" + std::to_string(Team.size()) + ")");
+	// The monthly volumes: this season's entries per 30 days since the season began for them (at least a week).
+	const double At = W.Clock();
+	const std::vector<world::SiteMember> Members = world::SiteMembers(W, Rit, At);
+	int Playing = 0;
+	for (const world::Npc& N : W.People())
+	{
+		Playing += N.Playing() && !N.Faded && (N.Sites & Bit(Rit)) != 0 ? 1 : 0;
+	}
+	bool Volumes = static_cast<int>(Members.size()) == Playing && Playing > 100;
+	std::vector<double> December;
+	for (const world::SiteMember& M : Members)
+	{
+		const world::Npc* N = W.Get(M.Npc);
+		const world::SiteRecord* R = W.SiteRecordOf(Rit, M.Npc);
+		const double From = std::max({static_cast<double>(world::YearStart(world::YearOf(Today(W)))) * Day, W.SiteLaunched(Rit), static_cast<double>(N->Joined) * Day});
+		const double Season = (At - From) / Day;
+		const double Want = static_cast<double>(R ? R->Events : 0) * 30.0 / Season;
+		Volumes = Volumes && M.Volume >= 0.0 && (Season < 7.0 || std::fabs(M.Volume - Want) < 1e-9) && M.Events == (R ? R->Events : 0) && M.Tier == N->Tier &&
+			std::fabs(world::MonthlyVolume(W, Rit, M.Npc, At) - M.Volume) < 1e-9;
+		December.push_back(M.Volume);
+	}
+	int Outside = -1;
+	for (const world::Npc& N : W.People())
+	{
+		Outside = Outside < 0 && (N.Sites & Bit(Rit)) == 0 ? N.Id : Outside;
+	}
+	Check(Volumes && Outside >= 0 && world::MonthlyVolume(W, Rit, Outside, At) == -1.0 && world::MonthlyVolume(W, net::SiteId::RiverLine, Members[0].Npc, At) == -1.0,
+		"league: a member's monthly volume is their season's entries per 30 days (-1 for a non-member, and on RiverLine)");
+	std::vector<int> Group;
+	for (size_t K = 0; K < Members.size() && Group.size() < 19; ++K)
+	{
+		Group.push_back(Members[K].Npc);
+	}
+	const int Pace = world::LeaguePaceOf(W, Group, At);
+	Check(Pace >= 1 && Pace <= 3 && world::LeaguePaceOf(W, {}, At) == 3, "league: the group's pace is 1-3 (" + std::to_string(Pace) + ")");
+	// January 1 at 6 AM, the new season's first morning (every count starts again): the volumes still read the members' real
+	// pace, from what the world has planned for them, about as December's did.
+	W.AdvanceTo(world::DayOn(2027, 1, 1) * Day + 360.0);
+	std::vector<double> January;
+	int Some = 0;
+	for (const world::SiteMember& M : world::SiteMembers(W, Rit, W.Clock()))
+	{
+		January.push_back(M.Volume);
+		Some += M.Volume > 0.0 ? 1 : 0;
+	}
+	std::sort(December.begin(), December.end());
+	std::sort(January.begin(), January.end());
+	const double DecMedian = December.empty() ? 0.0 : December[December.size() / 2];
+	const double JanMedian = January.empty() ? 0.0 : January[January.size() / 2];
+	std::printf("  league: RunItTwice's members' monthly volume, median %.1f on Dec 20 and %.1f on Jan 1 at 6 AM (%d of %zu above 0)\n", DecMedian, JanMedian, Some, January.size());
+	Check(!January.empty() && Some * 2 >= static_cast<int>(January.size()) && JanMedian >= 0.5 * DecMedian && JanMedian <= 2.0 * DecMedian,
+		"league: on January 1 the members' monthly volumes still read their pace (the season's counts start again)");
+	// A fresh world bills on points alone (Season 1: the first headliners).
+	world::World Blank;
+	Blank.Create(Seed, NightOne, world::Start::Blank);
+	Blank.AdvanceTo(world::DayOn(2026, 11, 16) * Day + 720.0); // two weeks into Ignite's first season
+	const std::vector<world::Headliner> First = world::Headliners(Blank, Blank.Clock(), 100000);
+	bool ByPoints = !First.empty();
+	for (size_t K = 0; K < First.size(); ++K)
+	{
+		ByPoints = ByPoints && (First[K].PointsBefore > 0.0 || First[K].PointsMonth > 0.0);
+		ByPoints = ByPoints && (K == 0 || First[K - 1].PointsBefore > First[K].PointsBefore ||
+								   (First[K - 1].PointsBefore == First[K].PointsBefore && First[K - 1].PointsMonth >= First[K].PointsMonth));
+	}
+	Check(ByPoints, "league: a fresh world's Headliners are billed on Ignite points alone");
+}
+
+/**
+ * S-6' (durable/update3/S-6p.md; world_test long): RunItTwice's members' monthly volumes, Nov to Mar (the true counts, the
+ * season record's difference across each 6 AM month turn; December's ends at 23:30 on the 31st before January's new season,
+ * January's starts at it), how often a player's 0.5-2x band holds 19 at each division's tiers (else the group-pace rule),
+ * the pace then, and MonthlyVolume's estimate on the 1st against the month just played.
+ */
+void S6Prime(uint32_t Seed)
+{
+	const net::SiteId Rit = net::SiteId::RunItTwice;
+	world::World W;
+	W.Create(Seed, NightOne);
+	auto Snap = [&]() {
+		std::map<int, int> Out;
+		for (const world::Npc& N : W.People())
+		{
+			if (const world::SiteRecord* R = W.SiteRecordOf(Rit, N.Id))
+			{
+				Out[N.Id] = R->Events;
+			}
+		}
+		return Out;
+	};
+	auto Members = [&]() {
+		std::vector<int> Out;
+		for (const world::Npc& N : W.People())
+		{
+			if (N.Playing() && (N.Sites & Bit(Rit)) != 0)
+			{
+				Out.push_back(N.Id);
+			}
+		}
+		return Out;
+	};
+	struct Span
+	{
+		const char* Name;
+		int From, To;          // days
+		double FromMin, ToMin; // minutes
+		bool Reset;
+	};
+	const int Nov1 = world::DayOn(2026, 11, 1);
+	const int Dec1 = world::DayOn(2026, 12, 1);
+	const int Jan1 = world::DayOn(2027, 1, 1);
+	const int Feb1 = world::DayOn(2027, 2, 1);
+	const int Mar1 = world::DayOn(2027, 3, 1);
+	const int Apr1 = world::DayOn(2027, 4, 1);
+	const Span Months[] = {{"Nov", Nov1, Dec1, Nov1 * Day + 360.0, Dec1 * Day + 360.0, false}, {"Dec", Dec1, Jan1, Dec1 * Day + 360.0, (Jan1 - 1) * Day + 1410.0, false},
+		{"Jan", Jan1, Feb1, Jan1 * Day + 360.0, Feb1 * Day + 360.0, true}, {"Feb", Feb1, Mar1, Feb1 * Day + 360.0, Mar1 * Day + 360.0, false},
+		{"Mar", Mar1, Apr1, Mar1 * Day + 360.0, Apr1 * Day + 360.0, false}};
+	struct Division
+	{
+		const char* Name;
+		int Lo, Hi;
+	};
+	const Division Divs[] = {{"Open", 1, 1}, {"Iron", 1, 2}, {"Steel", 2, 2}, {"Gold", 2, 3}, {"High Bridge", 3, 4}};
+	const int Heroes[] = {15, 30, 60, 120};
+	int Pace = 0;
+	int Matched = 0;
+	int Ten = 0; // cells with at least 10 in the band (core-siteplay's RitDraw falls to the pace under 10 matched)
+	int Tables = 0;
+	std::map<int, int> Last; // npc -> last month's true volume
+	std::printf("  S-6': RunItTwice's members' monthly volumes (entries in the month, the true counts; tiers 1 micro .. 4 high)\n");
+	for (const Span& M : Months)
+	{
+		W.AdvanceTo(M.FromMin);
+		// On the 1st (6 AM), the draw's view: MonthlyVolume against the month just played, and the bands.
+		const std::vector<int> Now = Members();
+		if (!Last.empty())
+		{
+			std::vector<double> Err;
+			int Inside = 0;
+			int Judged = 0;
+			int Agree = 0;
+			int Pairs = 0;
+			for (const int Id : Now)
+			{
+				const auto It = Last.find(Id);
+				const double Est = world::MonthlyVolume(W, Rit, Id, W.Clock());
+				if (It == Last.end() || Est < 0.0)
+				{
+					continue;
+				}
+				if (It->second >= 4)
+				{
+					Err.push_back(std::fabs(Est / It->second - 1.0));
+					Inside += Est >= 0.5 * It->second && Est <= 2.0 * It->second ? 1 : 0;
+					++Judged;
+				}
+				for (const int H : {30, 60})
+				{
+					Agree += (It->second >= 0.5 * H && It->second <= 2.0 * H) == (Est >= 0.5 * H && Est <= 2.0 * H) ? 1 : 0;
+					++Pairs;
+				}
+			}
+			std::sort(Err.begin(), Err.end());
+			std::printf("  S-6': %s 1st, MonthlyVolume vs last month (>= 4 entries, %d people): median |error| %.0f%%, p90 %.0f%%, inside 0.5-2x %.0f%%; the 30 and 60 bands agree %.0f%%\n", M.Name,
+				Judged, Err.empty() ? 0.0 : 100.0 * Err[Err.size() / 2], Err.empty() ? 0.0 : 100.0 * Err[Err.size() * 9 / 10], Judged ? 100.0 * Inside / Judged : 0.0,
+				Pairs ? 100.0 * Agree / Pairs : 0.0);
+			for (const Division& D : Divs)
+			{
+				std::string Row;
+				for (const int H : Heroes)
+				{
+					std::vector<std::pair<double, int>> Near;
+					int Band = 0;
+					int Eligible = 0;
+					for (const int Id : Now)
+					{
+						const int T = W.Get(Id)->Tier;
+						if (T < D.Lo || T > D.Hi)
+						{
+							continue;
+						}
+						++Eligible;
+						const auto It = Last.find(Id);
+						const double V = It == Last.end() ? 0.0 : It->second;
+						Band += V >= 0.5 * H && V <= 2.0 * H ? 1 : 0;
+						Near.push_back({V > 0.0 ? std::fabs(std::log(V / H)) : 99.0, Id});
+					}
+					std::sort(Near.begin(), Near.end());
+					std::vector<double> PerDay;
+					for (size_t K = 0; K < Near.size() && K < 19; ++K)
+					{
+						const auto It = Last.find(Near[K].second);
+						const double V = It == Last.end() ? 0.0 : It->second;
+						PerDay.push_back(V >= 30.0 ? V / 30.0 : 1.0);
+					}
+					std::sort(PerDay.begin(), PerDay.end());
+					const int GroupPace = PerDay.empty() ? 1 : std::max(1, std::min(3, static_cast<int>(std::lround(PerDay[PerDay.size() / 2]))));
+					const bool Enough = Band >= 19;
+					++Tables;
+					Matched += Enough ? 1 : 0;
+					Ten += Band >= 10 ? 1 : 0;
+					Pace += Enough ? 0 : 1;
+					Row += "  h" + std::to_string(H) + ": " + std::to_string(Band) + "/" + std::to_string(Eligible) + (Enough ? " ok" : " pace " + std::to_string(GroupPace));
+				}
+				std::printf("  S-6':   %-11s%s\n", D.Name, Row.c_str());
+			}
+		}
+		const std::map<int, int> S0 = M.Reset ? std::map<int, int>() : Snap();
+		W.AdvanceTo(M.ToMin);
+		const std::map<int, int> S1 = Snap();
+		std::vector<int> All;
+		std::map<int, std::vector<int>> ByTier;
+		int Zero = 0;
+		Last.clear();
+		for (const int Id : Members())
+		{
+			const auto A = S1.find(Id);
+			const auto B = S0.find(Id);
+			const int V = (A == S1.end() ? 0 : A->second) - (B == S0.end() ? 0 : B->second);
+			Last[Id] = V;
+			All.push_back(V);
+			ByTier[W.Get(Id)->Tier].push_back(V);
+			Zero += V == 0 ? 1 : 0;
+		}
+		std::sort(All.begin(), All.end());
+		auto Pct = [](const std::vector<int>& V, double Q) { return V.empty() ? 0 : V[std::min(V.size() - 1, static_cast<size_t>(Q * static_cast<double>(V.size())))]; };
+		std::string Tiers;
+		for (auto& It : ByTier)
+		{
+			std::sort(It.second.begin(), It.second.end());
+			Tiers += "  t" + std::to_string(It.first) + " " + std::to_string(It.second.size()) + " p50 " + std::to_string(Pct(It.second, 0.5)) + " p90 " + std::to_string(Pct(It.second, 0.9));
+		}
+		std::printf("  S-6': %s (%.1f days): %zu members, %d with none; p10 %d, p25 %d, p50 %d, p75 %d, p90 %d, max %d;%s\n", M.Name, (M.ToMin - M.FromMin) / Day, All.size(), Zero,
+			Pct(All, 0.1), Pct(All, 0.25), Pct(All, 0.5), Pct(All, 0.75), Pct(All, 0.9), All.empty() ? 0 : All.back(), Tiers.c_str());
+	}
+	std::printf("  S-6': on the 1sts above, %d of %d (division, volume) cells hold 19 in the 0.5-2x band (%d fall to the group-pace rule); %d hold at least 10\n", Matched, Tables,
+		Pace, Ten);
+}
+
+// ------------------------------------------------------------------ G2 review (review-core-world): the League's oracle
+
+std::vector<std::string> SplitOn(const std::string& S, char By)
+{
+	std::vector<std::string> Out(1);
+	for (const char C : S)
+	{
+		if (C == By)
+		{
+			Out.emplace_back();
+		}
+		else
+		{
+			Out.back() += C;
+		}
+	}
+	return Out;
+}
+
+/** A RunItTwice event in the world's queue, from its q line (World::Write's): what LeagueOracle needs of it. */
+struct LeagueQueued
+{
+	std::string Id;
+	int Template = -1;
+	double End = 0.0;
+	int Entries = 0;
+	long long BuyIn = 0;
+	int TableSize = 8;
+	int FinalSize = 9;
+	std::string Series;
+	std::vector<std::pair<int, bool>> Who; // npc, on a ticket (a seat won in a satellite)
+};
+
+/** The queued RunItTwice events ending in [From, To), in queue order (the order the world resolves equal ends in). */
+std::vector<LeagueQueued> LeagueQueue(const std::string& T, double From, double To)
+{
+	std::vector<LeagueQueued> Out;
+	for (const std::string& L : Lines(T))
+	{
+		if (L.compare(0, 8, "world\tq\t") != 0)
+		{
+			continue;
+		}
+		const std::vector<std::string> F = Tabs(L);
+		if (F.size() < 30 || F[4] != "1" || F[2].compare(0, 11, "runittwice.") != 0)
+		{
+			continue;
+		}
+		LeagueQueued Q;
+		Q.Id = F[2];
+		Q.Template = std::atoi(F[5].c_str());
+		Q.End = std::atof(F[8].c_str());
+		Q.Entries = std::atoi(F[9].c_str());
+		Q.BuyIn = std::atoll(F[11].c_str());
+		Q.TableSize = std::atoi(F[14].c_str());
+		Q.Series = F[18];
+		Q.FinalSize = std::atoi(F[28].c_str());
+		if (Q.End < From || Q.End >= To)
+		{
+			continue;
+		}
+		for (const std::string& R : SplitOn(F[29], '|'))
+		{
+			const std::vector<std::string> V = SplitOn(R, '~');
+			if (V.size() >= 2 && !V[0].empty())
+			{
+				Q.Who.push_back({std::atoi(V[0].c_str()), V[1] == "1"});
+			}
+		}
+		Out.push_back(Q);
+	}
+	return Out;
+}
+
+/** What the rule says a member's month holds, worked out from the world's records. */
+struct LeagueTruth
+{
+	int TodayKey = -1;
+	int TodayCount = 0;
+	int Days = 0;
+	int Form = 0;
+	std::map<int, int> Best; // day of the month -> tenths
+	bool Unsure = false;     // two of their entries ended together, or a result no queue line showed: nothing to split
+	bool FormUnsure = false; // a place the records can't put on either side of the table's size
+};
+
+/**
+ * Whether a result was a final table as the League's form reads it (the event's last table: its TableSize; more than 3
+ * entries), from the record's change across its end: 1 yes, 0 no, -1 the record can't tell. A win is one; with points, the
+ * places net::Points gives those points for; with none, the places past the paid ones inside (or past) the record's own
+ * final table (P.FinalSize).
+ */
+int LeagueFt(double Raw, bool Won, bool RecordFt, int Field, long long BuyIn, int TableSize, int FinalSize)
+{
+	if (Field <= 3)
+	{
+		return 0;
+	}
+	if (Won)
+	{
+		return 1;
+	}
+	const int Paid = std::max(1, static_cast<int>(std::lround(static_cast<double>(Field) * 0.15)));
+	bool In = false;
+	bool Out = false;
+	if (Raw > 0.0)
+	{
+		for (int P = 2; P <= Paid; ++P)
+		{
+			if (std::fabs(net::Points(P, Field, BuyIn) - Raw) < 1e-9)
+			{
+				(P <= TableSize ? In : Out) = true;
+			}
+		}
+	}
+	else
+	{
+		const int From = RecordFt ? Paid + 1 : std::max(Paid + 1, FinalSize + 1);
+		const int To = RecordFt ? std::min(FinalSize, Field) : Field;
+		for (int P = From; P <= To && !(In && Out); ++P)
+		{
+			(P <= TableSize ? In : Out) = true;
+		}
+	}
+	return In && !Out ? 1 : Out && !In ? 0 : -1;
+}
+
+/**
+ * The League's world side against the rule worked out a second way, from the world's own records rather than the code that
+ * keeps the book: all 19 members, every day of a month and the 1st after it. Each member's raw points and prize come from
+ * their RunItTwice record across each event's end; the buy-in, template, series, table size and tickets from the event's
+ * queue line; then the rule (§3.6 R2): the 6 AM day the result came in, the division's floor through LeagueScore, the
+ * first 3 a day (or the pace), the day's best, the best 8, the days, the form, Deadline Day, the month. Two forced entries
+ * run the rare paths: a member's ticket entry (in the record, but no League entry: W4) and a member 9th at an 8-max table
+ * that pays more than 8 (a cash on the form, not a final table). The month played in one jump, and saved and loaded every
+ * few days at odd minutes, ends with the same line (§1.9: a skip is the sum of its steps).
+ */
+void LeagueOracle(const std::string& DecemberText, int Div, int Pace)
+{
+	namespace play = ss::site::play;
+	const net::SiteId Rit = net::SiteId::RunItTwice;
+	std::string Base;
+	int TicketNpc = -1;
+	int NinthNpc = -1;
+	std::string TicketEvent;
+	std::string NinthEvent;
+	std::vector<int> Roster;
+	double Start = 0.0;
+	{
+		// The forced entries, on Dec 1 and 2: a $11-or-more event each, the first two members.
+		world::World W;
+		Load(W, DecemberText);
+		Start = W.Clock();
+		Roster = LeaguePeople(W, Div == 0 ? 1 : 2);
+		Roster.resize(std::min<size_t>(19, Roster.size()));
+		for (const LeagueQueued& E : LeagueQueue(Text(W), Start, Start + 2.0 * Day))
+		{
+			const int Field = std::max(E.Entries, static_cast<int>(E.Who.size()) + 1);
+			if (E.BuyIn < 1100 || !E.Series.empty() || Roster.size() < 2)
+			{
+				continue;
+			}
+			if (TicketNpc < 0)
+			{
+				TicketNpc = Roster[0];
+				TicketEvent = E.Id;
+				W.KnownPlaces(E.Id, {{TicketNpc, 1}});
+			}
+			else if (NinthNpc < 0 && E.TableSize == 8 && std::lround(Field * 0.15) >= 12)
+			{
+				NinthNpc = Roster[1];
+				NinthEvent = E.Id;
+				W.KnownPlaces(E.Id, {{NinthNpc, 9}});
+			}
+		}
+		// The ticket: the forced entry's record in its event's q line says the seat was won in a satellite.
+		Base = Text(W);
+		const size_t At = TicketNpc >= 0 ? Base.find("world\tq\t" + TicketEvent + "\t") : std::string::npos;
+		const size_t Eol = At == std::string::npos ? At : Base.find('\n', At);
+		bool Marked = false;
+		if (Eol != std::string::npos)
+		{
+			const std::string Line = Base.substr(At, Eol - At);
+			const size_t Tab = Line.rfind('\t');
+			std::string Joined;
+			const std::vector<std::string> Recs = SplitOn(Line.substr(Tab + 1), '|');
+			for (size_t R = 0; R < Recs.size(); ++R)
+			{
+				std::vector<std::string> V = SplitOn(Recs[R], '~');
+				if (V.size() >= 2 && std::atoi(V[0].c_str()) == TicketNpc)
+				{
+					V[1] = "1";
+					Marked = true;
+				}
+				Joined += R ? "|" : "";
+				for (size_t K = 0; K < V.size(); ++K)
+				{
+					Joined += (K ? "~" : "") + V[K];
+				}
+			}
+			Base = Base.substr(0, At) + Line.substr(0, Tab + 1) + Joined + Base.substr(Eol);
+		}
+		Check(Marked && NinthNpc >= 0, "league oracle: the forced ticket entry and 9th place are set up (" + std::to_string(TicketNpc) + ", " + std::to_string(NinthNpc) + ")");
+	}
+	const int Month = world::LeagueMonth(Start);
+	const int Packed = world::LeaguePack(Div, Pace);
+	const int First = world::LeagueFirst(Packed);
+	world::World W;
+	Load(W, Base);
+	W.SetLeagueRoster(Rit, Month, Packed, Roster);
+	world::World Jump;
+	Load(Jump, Base);
+	Jump.SetLeagueRoster(Rit, Month, Packed, Roster);
+	std::string Hopped = Text(Jump);
+	const std::set<int> Group(Roster.begin(), Roster.end());
+	std::map<int, LeagueTruth> Truth;
+	std::map<int, world::SiteRecord> Last;
+	auto Snap = [&](std::map<int, world::SiteRecord>& Out) {
+		for (const int Id : Roster)
+		{
+			const world::SiteRecord* R = W.SiteRecordOf(Rit, Id);
+			Out[Id] = R ? *R : world::SiteRecord();
+		}
+	};
+	Snap(Last);
+	int Counted = 0;
+	int Tickets = 0;
+	int Under = 0;
+	int Later = 0;
+	int Past = 0;
+	int Ninth = -1;
+	int TicketSeen = 0;
+	bool Agree = true;
+	std::string Why;
+	for (int D = 0; D < 32; ++D) // December, then the 1st's day (January's)
+	{
+		const double From = Start + static_cast<double>(D) * Day;
+		const double To = From + Day;
+		std::vector<LeagueQueued> Q = LeagueQueue(Text(W), From, To);
+		std::stable_sort(Q.begin(), Q.end(), [](const LeagueQueued& A, const LeagueQueued& B) { return A.End < B.End; });
+		for (size_t K = 0; K < Q.size();)
+		{
+			// The events ending together (within a second), across their end.
+			size_t J = K;
+			std::map<int, int> Count;
+			bool Any = false;
+			for (; J < Q.size() && Q[J].End < Q[K].End + 0.02; ++J)
+			{
+				for (const std::pair<int, bool>& E : Q[J].Who)
+				{
+					const bool In = Group.count(E.first) != 0;
+					Count[E.first] += In ? 1 : 0;
+					Any = Any || In;
+				}
+			}
+			if (!Any)
+			{
+				K = J;
+				continue;
+			}
+			W.AdvanceTo(Q[K].End - 0.01);
+			std::map<int, world::SiteRecord> Before;
+			Snap(Before);
+			for (const int Id : Roster)
+			{
+				// (a result no queue line showed; January 1's new season zeroes the counts, which is no result)
+				Truth[Id].Unsure = Truth[Id].Unsure || Before[Id].Events > Last[Id].Events;
+			}
+			W.AdvanceTo(Q[J - 1].End + 0.01);
+			std::map<int, world::SiteRecord> After;
+			Snap(After);
+			for (size_t I = K; I < J; ++I)
+			{
+				const LeagueQueued& E = Q[I];
+				const int Field = std::max(E.Entries, static_cast<int>(E.Who.size()) + 1);
+				const std::vector<net::EventTemplate>& Temps = net::ForEvent(E.Id).Templates();
+				const std::string TemplateId = E.Template >= 0 && static_cast<size_t>(E.Template) < Temps.size() ? Temps[static_cast<size_t>(E.Template)].Id : std::string();
+				for (const std::pair<int, bool>& Who : E.Who)
+				{
+					if (Group.count(Who.first) == 0)
+					{
+						continue;
+					}
+					LeagueTruth& T = Truth[Who.first];
+					const world::SiteRecord& A = After[Who.first];
+					const world::SiteRecord& B = Before[Who.first];
+					if (Count[Who.first] != 1 || A.Events != B.Events + 1)
+					{
+						T.Unsure = true;
+						continue;
+					}
+					const double Raw = A.Points - B.Points;
+					const long long Prize = A.Won - B.Won;
+					const int Ft = LeagueFt(Raw, A.Wins > B.Wins, A.FinalTables > B.FinalTables, Field, E.BuyIn, E.TableSize, E.FinalSize);
+					Ninth = Who.first == NinthNpc && E.Id == NinthEvent ? Ft : Ninth;
+					if (Who.second)
+					{
+						++Tickets;
+						TicketSeen += Who.first == TicketNpc && E.Id == TicketEvent ? 1 : 0;
+						continue;
+					}
+					if (E.BuyIn <= 0)
+					{
+						continue;
+					}
+					const int Played = world::LeagueDay(E.End);
+					if (world::MonthKeyOf(Played) != Month)
+					{
+						++Past;
+						continue;
+					}
+					if (play::LeagueScore(Div, TemplateId, E.BuyIn, Played, 1.0, false, false) <= 0.0)
+					{
+						++Under;
+						continue;
+					}
+					if (T.TodayKey != Played)
+					{
+						T.TodayKey = Played;
+						T.TodayCount = 0;
+					}
+					if (T.TodayCount >= First)
+					{
+						++Later;
+						continue;
+					}
+					++Counted;
+					const bool FirstToday = T.TodayCount == 0;
+					++T.TodayCount;
+					T.FormUnsure = T.FormUnsure || Ft < 0;
+					const int Outcome = Ft > 0 ? 3 : Prize > 0 ? 2 : 1;
+					if (FirstToday)
+					{
+						T.Days = std::min(31, T.Days + 1);
+						T.Form = ((T.Form << 2) | Outcome) & 0x3ff;
+					}
+					else if ((T.Form & 3) < Outcome)
+					{
+						T.Form = (T.Form & ~3) | Outcome;
+					}
+					const bool Deadline = world::MonthKeyOf(Played + 1) != Month;
+					const double Score = play::LeagueScore(Div, TemplateId, E.BuyIn, Played, Raw, !E.Series.empty(), Deadline);
+					const int Tenths = static_cast<int>(std::min<long long>(32767, std::max<long long>(0, std::llround(Score * 10.0))));
+					if (Tenths > 0)
+					{
+						int Yy = 0;
+						int Mm = 0;
+						int Dd = 0;
+						world::CivilDate(Played, Yy, Mm, Dd);
+						int& Held = T.Best[Dd];
+						Held = std::max(Held, Tenths);
+					}
+				}
+			}
+			Last = After;
+			K = J;
+		}
+		W.AdvanceTo(To);
+		Snap(Last);
+		// The book against the rule, member by member, at each day's end.
+		const world::LeagueBook* Book = W.League(Rit);
+		for (const int Id : Roster)
+		{
+			const LeagueTruth& T = Truth[Id];
+			const world::LeagueMember* M = Book ? world::LeagueMemberOf(*Book, Id) : nullptr;
+			if (!M || T.Unsure)
+			{
+				Agree = Agree && M;
+				continue;
+			}
+			std::vector<int> Want;
+			for (const auto& It : T.Best)
+			{
+				Want.push_back(It.second);
+			}
+			std::sort(Want.rbegin(), Want.rend());
+			Want.resize(std::min<size_t>(8, Want.size()));
+			std::vector<int> Got;
+			bool Days = true;
+			for (const std::pair<int8_t, int16_t>& S : M->Best)
+			{
+				if (S.second > 0)
+				{
+					Got.push_back(S.second);
+					// (each held day scored what it holds; a tie may keep either day)
+					const auto It = T.Best.find(S.first);
+					Days = Days && It != T.Best.end() && It->second == S.second;
+				}
+			}
+			const bool Same = Got == Want && Days && M->Days == T.Days && M->TodayKey == T.TodayKey && M->TodayCount == T.TodayCount && (T.FormUnsure || M->Form == T.Form);
+			if (!Same && Agree)
+			{
+				Why = "member " + std::to_string(Id) + " after day " + std::to_string(D + 1) + ": days " + std::to_string(M->Days) + "/" + std::to_string(T.Days) + ", today " +
+					std::to_string(M->TodayKey) + ":" + std::to_string(M->TodayCount) + "/" + std::to_string(T.TodayKey) + ":" + std::to_string(T.TodayCount) + ", form " +
+					std::to_string(M->Form) + "/" + std::to_string(T.Form) + ", best " + std::to_string(Got.size()) + "/" + std::to_string(Want.size());
+			}
+			Agree = Agree && Same;
+		}
+		if (D % 4 == 1)
+		{
+			world::World H;
+			Load(H, Hopped);
+			H.AdvanceTo(From + 457.0 + static_cast<double>(D));
+			Hopped = Text(H);
+		}
+	}
+	int Unsure = 0;
+	int FormUnsure = 0;
+	int Full = 0;
+	for (const auto& It : Truth)
+	{
+		Unsure += It.second.Unsure ? 1 : 0;
+		FormUnsure += It.second.FormUnsure ? 1 : 0;
+		Full += It.second.Best.size() > 8 ? 1 : 0;
+	}
+	std::printf("  league oracle (%s, pace %d): %d entries counted, %d past the day's first %d, %d under the floor, %d on a ticket, %d after the 1st's turn; %d of %zu "
+				"members with more than 8 days, %d the records can't split, %d with a form they can't pin\n",
+		Div == 0 ? "Open" : "Steel", Pace, Counted, Later, First, Under, Tickets, Past, Full, Roster.size(), Unsure, FormUnsure);
+	Check(Agree, "league oracle: every member's book is the rule worked out from the world's own records, at every day's end (" + Why + ")");
+	Check(Unsure <= 2 && Counted > 100 && Past > 0 && (Div != 0 || Full > 0) && (Div == 0 || Under > 0) && (Pace != 1 || Later > 0),
+		"league oracle: the month ran the rule's paths (counted, under the floor, past the day's first, past 8 days, the 1st's turn)");
+	Check(TicketSeen == 1, "league oracle: a member's ticket entry is in their record but is no League entry (W4)");
+	Check(Ninth == 0, "league oracle: 9th at an 8-max table that pays more than 8 is a cash on the form, not a final table (" + std::to_string(Ninth) + ")");
+	Jump.AdvanceTo(W.Clock());
+	{
+		world::World H;
+		Load(H, Hopped);
+		H.AdvanceTo(W.Clock());
+		Hopped = Text(H);
+	}
+	const std::string Line = LeagueLines(Text(W), true);
+	Check(!Line.empty() && LeagueLines(Text(Jump), true) == Line && LeagueLines(Hopped, true) == Line,
+		"league oracle: the month in one jump, and saved and loaded every few days at odd minutes, ends with the same League line");
+}
+
+/**
+ * Ignite's Headliners hold for the month (F8: "each month the six ..."): through January, where the season's points start
+ * again at nothing, the six change only when someone's audience moves or they stop playing, never with a night's results.
+ * W is LeagueQueries' world at January 1, 6 AM.
+ */
+void LeagueHeadlinersHold(world::World& W)
+{
+	const int Jan1 = world::DayOn(2027, 1, 1);
+	std::vector<world::Headliner> Was;
+	std::map<int, int> FollowersWas;
+	std::set<int> PlayingWas;
+	int Changed = 0;
+	int Unexplained = 0;
+	bool Stable = true;
+	std::map<int, std::pair<double, ss::Chips>> Keys;
+	for (int D = 0; D < 31; ++D)
+	{
+		W.AdvanceTo(static_cast<double>(Jan1 + D) * Day + 720.0);
+		const std::vector<world::Headliner> All = world::Headliners(W, W.Clock(), 100000);
+		std::vector<world::Headliner> Six(All.begin(), All.begin() + static_cast<std::ptrdiff_t>(std::min<size_t>(6, All.size())));
+		std::map<int, int> Followers;
+		std::set<int> Playing;
+		for (const world::Headliner& H : All)
+		{
+			Followers[H.Npc] = H.Followers;
+			Playing.insert(H.Npc);
+			// The month's keys stay put: the points before the month and the money before the season.
+			const auto It = Keys.find(H.Npc);
+			Stable = Stable && (It == Keys.end() || (It->second.first == H.PointsBefore && It->second.second == H.WonBefore));
+			Keys[H.Npc] = {H.PointsBefore, H.WonBefore};
+		}
+		bool Same = Six.size() == Was.size();
+		for (size_t K = 0; Same && K < Six.size(); ++K)
+		{
+			Same = Six[K].Npc == Was[K].Npc;
+		}
+		if (D > 0 && !Same)
+		{
+			++Changed;
+			// Explained: someone in either six has a different audience than yesterday, or wasn't billed one of the days.
+			bool Moved = false;
+			for (const std::vector<world::Headliner>* List : {&Six, &Was})
+			{
+				for (const world::Headliner& H : *List)
+				{
+					const auto F = FollowersWas.find(H.Npc);
+					Moved = Moved || PlayingWas.count(H.Npc) == 0 || Playing.count(H.Npc) == 0 || F == FollowersWas.end() || F->second != Followers[H.Npc];
+				}
+			}
+			Unexplained += Moved ? 0 : 1;
+		}
+		Was = Six;
+		FollowersWas = Followers;
+		PlayingWas = Playing;
+	}
+	std::printf("  league: Ignite's Headliners through January changed on %d of 30 days (%d not by an audience or a break)\n", Changed, Unexplained);
+	Check(Stable && Unexplained == 0, "league: January's Headliners hold for the month: their points before it and money before the season stay put, and the six move only with an audience or a break");
+}
+
+/** A session's saves, kept (the last one). */
+struct LeagueSaveHooks : ss::SessionHooks
+{
+	ss::SaveData Last;
+	void Save(const ss::SaveData& D) override
+	{
+		Last = D;
+	}
+};
+
+/** The save's League line's month (-1: none). */
+int LeagueLineMonth(const std::string& Text)
+{
+	const size_t At = Text.find("world\tleague\t");
+	const std::vector<std::string> F = At == std::string::npos ? std::vector<std::string>() : Tabs(Text.substr(At, Text.find('\n', At) - At));
+	return F.size() > 3 ? std::atoi(F[3].c_str()) : -1;
+}
+
+/**
+ * The 1st's 6 AM step closes the month and hands the world the new group; the player saves within the hour and loads.
+ * The session keeps its last world text for up to an hour while nothing of the player's changes in the world (HeroRevision),
+ * so SetLeagueRoster must count as such a change: else that save holds last month's book, and the loaded world never
+ * records the new month's group (every member at 0 points all month).
+ */
+void LeagueSaveAfterDraw()
+{
+	LeagueSaveHooks H;
+	ss::Session S(H, "league-save-after-draw");
+	double Now = 0.0;
+	auto Jump = [&](double ToWorld) {
+		if (ToWorld > S.WorldMinutes())
+		{
+			S.LobbyMinutes += ToWorld - S.WorldMinutes();
+		}
+		Now += 1.0 / 30.0;
+		S.Update(Now);
+	};
+	const int Dec1 = world::DayOn(2026, 12, 1);
+	Jump(static_cast<double>(world::DayOn(2026, 11, 20)) * Day + 18.0 * 60.0);
+	ss::site::Join(S.Life.Sites, net::SiteId::RunItTwice, S.WorldMinutes());
+	// The book as the first paid RunItTwice entry leaves it (a Placement month, its group drawn at the next step).
+	S.Life.SitePlay.Rt.L.Month = -2;
+	S.Life.SitePlay.Rt.L.Placement = true;
+	S.Life.Update3LinesRead |= ss::life::U3SitePlay;
+	Jump(S.WorldMinutes() + 1.0);
+	const world::LeagueBook* November = S.Living().League(net::SiteId::RunItTwice);
+	const int NovemberKey = November ? November->MonthKey : -1;
+	// Dec 1 at 5:30 AM a save writes the world; at 6:05 the step has closed November and drawn December; a save at once.
+	Jump(static_cast<double>(Dec1) * Day + 330.0);
+	S.Save();
+	const int Before = LeagueLineMonth(H.Last.Serialize());
+	Jump(static_cast<double>(Dec1) * Day + 365.0);
+	const world::LeagueBook* December = S.Living().League(net::SiteId::RunItTwice);
+	S.Save();
+	const std::string Text = H.Last.Serialize();
+	const int After = LeagueLineMonth(Text);
+	ss::SaveData Back;
+	int Loaded = -1;
+	if (ss::SaveData::Parse(Text, Back))
+	{
+		LeagueSaveHooks H2;
+		ss::Session R(H2, "league-save-after-draw", &Back);
+		const world::LeagueBook* Again = R.Living().League(net::SiteId::RunItTwice);
+		Loaded = Again && Again->MonthKey == R.Life.SitePlay.Rt.L.Month ? Again->MonthKey : -1;
+	}
+	std::printf("  league: a save at 6:05 on Dec 1: the play book's month %d, the save's League line %d (the 5:30 save's %d), loaded %d\n", S.Life.SitePlay.Rt.L.Month, After, Before, Loaded);
+	Check(NovemberKey == world::MonthKeyOf(Dec1 - 1) && Before == NovemberKey && December && December->MonthKey == S.Life.SitePlay.Rt.L.Month && After == December->MonthKey &&
+			  Loaded == December->MonthKey,
+		"league: the group the 1st's step hands the world is in the next save's world text, and a load records it (SetLeagueRoster moves HeroRevision)");
+}
 } // namespace sites_seg
 
 int SegSites()
@@ -1589,6 +2940,32 @@ int SegSites()
 	ss_::Hero();
 	ss_::LaunchCommand();
 	ss_::Migration();
+	// Update 3 G2 (core-world): the League's world side and what core-siteplay reads from the world.
+	{
+		const auto TL = std::chrono::steady_clock::now();
+		std::string December;
+		ss::world::World Base;
+		ss_::LeagueRules();
+		ss_::LeagueScoring(Base, 7u, December);
+		ss_::LeagueQueries(Base, 7u);
+		ss_::LeagueHeadlinersHold(Base);
+		ss_::LeagueSaveAfterDraw();
+		// The G2 review's oracle: the book against the rule worked out from the world's records (Open at the first 3, whose
+		// micro fields run an event past the 6 AM turn; the long run adds Steel, with its floor, at the first 3 and a pace of 1).
+		ss_::LeagueOracle(December, 0, 0);
+		if (LongRun)
+		{
+			ss_::LeagueOracle(December, 2, 0);
+			ss_::LeagueOracle(December, 2, 1);
+		}
+		const char* Pairs = std::getenv("SS_S6P_PAIRS"); // S-6p.md's measurement: more pairs
+		ss_::LeagueBudget(December, Pairs ? std::max(1, std::atoi(Pairs)) : LongRun ? 5 : 1);
+		if (LongRun || std::getenv("SS_S6P"))
+		{
+			ss_::S6Prime(7u);
+		}
+		std::printf("  league: %.1f s\n", ss_::Seconds(TL));
+	}
 	if (LongRun)
 	{
 		ss_::Season(1234u);

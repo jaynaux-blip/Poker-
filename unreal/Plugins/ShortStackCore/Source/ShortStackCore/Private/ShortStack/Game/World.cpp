@@ -4,6 +4,7 @@
 #include "ShortStack/Game/Handles.h"
 #include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Live.h"
+#include "ShortStack/Game/WorldLeague.h"
 #include "WorldSim.h"
 
 #include <algorithm>
@@ -1038,18 +1039,41 @@ int World::RankBefore(net::SiteId Site, net::Board B, int Npc) const
 
 void World::SetLeagueRoster(net::SiteId Site, int MonthKey, int Div, const std::vector<int>& Npcs)
 {
-	// Update 3 (§3.6 R2): the month's group as the session drew it (dormant: nothing draws one before G2; core-world's
-	// Sim::SiteResult scores its members and WorldSave writes it then).
+	// Update 3 (§3.6 R2): the month's group as the session drew it (site::play::Step's roster). Sim::Apply scores its members'
+	// paid RunItTwice entries from here on and WorldSave writes the book as world\tleague. Div is WorldLeague.h's packed
+	// division and pace. Handing over the same month's group again keeps what the world has recorded for anyone still in it
+	// (a new month starts everyone at nothing); at most 19 people, each once, only people this world has.
+	if (Site == net::SiteId::RiverLine || Site >= net::SiteId::Count)
+	{
+		return;
+	}
 	LeagueBook& B = Leagues[Site];
+	std::vector<LeagueMember> Kept = B.MonthKey == MonthKey ? B.Members : std::vector<LeagueMember>();
 	B.MonthKey = MonthKey;
 	B.Div = static_cast<int8_t>(Div);
 	B.Members.clear();
 	for (const int Npc : Npcs)
 	{
+		if (B.Members.size() >= 19 || !Get(Npc) || LeagueMemberOf(B, Npc))
+		{
+			continue;
+		}
 		LeagueMember M;
 		M.Npc = Npc;
+		for (const LeagueMember& Was : Kept)
+		{
+			M = Was.Npc == Npc ? Was : M;
+		}
 		B.Members.push_back(M);
 	}
+	if (B.Members.empty())
+	{
+		Leagues.erase(Site); // no group: no book, and no world\tleague line
+	}
+	// The player's group changed: the session's next save writes the world again (it keeps its last world text for up to an
+	// hour while nothing of the player's moves). Otherwise a save soon after the 1st's 6 AM draw would hold last month's book,
+	// and the loaded world would never record the new month's group.
+	++HeroRev;
 }
 
 const LeagueBook* World::League(net::SiteId Site) const

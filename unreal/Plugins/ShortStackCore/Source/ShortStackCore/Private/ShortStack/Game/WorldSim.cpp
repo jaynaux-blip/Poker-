@@ -12,8 +12,10 @@
 #include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Live.h"
+#include "ShortStack/Game/SitePlay.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
+#include "ShortStack/Game/WorldLeague.h"
 #include "ShortStack/Structure.h"
 #include "WorldSim.h"
 
@@ -34,6 +36,9 @@ const double EdgeScale = 0.8;
 const double MaxEdge = 0.35;
 // A tier's field is a little softer than the regulars who started there (everyone else plays too).
 const double FieldSoftness = 0.0;
+
+// Update 3 (§3.6 R2): a League group member's paid RunItTwice entry, scored into the group's book (with the sites' helpers).
+void WorldLeagueRecord(LeagueBook& B, int Npc, const Pending& P, int Place, Chips Prize, double Points);
 
 bool Has(int Bits, int Bit)
 {
@@ -1452,6 +1457,16 @@ void Sim::Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, C
 	if (Site != net::SiteId::RiverLine)
 	{
 		SiteResult(W, N, P, Place, Prize, Points);
+		// Update 3 (§3.6 R2): the player's League group keeps its members' paid RunItTwice entries (a ticket or a freeroll
+		// moves no loop, W4, the same rule the player's own entries follow). One map lookup, then the group of 19.
+		if (Site == net::SiteId::RunItTwice && P.Online && !E.Ticket && P.BuyIn > 0)
+		{
+			const auto Group = W.Leagues.find(Site);
+			if (Group != W.Leagues.end() && !Group->second.Members.empty())
+			{
+				WorldLeagueRecord(Group->second, N.Id, P, Place, Prize, Points);
+			}
+		}
 	}
 	// RiverLine's running boards: its series and its Night Shift count only what was played on RiverLine (update 2 §5.8),
 	// checked where the points are added, so a rival's series or micro event can never switch or clear them.
@@ -3607,6 +3622,185 @@ bool WorldSitesSignsOnResults(const World& W, net::SiteId S, const Npc& N, const
 	const int Rank = static_cast<size_t>(N.Id) < SeasonRank.size() ? SeasonRank[static_cast<size_t>(N.Id)] : 0;
 	return Rank >= 1 && Rank <= 100;
 }
+
+/** A League book's member for an npc (null: not in the group). */
+LeagueMember* WorldLeagueSlot(LeagueBook& B, int Npc)
+{
+	for (LeagueMember& Each : B.Members)
+	{
+		if (Each.Npc == Npc)
+		{
+			return &Each;
+		}
+	}
+	return nullptr;
+}
+
+/** A member's best days in the book's order: the most points first, then the earlier day; empty slots last. */
+void WorldLeagueSortBest(LeagueMember& M)
+{
+	std::stable_sort(M.Best.begin(), M.Best.end(), [](const std::pair<int8_t, int16_t>& Lhs, const std::pair<int8_t, int16_t>& Rhs) {
+		return Lhs.second != Rhs.second ? Lhs.second > Rhs.second : Lhs.first < Rhs.first;
+	});
+}
+
+/**
+ * Update 3 (§3.6 R2): a League group member's paid RunItTwice entry, scored by the rule the player's own entries are scored
+ * by (site::play::LeagueScore: the division's floor, its Matchdays, a series, Deadline Day), on the play day the result
+ * came in (LeagueDay(P.End), the 6 AM day; the player's own results score on site::play::PlayDay of theirs, the same day).
+ * Only the member's first entries of a day at or above the floor count (3, or the group's pace), and the day's best is the
+ * best of them; the book keeps the best 8 days (day of the month, points x 10, at most 3,276.7), the League days and the
+ * last 5 days' form. A result from another month (one that ended after the 1st's 6 AM turn, before the session handed the
+ * world the new group) is left out: the month it belongs to has closed.
+ */
+void WorldLeagueRecord(LeagueBook& B, int Npc, const Pending& P, int Place, Chips Prize, double Points)
+{
+	LeagueMember* M = WorldLeagueSlot(B, Npc);
+	if (!M)
+	{
+		return;
+	}
+	const int ResultDay = LeagueDay(P.End);
+	if (sim::MonthKey(ResultDay) != B.MonthKey)
+	{
+		return;
+	}
+	const std::vector<net::EventTemplate>& Temps = net::ForEvent(P.Id).Templates();
+	const net::EventTemplate* Template = P.Template >= 0 && static_cast<size_t>(P.Template) < Temps.size() ? &Temps[static_cast<size_t>(P.Template)] : nullptr;
+	const std::string TemplateId = Template ? Template->Id : std::string();
+	const int Division = LeagueDivision(B.Div);
+	// (One point through the rule is 0 only under the division's floor: an entry under it isn't a League entry at all, and
+	// doesn't use up one of the day's first entries.)
+	if (site::play::LeagueScore(Division, TemplateId, P.BuyIn, ResultDay, 1.0, false, false) <= 0.0)
+	{
+		return;
+	}
+	if (M->TodayKey != ResultDay)
+	{
+		M->TodayKey = ResultDay;
+		M->TodayCount = 0;
+	}
+	if (M->TodayCount >= LeagueFirst(B.Div))
+	{
+		return;
+	}
+	const bool FirstToday = M->TodayCount == 0;
+	++M->TodayCount;
+	// The day's form (2 bits, the newest day lowest): 3 a final table, 2 a cash, 1 played and blank. The final table is the
+	// event's own last table, as the player's form reads it (site::show::FinalTableSeats: its TableSize, the last 8 at the
+	// rivals' 8-max; more than 3 entries); the world's own records keep their 1st-to-9th (P.FinalSize), unchanged.
+	const int Seats = Template && Template->TableSize >= 2 ? Template->TableSize : 9;
+	const uint16_t Outcome = static_cast<uint16_t>(Place >= 1 && Place <= Seats && P.Entries > 3 ? 3 : Prize > 0 ? 2 : 1);
+	if (FirstToday)
+	{
+		M->Days = static_cast<int8_t>(std::min(31, M->Days + 1));
+		M->Form = static_cast<uint16_t>(((M->Form << 2) | Outcome) & 0x3ff);
+	}
+	else if ((M->Form & 3) < Outcome)
+	{
+		M->Form = static_cast<uint16_t>((M->Form & ~3u) | Outcome);
+	}
+	const bool Deadline = sim::MonthKey(ResultDay + 1) != B.MonthKey;
+	const double Score = site::play::LeagueScore(Division, TemplateId, P.BuyIn, ResultDay, Points, !P.Series.empty(), Deadline);
+	const long long Tenths = std::min<long long>(32767, std::max<long long>(0, std::llround(Score * 10.0)));
+	if (Tenths <= 0)
+	{
+		return;
+	}
+	const int8_t Date = static_cast<int8_t>(sim::MonthDay(ResultDay));
+	const int16_t Pts = static_cast<int16_t>(Tenths);
+	for (std::pair<int8_t, int16_t>& Slot : M->Best)
+	{
+		if (Slot.second > 0 && Slot.first == Date)
+		{
+			// Today's best so far: a better entry today raises it (a day counts once, at its best).
+			if (Pts > Slot.second)
+			{
+				Slot.second = Pts;
+				WorldLeagueSortBest(*M);
+			}
+			return;
+		}
+	}
+	// (Today's best isn't held: it was never better than the weakest of the 8, so only this entry can be.)
+	const auto Weakest = std::min_element(M->Best.begin(), M->Best.end(),
+		[](const std::pair<int8_t, int16_t>& Lhs, const std::pair<int8_t, int16_t>& Rhs) { return Lhs.second < Rhs.second; });
+	if (Pts > Weakest->second)
+	{
+		*Weakest = {Date, Pts};
+		WorldLeagueSortBest(*M);
+	}
+}
+
+/**
+ * The entries the world has already decided for its people on a site: its registrations for the site's events starting from
+ * From to the end of the last day it has planned (tomorrow), counted into Planned by npc; returns how many days that covers.
+ */
+double WorldLeaguePlanned(const World& W, net::SiteId S, double From, std::map<int, int>& Planned)
+{
+	const double To = (static_cast<double>(sim::DayAt(W.Clock())) + 2.0) * 1440.0;
+	if (To <= From)
+	{
+		return 0.0;
+	}
+	for (const net::EventInstance& E : net::Site(S).Window(From, To))
+	{
+		if (E.Start < From)
+		{
+			continue;
+		}
+		for (const int Id : W.RegisteredNow(E.Id))
+		{
+			++Planned[Id];
+		}
+	}
+	return (To - From) / 1440.0;
+}
+
+/**
+ * MonthlyVolume's rule (WorldLeague.h): the season's entries per 30 days since it began for them. In its first week (the
+ * counts start again every January 1, or they've only just arrived) the entries the world has already planned for them
+ * count too, over the days it has planned (Planned and PlannedDays, worked out once by the caller when needed), so the
+ * 1st of January reads a real rate rather than nothing. -1 for someone who isn't a member, or a site not open.
+ */
+double WorldLeagueVolume(const World& W, net::SiteId S, int Npc, double At, const std::map<int, int>* Planned, double PlannedDays)
+{
+	const world::Npc* Who = W.Get(Npc);
+	const double Launched = W.SiteLaunched(S);
+	if (!Who || S == net::SiteId::RiverLine || (Who->Sites & Sim::SiteBit(S)) == 0 || Launched < 0.0 || Launched > At)
+	{
+		return -1.0;
+	}
+	const double YearFrom = static_cast<double>(YearStart(YearOf(sim::DayAt(At)))) * 1440.0;
+	const double From = std::max({YearFrom, Launched, static_cast<double>(Who->Joined) * 1440.0});
+	const SiteRecord* R = W.SiteRecordOf(S, Npc);
+	double Entries = static_cast<double>(R ? R->Events : 0);
+	double Days = std::max(0.0, (At - From) / 1440.0);
+	if (Days < 7.0 && Planned)
+	{
+		const auto It = Planned->find(Npc);
+		Entries += It == Planned->end() ? 0.0 : static_cast<double>(It->second);
+		Days += PlannedDays;
+	}
+	return Entries * 30.0 / std::max(1.0, Days);
+}
+
+/** Whether anyone's season on a site is under a week old at At (January's first week, or a newcomer): the planned count is needed. */
+bool WorldLeagueYoung(const World& W, net::SiteId S, double At)
+{
+	if (At - static_cast<double>(YearStart(YearOf(sim::DayAt(At)))) * 1440.0 < 7.0 * 1440.0 || At - W.SiteLaunched(S) < 7.0 * 1440.0)
+	{
+		return true;
+	}
+	for (const world::Npc& Who : W.People())
+	{
+		if ((Who.Sites & Sim::SiteBit(S)) != 0 && At - static_cast<double>(Who.Joined) * 1440.0 < 7.0 * 1440.0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
 } // namespace worldsim_detail
 
 net::SiteId Sim::SiteOf(const Pending& P)
@@ -3953,14 +4147,8 @@ void Sim::SiteResult(World& W, Npc& N, const Pending& P, int Place, Chips Prize,
 		}
 		Race.second[N.Id] += Points;
 	}
-	// Update 3 (§3.6 R2): the player's League group on this site keeps its members' scored days. Dormant: no group is
-	// recorded before G2.
-	const auto LeagueGroup = W.Leagues.find(S);
-	if (LeagueGroup != W.Leagues.end() && !LeagueGroup->second.Members.empty())
-	{
-		// core-world (G2): a member's result, scored through site::play::LeagueScore (the floor, the first-3 rule, the
-		// multipliers), into their best 8, their days and their form.
-	}
+	// (Update 3, §3.6 R2: a League group member's result is scored in Apply, beside this call, where the entry says whether
+	// it was paid: WorldLeagueRecord.)
 }
 
 double Sim::SiteValue(const World& W, net::SiteId S, net::Board B, int Npc, double At)
@@ -4054,6 +4242,216 @@ void Sim::SitesNewYear(World& W)
 			It = R.Lifetime == 0 ? Site.second.erase(It) : std::next(It);
 		}
 	}
+}
+
+// ------------------------------------------------------------------ Update 3 G2: the League's rules, the sites' people
+// (WorldLeague.h; §3.6 R2, §2.6 F8). Pure reads of the world's saved state: nothing here writes.
+
+int LeagueDay(double At)
+{
+	return sim::DayAt(At - 360.0);
+}
+
+int LeagueMonth(double At)
+{
+	return sim::MonthKey(LeagueDay(At));
+}
+
+int LeaguePack(int Division, int Pace)
+{
+	return std::max(0, std::min(4, Division)) | (std::max(0, std::min(3, Pace)) << 3);
+}
+
+int LeagueDivision(int Packed)
+{
+	return std::min(4, Packed & 7);
+}
+
+int LeagueFirst(int Packed)
+{
+	const int Pace = (Packed >> 3) & 3;
+	return Pace > 0 ? Pace : 3;
+}
+
+double LeaguePoints(const LeagueMember& M)
+{
+	int Tenths = 0;
+	for (const std::pair<int8_t, int16_t>& Slot : M.Best)
+	{
+		Tenths += std::max<int>(0, Slot.second);
+	}
+	return static_cast<double>(Tenths) / 10.0;
+}
+
+std::vector<int> LeagueForm(const LeagueMember& M)
+{
+	std::vector<int> Out;
+	for (int K = 0; K < std::min<int>(5, M.Days); ++K)
+	{
+		const int DayForm = (M.Form >> (2 * K)) & 3;
+		if (DayForm == 0)
+		{
+			break;
+		}
+		Out.push_back(DayForm);
+	}
+	return Out;
+}
+
+const LeagueMember* LeagueMemberOf(const LeagueBook& B, int Npc)
+{
+	for (const LeagueMember& Each : B.Members)
+	{
+		if (Each.Npc == Npc)
+		{
+			return &Each;
+		}
+	}
+	return nullptr;
+}
+
+double MonthlyVolume(const World& W, net::SiteId Site, int Npc, double At)
+{
+	// The season, for them: from January 1, the site's launch or the day they joined, whichever came last (SitesNewYear
+	// starts every record's count again on January 1); in its first week, with the entries the world has planned for them.
+	std::map<int, int> Planned;
+	double PlannedDays = 0.0;
+	const world::Npc* Who = W.Get(Npc);
+	if (Who && Site != net::SiteId::RiverLine && W.SiteLaunched(Site) >= 0.0)
+	{
+		const double YearFrom = static_cast<double>(YearStart(YearOf(sim::DayAt(At)))) * 1440.0;
+		if (At - std::max({YearFrom, W.SiteLaunched(Site), static_cast<double>(Who->Joined) * 1440.0}) < 7.0 * 1440.0)
+		{
+			PlannedDays = WorldLeaguePlanned(W, Site, At, Planned);
+		}
+	}
+	return WorldLeagueVolume(W, Site, Npc, At, &Planned, PlannedDays);
+}
+
+std::vector<SiteMember> SiteMembers(const World& W, net::SiteId Site, double At)
+{
+	std::vector<SiteMember> Out;
+	if (Site == net::SiteId::RiverLine || W.SiteLaunched(Site) < 0.0 || W.SiteLaunched(Site) > At)
+	{
+		return Out;
+	}
+	std::map<int, int> Planned;
+	const double PlannedDays = WorldLeagueYoung(W, Site, At) ? WorldLeaguePlanned(W, Site, At, Planned) : 0.0;
+	for (const world::Npc& Who : W.People())
+	{
+		if (!Who.Playing() || Who.Faded || (Who.Sites & Sim::SiteBit(Site)) == 0)
+		{
+			continue;
+		}
+		SiteMember M;
+		M.Npc = Who.Id;
+		M.Tier = Who.Tier;
+		M.Volume = WorldLeagueVolume(W, Site, Who.Id, At, &Planned, PlannedDays);
+		const SiteRecord* R = W.SiteRecordOf(Site, Who.Id);
+		M.Events = R ? R->Events : 0;
+		Out.push_back(M);
+	}
+	return Out;
+}
+
+int LeaguePaceOf(const World& W, const std::vector<int>& Npcs, double At)
+{
+	// design_model_v11.py's rule: each member's entries per playing day as max(1, volume / 30), the median of the group,
+	// rounded, 1-3.
+	std::map<int, int> Planned;
+	const double PlannedDays = WorldLeagueYoung(W, net::SiteId::RunItTwice, At) ? WorldLeaguePlanned(W, net::SiteId::RunItTwice, At, Planned) : 0.0;
+	std::vector<double> PerDay;
+	for (const int Who : Npcs)
+	{
+		const double Volume = WorldLeagueVolume(W, net::SiteId::RunItTwice, Who, At, &Planned, PlannedDays);
+		PerDay.push_back(Volume >= 30.0 ? Volume / 30.0 : 1.0);
+	}
+	if (PerDay.empty())
+	{
+		return 3;
+	}
+	std::sort(PerDay.begin(), PerDay.end());
+	const double Median = PerDay[PerDay.size() / 2];
+	return std::max(1, std::min(3, static_cast<int>(std::lround(Median))));
+}
+
+std::vector<int> SiteTeamNow(const World& W, net::SiteId Site)
+{
+	std::vector<int> Out;
+	if (WorldSitesTeamSize(Site) <= 0)
+	{
+		return Out;
+	}
+	const std::string Team = WorldSitesTeamName(Site);
+	for (const world::Npc& Who : W.People())
+	{
+		if (Who.Sponsor == Team)
+		{
+			Out.push_back(Who.Id);
+		}
+	}
+	return Out;
+}
+
+std::vector<Headliner> Headliners(const World& W, double At, int Count)
+{
+	std::vector<Headliner> Out;
+	const double Launched = W.SiteLaunched(net::SiteId::Ignite);
+	if (Count <= 0 || Launched < 0.0 || Launched > At)
+	{
+		return Out;
+	}
+	const bool Fresh = W.Began() == Start::Blank;
+	for (const world::Npc& Who : W.People())
+	{
+		if (!Who.Playing() || Who.Faded || (Who.Sites & Sim::SiteBit(net::SiteId::Ignite)) == 0)
+		{
+			continue;
+		}
+		Headliner H;
+		H.Npc = Who.Id;
+		H.Followers = Who.Followers;
+		// This month's points are Ignite's month race (the World month, from midnight on the 1st); the season's before it are
+		// the record less the race, which stays put all month (both count the same results), held to cents.
+		const SiteRecord* R = W.SiteRecordOf(net::SiteId::Ignite, Who.Id);
+		H.PointsMonth = W.BoardValue(net::SiteId::Ignite, net::Board::Month, Who.Id, At);
+		H.PointsBefore = std::max(0.0, std::round(((R ? R->Points : 0.0) - H.PointsMonth) * 100.0) / 100.0);
+		// January has no points before the month (SitesNewYear starts the season's at nothing), so the next tiebreak is what
+		// they won on Ignite before this season: the lifetime money less the season's, which stays put all year. (This month's
+		// points move with every night's results; ranked before it, January's six would change from day to day.)
+		H.WonBefore = R ? std::max<Chips>(0, R->Lifetime - R->Won) : 0;
+		// Someone with nothing to bill (no audience, no points, no Ignite money) never headlines; a fresh world bills on
+		// points alone.
+		const bool Billed = H.PointsBefore > 0.0 || H.WonBefore > 0 || H.PointsMonth > 0.0;
+		if (Billed || (!Fresh && H.Followers > 0))
+		{
+			Out.push_back(H);
+		}
+	}
+	std::sort(Out.begin(), Out.end(), [Fresh](const Headliner& Lhs, const Headliner& Rhs) {
+		if (!Fresh && Lhs.Followers != Rhs.Followers)
+		{
+			return Lhs.Followers > Rhs.Followers;
+		}
+		if (Lhs.PointsBefore != Rhs.PointsBefore)
+		{
+			return Lhs.PointsBefore > Rhs.PointsBefore;
+		}
+		if (Lhs.WonBefore != Rhs.WonBefore)
+		{
+			return Lhs.WonBefore > Rhs.WonBefore;
+		}
+		if (Lhs.PointsMonth != Rhs.PointsMonth)
+		{
+			return Lhs.PointsMonth > Rhs.PointsMonth;
+		}
+		return Lhs.Npc < Rhs.Npc;
+	});
+	if (Out.size() > static_cast<size_t>(Count))
+	{
+		Out.resize(static_cast<size_t>(Count));
+	}
+	return Out;
 }
 } // namespace world
 } // namespace ss

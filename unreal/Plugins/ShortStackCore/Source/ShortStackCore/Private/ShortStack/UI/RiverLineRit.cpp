@@ -37,26 +37,16 @@ namespace ui
 {
 namespace rlrit_detail
 {
-const net::SiteId RitSite = net::SiteId::RunItTwice;
 constexpr float RitRailW = 216.0f;   // the rail
 constexpr float RitRailMini = 64.0f; // the rail at a table
 constexpr float RitClientH = 962.0f; // the client above the taskbar
 constexpr float RitTop = 84.0f;      // under the tape and the header
-/** G1: the League is G2's, so its plate stays hidden (the others close up and number 1-8). */
-constexpr bool RitLeagueOpen = false;
-
-/** Everything a page draws with: the laptop, its session, the canvas and pointer, this laptop's state, the clocks. */
-struct RitCtx
+/** G2: the League is open while core's loops are live (RitView::On), so the rail shows its 9 plates; with them off, G1's 8
+ *  (LEAGUE hidden, the others closed up to 1-8). */
+bool RitLeagueOpen(const RitPlay& P)
 {
-	RiverLine& RL;
-	Session& S;
-	Canvas& C;
-	Ui& UI;
-	RitUi& U;
-	double Now = 0.0;
-	double World = 0.0;
-	bool Preview = false;
-};
+	return P.On;
+}
 
 /** A plate on the rail: its page, its label, its nav id (the page's index: nav0..nav8). */
 struct RitPlateDef
@@ -89,8 +79,8 @@ std::string RitPageName(RiverLine::Page P)
 	return "THE BOARD";
 }
 
-/** The page a RunItTwice client shows for P at G1: its own nine (League hidden), the Member File; anything else, the Board. */
-RiverLine::Page RitPageOf(RiverLine::Page P)
+/** The page a RunItTwice client shows for P: its own nine (the League while it's open), the Member File; else the Board. */
+RiverLine::Page RitPageOf(RiverLine::Page P, bool LeagueOpen)
 {
 	switch (P)
 	{
@@ -103,7 +93,7 @@ RiverLine::Page RitPageOf(RiverLine::Page P)
 	case RiverLine::Page::Promotions:
 	case RiverLine::Page::Cashier:
 	case RiverLine::Page::Profile: return P;
-	case RiverLine::Page::League: return RitLeagueOpen ? P : RiverLine::Page::Lobby;
+	case RiverLine::Page::League: return LeagueOpen ? P : RiverLine::Page::Lobby;
 	default: break;
 	}
 	return RiverLine::Page::Lobby;
@@ -323,7 +313,7 @@ RitStatus RitStatusOf(const Session& S, const net::EventInstance& E, const net::
 }
 
 /** The pointer: a click inside R this frame (immediate mode, through the laptop's Ui). */
-Ui::ClickState RitClick(RitCtx& X, const std::string& Id, const Rect& R, bool Enabled = true)
+Ui::ClickState RitClick(RitCtx& X, const std::string& Id, const Rect& R, bool Enabled)
 {
 	return X.UI.Clickable(Id, R, Enabled && !X.Preview);
 }
@@ -363,7 +353,7 @@ void RitRailPlates(RitCtx& X, bool Collapsed)
 	int Num = 0;
 	for (const RitPlateDef& D : RitPlates)
 	{
-		if (D.P == RiverLine::Page::League && !RitLeagueOpen)
+		if (D.P == RiverLine::Page::League && !RitLeagueOpen(X.P))
 		{
 			continue;
 		}
@@ -532,14 +522,37 @@ void RitRailMember(RitCtx& X)
 	const site::Account* A = RitAccount(X.S);
 	const site::show::Accrual Ac = RitAccrual(X.S);
 	X.C.FillRect({8.0f, 700.0f, 200.0f, 1.0f}, RitC(RitHair));
-	RitSquareAvatar(X.C, 20.0f, 714.0f, 56.0f, X.S.HeroName, RitC(RitChrome));
+	// The avatar's frame goes Signal Red while the League has you top of the group; signed with the team, the crosshair is on
+	// you (R4, "you're the bounty").
+	const bool Top = X.P.InLeague && X.P.Rank == 1;
+	RitSquareAvatar(X.C, 20.0f, 714.0f, 56.0f, X.S.HeroName, RitC(Top ? RitRed : RitChrome));
+	if (Top)
+	{
+		RitGlow(X.C, {20.0f, 714.0f, 56.0f, 56.0f}, RitRed, 0.35f, 10.0f);
+	}
+	if (X.P.Scalps.Bounty)
+	{
+		RitCrosshair(X.C, 68.0f, 722.0f, 8.0f);
+	}
 	RitText(X.C, X.S.HeroName, 88.0f, 730.0f, 15.0f, RitC(RitInk), RitFace::Name, Align::Left, Baseline::Alphabetic, 116.0f);
-	// The Club tier as a mini card chip with its rate (the League's division and place join it at G2).
-	X.C.FillRect({88.0f, 742.0f, 16.0f, 11.0f}, RitC(Ac.Tier >= 2 ? RitChromeMid : RitPanel2));
-	X.C.StrokePolyline({{88.5f, 742.5f}, {103.5f, 742.5f}, {103.5f, 752.5f}, {88.5f, 752.5f}}, true, RitC(RitChromeDark), 0.8f);
-	RitLabel(X.C, Ac.Tier > 0 ? RitTierName(Ac.Tier) + " \xC2\xB7 " + RitTierPct(Ac.Tier) : std::string("Club \xC2\xB7 no tier yet"), 110.0f, 752.0f, 12.0f, RitC(RitInk));
-	const net::HeroStats Me = rlsites_detail::SitesHero(X.S, RitSite, net::Site(RitSite), X.World, net::Board::Season);
-	RitLabel(X.C, "Season \xC2\xB7 " + Grouped(static_cast<int64_t>(std::llround(Me.SeasonPoints))) + " pts", 88.0f, 774.0f, 13.0f, RitC(RitChrome));
+	if (X.P.InLeague || X.P.Started)
+	{
+		// The division's crest in its status metal and the League place ("STEEL · 7TH"), then the Club tier's mini card.
+		RitCrest(X.C, 95.0f, 747.0f, 15.0f, X.P.Div);
+		RitLabel(X.C, RitUpper(RitDivName(X.P.Div)) + (X.P.InLeague && X.P.Rank > 0 ? " \xC2\xB7 " + RitPlace(X.P.Rank) : std::string()), 110.0f, 752.0f, 12.0f, RitC(RitInk));
+		X.C.FillRect({88.0f, 764.0f, 16.0f, 11.0f}, RitC(Ac.Tier >= 2 ? RitChromeMid : RitPanel2));
+		X.C.StrokePolyline({{88.5f, 764.5f}, {103.5f, 764.5f}, {103.5f, 774.5f}, {88.5f, 774.5f}}, true, RitC(RitChromeDark), 0.8f);
+		RitLabel(X.C, Ac.Tier > 0 ? RitTierName(Ac.Tier) + " \xC2\xB7 " + RitTierPct(Ac.Tier) : std::string("Club \xC2\xB7 no tier yet"), 110.0f, 774.0f, 12.0f, RitC(RitChrome));
+	}
+	else
+	{
+		// No League yet: the Club tier, and the season's points (as at G1).
+		X.C.FillRect({88.0f, 742.0f, 16.0f, 11.0f}, RitC(Ac.Tier >= 2 ? RitChromeMid : RitPanel2));
+		X.C.StrokePolyline({{88.5f, 742.5f}, {103.5f, 742.5f}, {103.5f, 752.5f}, {88.5f, 752.5f}}, true, RitC(RitChromeDark), 0.8f);
+		RitLabel(X.C, Ac.Tier > 0 ? RitTierName(Ac.Tier) + " \xC2\xB7 " + RitTierPct(Ac.Tier) : std::string("Club \xC2\xB7 no tier yet"), 110.0f, 752.0f, 12.0f, RitC(RitInk));
+		const net::HeroStats Me = rlsites_detail::SitesHero(X.S, RitSite, net::Site(RitSite), X.World, net::Board::Season);
+		RitLabel(X.C, "Season \xC2\xB7 " + Grouped(static_cast<int64_t>(std::llround(Me.SeasonPoints))) + " pts", 88.0f, 774.0f, 13.0f, RitC(RitChrome));
+	}
 	(void)A;
 	X.C.FillRect({20.0f, 796.0f, 176.0f, 1.0f}, RitC(RitHair));
 	RitTwice(X.C, RitClock(X.World), 20.0f, 840.0f, 30.0f, RitC(RitWhite));
@@ -586,6 +599,48 @@ std::vector<RitTapeItem> RitTapeBuild(RitCtx& X)
 {
 	std::vector<RitTapeItem> Out = X.U.Extra; // the tables' own lines first: the latest wins
 	const net::Network& Net = net::Site(RitSite);
+	// G2: the desk bells first (a starred event projected short as its late registration closes), in amber.
+	for (const RitBellView& B : X.P.Bells)
+	{
+		Out.push_back({"bell:" + B.EventId, RitUpper(rlnet_detail::NetShortName(B.Name)) + " \xC2\xB7 PROJ. SHORT " + Money(B.Short) + " \xC2\xB7 REG CLOSES " + RitClock(B.Closes), RitAmber, 0});
+	}
+	// Your League group (the world's scores): Deadline Day's line, your place, the group's leader.
+	if (X.P.InLeague && X.P.Rank > 0)
+	{
+		const std::string Group = RitGroupTag(X.P);
+		const RitLeagueRow* Me = RitHeroRow(X.P);
+		if (X.P.Deadline)
+		{
+			const long long Hours = std::max(1LL, static_cast<long long>(std::ceil((X.P.Closes - X.World) / 60.0)));
+			Out.push_back({"deadline", "DEADLINE DAY \xC2\xB7 " + std::to_string(Hours) + " H LEFT \xC2\xB7 " + Group + ": YOU " + RitPlace(X.P.Rank) +
+										   (X.P.Rank <= X.P.Up ? std::string(", IN THE PROMOTION PLACES") : ", " + RitPts(X.P.ToPromotion) + " PTS FROM PROMOTION"),
+				RitWhite, 0});
+		}
+		else
+		{
+			Out.push_back({"league:you", Group + " \xC2\xB7 YOU " + RitPlace(X.P.Rank) + " \xC2\xB7 " + RitPts(X.P.Points) + " PTS", RitInk, Me ? (Me->Move > 0 ? 1 : Me->Move < 0 ? -1 : 0) : 0});
+		}
+		if (!X.P.Table.empty() && X.P.Table.front().Npc >= 0)
+		{
+			Out.push_back({"league:lead", Group + " \xC2\xB7 " + RitUpper(X.P.Table.front().Name) + " LEADS \xC2\xB7 " + RitPts(X.P.Table.front().Points) + " PTS", RitInk, 0});
+		}
+	}
+	// Your Callout at your table.
+	if (X.P.Callout.On && X.S.T)
+	{
+		bool Here = false;
+		for (const SeatVis& V : X.S.Seats)
+		{
+			Here = Here || (V.Present && !V.IsHero && V.Name == X.P.Callout.Name);
+		}
+		if (Here)
+		{
+			const bool Lead = X.P.Callout.Mine >= X.P.Callout.Theirs;
+			Out.push_back({"callout:here", "CALLOUT \xC2\xB7 " + RitUpper(X.P.Callout.Name) + " AT YOUR TABLE \xC2\xB7 YOU " + (Lead ? "LEAD " : "TRAIL ") +
+												Grouped(static_cast<int64_t>(std::llround(X.P.Callout.Mine))) + "-" + Grouped(static_cast<int64_t>(std::llround(X.P.Callout.Theirs))),
+				RitInk, 0});
+		}
+	}
 	// Your tables: players left, and where you stand.
 	for (const rlsites_detail::StripRow& Row : RitSeated(X))
 	{
@@ -642,11 +697,10 @@ std::vector<RitTapeItem> RitTapeBuild(RitCtx& X)
 	for (const net::EventInstance& E : Recent)
 	{
 		const site::show::OverlayView V = site::show::OverlayOf(Net, E, X.World);
-		if (V.Shown && !V.Actual && V.Cents > 0)
+		const bool Belled = std::any_of(X.P.Bells.begin(), X.P.Bells.end(), [&E](const RitBellView& B) { return B.EventId == E.Id; });
+		if (V.Shown && !V.Actual && V.Cents > 0 && !Belled)
 		{
-			const net::EventTemplate& T = Net.TemplateOf(E);
 			Shorts.push_back({V.Cents, "ov:" + E.Id});
-			(void)T;
 		}
 	}
 	std::sort(Shorts.begin(), Shorts.end(), [](const auto& A, const auto& B) { return A.first > B.first; });
@@ -701,19 +755,23 @@ std::vector<RitTapeItem> RitTapeBuild(RitCtx& X)
 void RitTapeBar(RitCtx& X, float X0)
 {
 	const Rect R{X0, 0.0f, 1600.0f - X0, 32.0f};
+	// Deadline Day (§3.6 R2): the whole tape turns Signal Red with Hot White type.
+	const bool Deadline = X.P.Deadline && X.P.InLeague;
 	RitPanelBegin();
-	X.C.FillRect(R, RitC(RitTape));
-	RitScanlines(X.C, R, RitRed, 0.22f);
+	X.C.FillRect(R, RitC(Deadline ? RitRed : RitTape));
+	RitScanlines(X.C, R, Deadline ? RitDeep : RitRed, Deadline ? 0.30f : 0.22f);
 	X.C.FillRect({X0, 31.0f, R.W, 1.0f}, RitC(RitHair));
 	// The LIVE bug.
-	RitCutFill(X.C, {X0 + 8.0f, 7.0f, 48.0f, 18.0f}, 4.0f, RitC(RitRed));
+	RitCutFill(X.C, {X0 + 8.0f, 7.0f, 48.0f, 18.0f}, 4.0f, RitC(Deadline ? RitDeep : RitRed));
 	if (X.Preview || std::fmod(X.Now, 1.0) < 0.5)
 	{
 		X.C.FillCircle(X0 + 17.0f, 16.0f, 3.0f, RitC(RitWhite));
 	}
 	RitText(X.C, "LIVE", X0 + 38.0f, 16.0f, 12.0f, RitC(RitWhite), RitFace::Cond, Align::Center, Baseline::Middle);
 	// The items, rebuilt once a world minute; a new item or a changed figure flashes (one at a time, 160 ms).
-	const long long Key = static_cast<long long>(std::floor(X.World)) * 8 + (X.S.CurrentScreen == Screen::Table ? 1 : 0);
+	// (G2: a new desk bell, Deadline Day or a League group rebuilds it at once, not at the next world minute.)
+	const long long Key = static_cast<long long>(std::floor(X.World)) * 128 + (X.S.CurrentScreen == Screen::Table ? 1 : 0) + 2 * static_cast<long long>(std::min<size_t>(X.P.Bells.size(), 7)) +
+		(Deadline ? 16 : 0) + (X.P.InLeague ? 32 : 0) + (X.P.Callout.On ? 64 : 0);
 	if (Key != X.U.TapeKey)
 	{
 		const bool First = X.U.TapeSeen.empty();
@@ -746,7 +804,7 @@ void RitTapeBar(RitCtx& X, float X0)
 	std::vector<float> Widths;
 	for (const RitTapeItem& It : X.U.Tape)
 	{
-		Widths.push_back(RitMeasure(X.C, It.Text, 15.0f));
+		Widths.push_back(RitMeasure(X.C, It.Text, 15.0f) + (It.Move != 0 ? 16.0f : 0.0f)); // a move's vector triangle after it
 		Total += Widths.back() + 40.0f;
 	}
 	if (Total <= 0.0f)
@@ -766,12 +824,16 @@ void RitTapeBar(RitCtx& X, float X0)
 			{
 				if (Lit)
 				{
-					RitCutFill(X.C, {Px - 7.0f, 5.0f, Widths[I] + 14.0f, 22.0f}, 4.0f, RitC(RitRed));
+					RitCutFill(X.C, {Px - 7.0f, 5.0f, Widths[I] + 14.0f, 22.0f}, 4.0f, RitC(Deadline ? RitDeep : RitRed));
 				}
-				RitText(X.C, It.Text, Px, 16.0f, 15.0f, RitC(Lit ? RitWhite : It.Rgb), RitFace::Cond, Align::Left, Baseline::Middle);
+				const float Tw = RitText(X.C, It.Text, Px, 16.0f, 15.0f, RitC(Lit || Deadline ? RitWhite : It.Rgb), RitFace::Cond, Align::Left, Baseline::Middle);
+				if (It.Move != 0)
+				{
+					RitTri(X.C, Px + Tw + 9.0f, 16.0f, 8.0f, It.Move > 0, RitC(Deadline || Lit ? RitWhite : It.Move > 0 ? RitUp : RitDown));
+				}
 			}
 			Px += Widths[I] + 18.0f;
-			RitTwinTick(X.C, Px - 4.0f, 9.0f, 14.0f, RitC(RitRed));
+			RitTwinTick(X.C, Px - 4.0f, 9.0f, 14.0f, RitC(Deadline ? RitWhite : RitRed));
 			Px += 22.0f;
 		}
 	}
@@ -810,26 +872,45 @@ void RitHeaderBar(RitCtx& X, float X0, const std::string& Name, bool AtTable)
 	const net::Network& Net = net::Site(RitSite);
 	if (!AtTable)
 	{
-		// The WATCH chips (G1: tonight's next three featured events with their countdowns; the Watchlist's stars are G2).
-		std::vector<net::EventInstance> Next;
-		for (const net::EventInstance& E : Net.Window(X.World, X.World + 24.0 * 60.0))
+		// The WATCH chips (R1): the next five instances of your starred templates with their countdowns (to late registration's
+		// close once it runs); with nothing starred, tonight's next three featured events (G1's).
+		std::vector<std::pair<net::EventInstance, double>> Next;
+		const bool Starred = !X.P.Watch.empty();
+		if (Starred)
 		{
-			if (Next.size() < 3 && E.Start > X.World && Net.TemplateOf(E).Featured)
+			for (const net::EventInstance& E : Net.Window(X.World - 16.0 * 60.0, X.World + 48.0 * 60.0))
 			{
-				Next.push_back(E);
+				const net::LiveState L = Net.Live(E, X.World);
+				const bool Open = L.St == net::Status::Announced || L.St == net::Status::Registering || L.St == net::Status::LateReg;
+				if (Open && std::find(X.P.Watch.begin(), X.P.Watch.end(), RitTemplateOf(E.Id)) != X.P.Watch.end())
+				{
+					Next.push_back({E, L.St == net::Status::LateReg ? E.Start + E.LateReg : E.Start});
+				}
+			}
+			std::stable_sort(Next.begin(), Next.end(), [](const auto& A, const auto& B) { return A.second < B.second; });
+		}
+		else
+		{
+			for (const net::EventInstance& E : Net.Window(X.World, X.World + 24.0 * 60.0))
+			{
+				if (Next.size() < 3 && E.Start > X.World && Net.TemplateOf(E).Featured)
+				{
+					Next.push_back({E, E.Start});
+				}
 			}
 		}
-		for (size_t I = 0; I < Next.size() && I < 3; ++I)
+		const size_t WatchChips = Starred ? 5 : 3;
+		for (size_t I = 0; I < Next.size() && I < WatchChips; ++I)
 		{
-			const net::EventInstance& E = Next[I];
+			const net::EventInstance& E = Next[I].first;
 			const net::EventTemplate& T = Net.TemplateOf(E);
 			const Rect R{548.0f + static_cast<float>(I) * 138.0f - (RitRailW - X0), 42.0f, 132.0f, 32.0f};
 			const Ui::ClickState St = RitClick(X, "watch" + std::to_string(I), R);
 			const bool Seated = X.S.IsPlaying(E.Id);
 			RitCutFill(X.C, R, 6.0f, RitC(St.Hover ? RitPanel2 : RitCarbon));
 			RitCutStroke(X.C, R, 6.0f, RitC(RitHair), 1.0f);
-			RitStar(X.C, R.X + 11.0f, R.Y + 16.0f, 5.5f, false);
-			const std::string When = Seated ? std::string("SEATED") : RitCountdown(E.Start - X.World);
+			RitStar(X.C, R.X + 11.0f, R.Y + 16.0f, 5.5f, Starred);
+			const std::string When = Seated ? std::string("SEATED") : RitCountdown(Next[I].second - X.World);
 			const float Tw = RitMeasure(X.C, When, 12.0f);
 			RitText(X.C, When, R.X + R.W - 7.0f, R.Y + 16.0f, 12.0f, RitC(Seated ? RitChrome : RitMuted), RitFace::Cond, Align::Right, Baseline::Middle);
 			RitText(X.C, RitUpper(rlnet_detail::NetShortName(T.Name)), R.X + 19.0f, R.Y + 16.0f, 12.0f, RitC(RitInk), RitFace::Cond, Align::Left, Baseline::Middle, R.W - 32.0f - Tw);
@@ -873,10 +954,14 @@ std::vector<RitRow> RitBoardRows(RitCtx& X)
 {
 	std::vector<RitRow> Rows = Access::ScheduleRows(X.RL);
 	const net::Network& Net = net::Site(RitSite);
-	if (X.U.GtdOnly || X.U.LateOnly)
+	if (X.U.GtdOnly || X.U.LateOnly || X.U.Mine)
 	{
+		const std::vector<std::string>& Watch = X.P.Watch;
 		Rows.erase(std::remove_if(Rows.begin(), Rows.end(),
-					   [&](const RitRow& R) { return (X.U.GtdOnly && Net.TemplateOf(R.E).GtdCents <= 0) || (X.U.LateOnly && R.L.St != net::Status::LateReg); }),
+					   [&](const RitRow& R) {
+						   return (X.U.GtdOnly && Net.TemplateOf(R.E).GtdCents <= 0) || (X.U.LateOnly && R.L.St != net::Status::LateReg) ||
+							   (X.U.Mine && std::find(Watch.begin(), Watch.end(), RitTemplateOf(R.E.Id)) == Watch.end());
+					   }),
 			Rows.end());
 	}
 	if (X.U.Sort > 0)
@@ -988,8 +1073,30 @@ void RitArrivedTip(RitCtx& X, const RitRow& Row, const Rect& R)
 
 const char* const RitSortNames[5] = {"START", "BUY-IN", "GTD", "FIELD", "OVERLAY"};
 
+/** The clause's banner (§1.5, the hubs): in the KPI strip's place while a Team RiverLine deal makes every table here a strike. */
+void RitClauseBand(RitCtx& X, const Rect& R)
+{
+	RitPanelBegin();
+	RitCutFill(X.C, R, 10.0f, RitC(RitCarbon));
+	RitCutStroke(X.C, R, 10.0f, RitC(RitHair), 1.0f);
+	X.C.FillRect({R.X, R.Y, 4.0f, R.H}, RitC(RitRed));
+	RitTag(X.C, R.X + 20.0f, R.Y + 14.0f, "Under your Team RiverLine deal", RitRed, RitWhite, 12.0f, 7.0f, 18.0f);
+	RitText(X.C, RitClauseBanner, R.X + 20.0f, R.Y + 56.0f, 15.0f, RitC(RitInk), RitFace::Body, Align::Left, Baseline::Alphabetic, R.W - 40.0f);
+}
+
 void RitKpis(RitCtx& X)
 {
+	// The KPI strip's place: the clause's banner under a Team RiverLine deal, else the day's Briefing until it's dismissed (R9).
+	const Rect Strip{232.0f, 96.0f, 880.0f, 72.0f};
+	if (X.P.Clause)
+	{
+		RitClauseBand(X, Strip);
+		return;
+	}
+	if (RitBriefingBand(X, Strip, false))
+	{
+		return;
+	}
 	const net::Network& Net = net::Site(RitSite);
 	const double Ends = RitNightEnds(X.World);
 	const double Starts = Ends - net::MinutesPerDay;
@@ -1132,6 +1239,10 @@ void RitFilters(RitCtx& X)
 	{
 		X.U.LateOnly = !X.U.LateOnly;
 	}
+	if (Draw("chipmine", "MINE", X.U.Mine))
+	{
+		X.U.Mine = !X.U.Mine; // the Watchlist's starred templates only (R1)
+	}
 	// Sort: START, then BUY-IN, GTD, FIELD, OVERLAY on each press.
 	const std::string Sort = RitSortNames[std::min(std::max(X.U.Sort, 0), 4)];
 	const float Sw = RitMeasure(X.C, Sort, 13.0f);
@@ -1170,6 +1281,26 @@ void RitBoardRow(RitCtx& X, const RitRow& Row, const Rect& R, int Visible, int I
 	const Color Words = RitC(St.Dim ? RitMuted : RitInk);
 	const float Mid = R.Y + R.H / 2.0f;
 	const float Fig = R.Y + 17.0f + 15.0f * 0.36f;
+	// The desk bell's row pulses amber while its late registration runs (R1).
+	const bool Belled = std::any_of(X.P.Bells.begin(), X.P.Bells.end(), [&Row](const RitBellView& B) { return B.EventId == Row.E.Id; });
+	if (Belled && L.St == net::Status::LateReg)
+	{
+		const float Pulse = X.Preview ? 1.0f : 0.5f + 0.5f * static_cast<float>(std::cos(X.Now * 2.0 * Pi));
+		X.C.FillRect({R.X, R.Y, R.W, R.H}, RitC(RitAmber, 0.06f + 0.06f * Pulse));
+		X.C.FillRect({R.X + R.W - 3.0f, R.Y, 3.0f, R.H}, RitC(RitAmber));
+		RitBell(X.C, RitColStatus - 14.0f, Mid, 11.0f, RitC(RitAmber));
+	}
+	// The star (R1): star the event's template for the Watchlist. Chrome, Hot White when on; never red.
+	const std::string Template = RitTemplateOf(Row.E.Id);
+	const bool Starred = std::find(X.P.Watch.begin(), X.P.Watch.end(), Template) != X.P.Watch.end();
+	const Ui::ClickState Ss = RitClick(X, "star:" + Template + "#" + Row.E.Id, {R.X + 4.0f, R.Y, 24.0f, R.H});
+	RitStar(X.C, R.X + 16.0f, Mid, Ss.Hover && !Starred ? 6.8f : 6.0f, Starred);
+	if (Ss.Clicked)
+	{
+		// Core's claim (Session::StarEvent): never a strike, never a grant (W4); the Board reads the result from the View.
+		X.S.StarEvent(Template, !Starred);
+		RitSound(X, SoundId::RitBlip, 0.25f);
+	}
 	// TIME, a flap tile (24-hour).
 	RitFlap(X.C, RitColTime, R.Y + 6.0f, RitClock(Row.E.Start), 14.0f, 22.0f, 5, RitTile::Gloss, Words);
 	// EVENT and its tag.
@@ -1208,14 +1339,24 @@ void RitBoardRow(RitCtx& X, const RitRow& Row, const Rect& R, int Visible, int I
 	{
 		X.C.FillRect({RitColOver - 9.0f, Mid - 0.5f, 8.0f, 1.5f}, RitC(RitDim));
 	}
-	// WIN PTS: the season points a win in this field earns today (net::Points, the network's own; the League's are G2).
-	if (Counted && T.BuyInCents > 0)
+	// LEAGUE (§3.4 A, G2): the League points a win in this field would score at your division today, by core's LeagueScore (0
+	// under the division's floor: a dash), and an MD tag on your division's Matchday.
+	const int Day6 = net::DayOf(Row.E.Start - 6.0 * 60.0);
+	const bool Matchday = std::any_of(X.P.Fixtures.begin(), X.P.Fixtures.end(), [&](const RitFixture& F) { return !F.Deadline && F.Day == Day6 && F.TemplateId == Template; });
+	const double Win = Counted && T.BuyInCents > 0 ? site::play::LeagueScore(X.P.Div, Template, T.BuyInCents, Day6, net::Points(1, std::max(2, L.Entries), T.BuyInCents), !T.Series.empty(),
+														  X.P.Deadline && Day6 == X.P.Today && T.Featured)
+												   : 0.0;
+	if (Win > 0.0)
 	{
-		RitText(X.C, Grouped(static_cast<int64_t>(std::llround(net::Points(1, std::max(2, L.Entries), T.BuyInCents)))), RitColPts, Fig, 15.0f, Words, RitFace::Cond, Align::Right);
+		RitText(X.C, Grouped(static_cast<int64_t>(std::llround(Win))), RitColPts, Fig, 15.0f, Words, RitFace::Cond, Align::Right);
 	}
 	else
 	{
 		X.C.FillRect({RitColPts - 9.0f, Mid - 0.5f, 8.0f, 1.5f}, RitC(RitDim));
+	}
+	if (Matchday)
+	{
+		RitTag(X.C, RitColPts + 6.0f, R.Y + 9.0f, "MD", St.Dim ? RitMuted : RitChrome, St.Dim ? RitMuted : RitChrome, 10.0f, 4.0f, 15.0f, 4.0f, true);
 	}
 	// STATUS: the flap, settling in the wave on open and again whenever its value changes (the Kast preview draws it settled
 	// and leaves the player's own memo alone).
@@ -1262,7 +1403,7 @@ void RitBoardGrid(RitCtx& X, const std::vector<RitRow>& Rows, const std::vector<
 	RitLabel(X.C, "GTD", RitColGtd, Hy, 12.0f, RitC(RitMuted), Align::Right);
 	RitLabel(X.C, "Field", RitColField - 24.0f, Hy, 12.0f, RitC(RitMuted));
 	RitLabel(X.C, "Overlay", RitColOver + 12.0f, Hy, 12.0f, RitC(RitMuted), Align::Right);
-	RitLabel(X.C, "Win pts", RitColPts, Hy, 12.0f, RitC(RitMuted), Align::Right);
+	RitLabel(X.C, "League", RitColPts, Hy, 12.0f, RitC(RitMuted), Align::Right);
 	RitLabel(X.C, "Status", RitColStatus, Hy, 12.0f, RitC(RitMuted));
 	// Scrolling: a row and a half a notch; Listed is the grid's order (the arrows walk it).
 	float& Scroll = Access::ListScroll(X.RL);
@@ -1306,7 +1447,7 @@ void RitBoardGrid(RitCtx& X, const std::vector<RitRow>& Rows, const std::vector<
 		}
 		const Rect R{RitGrid.X, Y, RitGrid.W, RitRowPitch};
 		const bool Selected = static_cast<int>(I) == Sel;
-		const Ui::ClickState St = RitClick(X, "ev:" + Rows[I].E.Id, R);
+		const Ui::ClickState St = RitClick(X, "ev:" + Rows[I].E.Id, {R.X + 28.0f, R.Y, R.W - 28.0f, R.H}); // the star's cell is its own
 		if (St.Clicked && !Selected)
 		{
 			X.RL.SelectEvent(Rows[I].E.Id);
@@ -1350,7 +1491,7 @@ void RitBoardGrid(RitCtx& X, const std::vector<RitRow>& Rows, const std::vector<
 	X.C.PopClip();
 	if (Rows.empty() && Arrived.empty())
 	{
-		RitText(X.C, RitBoardEmpty, RitGrid.X + RitGrid.W / 2.0f, RitGrid.Y + 120.0f, 15.0f, RitC(RitMuted), RitFace::Body, Align::Center);
+		RitText(X.C, X.U.Mine ? RitMineNone : RitBoardEmpty, RitGrid.X + RitGrid.W / 2.0f, RitGrid.Y + 120.0f, 15.0f, RitC(RitMuted), RitFace::Body, Align::Center);
 	}
 	if (MaxScroll > 0.0f)
 	{
@@ -1531,6 +1672,31 @@ void RitProspectus(RitCtx& X, const std::vector<RitRow>& Rows, float LeadY)
 	Y += 18.0f;
 	X.C.FillRect({L, Y, Rx - L, 1.0f}, RitC(RitHair));
 	Y += 26.0f;
+	// The League line (G2): what a win here scores at your division by core's LeagueScore, and the night's Matchday.
+	{
+		const int Day6 = net::DayOf(E.Start - 6.0 * 60.0);
+		const std::string Template = RitTemplateOf(E.Id);
+		const int WinField = std::max(2, Lv.Entries > 0 ? Lv.Entries : T.Field);
+		const double Win = T.BuyInCents > 0 ? site::play::LeagueScore(X.P.Div, Template, T.BuyInCents, Day6, net::Points(1, WinField, T.BuyInCents), !T.Series.empty(), X.P.Deadline && Day6 == X.P.Today && T.Featured) : 0.0;
+		const Chips Floor = X.P.Divisions[static_cast<size_t>(std::min(std::max<int>(X.P.Div, 0), RitDivisions - 1))].Floor;
+		RitTerm(X, L, Rx, Y, "LEAGUE \xC2\xB7 " + RitGroupTag(X.P),
+			Win > 0.0				   ? Grouped(static_cast<int64_t>(std::llround(Win))) + " pts for a win"
+				: T.BuyInCents < Floor ? "under the " + RitBuyIn(Floor) + " floor"
+									   : std::string("\xE2\x80\x94"),
+			RitInk);
+		Y += 20.0f;
+		const RitFixture* Md = nullptr;
+		for (const RitFixture& F : X.P.Fixtures)
+		{
+			Md = !Md && !F.Deadline && F.Day == Day6 ? &F : Md;
+		}
+		const std::string Div = RitDivName(X.P.Div);
+		const std::string Says = Md && Md->TemplateId == Template ? Div + "'s Matchday: this event counts x" + RitMult(Md->Mult) + "."
+			: Md																	? Div + "'s Matchday tonight is " + Md->Name + " (x" + RitMult(Md->Mult) + ")."
+																					: std::string(X.P.InLeague ? "" : RitNoLeagueYet);
+		RitText(X.C, Says, L, Y, 12.0f, RitC(RitMuted), RitFace::Body, Align::Left, Baseline::Alphabetic, Rx - L);
+		Y += 22.0f;
+	}
 	// YOUR RECORD HERE: History filtered to the template.
 	int Played = 0;
 	int Cashed = 0;
@@ -1587,25 +1753,87 @@ void RitProspectus(RitCtx& X, const std::vector<RitRow>& Rows, float LeadY)
 		break;
 	case 3:
 	{
-		// Who's in: the world's registrations the player can know (Team RunItTwice's pros, the followed).
+		// Who's in: the world's registrations the player can know: your Callout, Team RunItTwice's pros (what a scalp here
+		// pays), your League group, the names you have history with, the followed (G2: §3.6 R3).
 		const world::World& W = X.S.Living();
 		const std::string Team = net::Def(RitSite).TeamName;
-		int Shown = 0;
+		struct RitEntrant
+		{
+			const world::Npc* N;
+			int Pri;
+			std::string Line;
+		};
+		std::vector<RitEntrant> Ents;
+		std::string Scalp;
+		for (const std::pair<Chips, std::string>& Rung : X.P.Scalps.Ladder)
+		{
+			Scalp = T.BuyInCents >= Rung.first ? Rung.second : Scalp;
+		}
 		for (const int Id : W.RegisteredNow(E.Id))
 		{
 			const world::Npc* N = W.Get(Id);
-			if (!N || Shown >= 3 || (N->Sponsor != Team && N->Followers < 2000))
+			if (!N)
 			{
 				continue;
 			}
+			const RitLeagueRow* G = nullptr;
+			for (const RitLeagueRow& Gr : X.P.Table)
+			{
+				G = Gr.Npc == Id ? &Gr : G;
+			}
+			const RitH2H* H = nullptr;
+			for (const RitH2H& Hh : X.P.H2H)
+			{
+				H = Hh.Name == N->Name ? &Hh : H;
+			}
+			const std::string Hist = H ? "h2h " + std::to_string(H->W) + "-" + std::to_string(H->L) + " \xC2\xB7 busts " + std::to_string(H->YouKo) + "-" + std::to_string(H->TheyKo) : std::string();
+			RitEntrant En{N, 9, std::string()};
+			if (X.P.Callout.On && X.P.Callout.Npc == Id)
+			{
+				En = {N, 0, RitGroupTag(X.P) + " \xC2\xB7 YOUR CALLOUT"};
+			}
+			else if (N->Sponsor == Team)
+			{
+				En = {N, 1, !Scalp.empty() && !X.P.Scalps.Bounty ? "scalp: " + Scalp : std::string("Team RunItTwice")};
+			}
+			else if (G)
+			{
+				En = {N, 2, RitGroupTag(X.P) + " \xC2\xB7 " + RitPlace(G->Rank) + (H ? " \xC2\xB7 " + Hist : std::string())};
+			}
+			else if (H)
+			{
+				En = {N, 3, Hist};
+			}
+			else if (N->Followers >= 2000)
+			{
+				En = {N, 4, Grouped(N->Followers) + " followers"};
+			}
+			if (En.Pri < 9)
+			{
+				Ents.push_back(En);
+			}
+		}
+		std::stable_sort(Ents.begin(), Ents.end(), [](const RitEntrant& A, const RitEntrant& B) { return A.Pri < B.Pri; });
+		int Shown = 0;
+		for (const RitEntrant& En : Ents)
+		{
+			if (Shown >= 3)
+			{
+				break;
+			}
+			const world::Npc* N = En.N;
 			const float Ry = By + static_cast<float>(Shown) * 34.0f;
-			RitSquareAvatar(X.C, L, Ry - 16.0f, 24.0f, N->Name, RitC(N->Sponsor == Team ? RitRed : RitChrome));
-			const float Nw = RitText(X.C, N->Name, L + 34.0f, Ry, 14.0f, RitC(RitInk), RitFace::Name, Align::Left, Baseline::Alphabetic, 200.0f);
+			RitSquareAvatar(X.C, L, Ry - 16.0f, 24.0f, N->Name, RitC(N->Sponsor == Team ? RitRed : En.Pri == 0 ? RitAmber : RitChrome));
+			const float Nw = RitText(X.C, N->Name, L + 34.0f, Ry, 14.0f, RitC(RitInk), RitFace::Name, Align::Left, Baseline::Alphabetic, 150.0f);
 			if (N->Sponsor == Team)
 			{
 				RitTag(X.C, L + 40.0f + Nw, Ry - 13.0f, "TEAM", RitRed, RitWhite, 11.0f);
 			}
-			RitText(X.C, N->Sponsor == Team ? std::string("Team RunItTwice") : Grouped(N->Followers) + " followers", Rx, Ry, 12.0f, RitC(RitMuted), RitFace::Mono, Align::Right);
+			else if (En.Pri == 0)
+			{
+				RitTag(X.C, L + 40.0f + Nw, Ry - 13.0f, "VS", RitAmber, RitOnyx, 11.0f);
+			}
+			RitText(X.C, En.Line, Rx, Ry, 12.0f, RitC(RitMuted), RitFace::Mono, Align::Right, Baseline::Alphabetic, 190.0f);
 			++Shown;
 		}
 		if (Shown == 0)
@@ -1779,8 +2007,14 @@ void RitLivePage(RitCtx& X)
 	const Rect Hb{232.0f, 136.0f, 1344.0f, 140.0f};
 	RitPanel(X.C, Hb, 10.0f);
 	RitTwice(X.C, RitUpper(rlnet_detail::NetShortName(T.Name)), Hb.X + 24.0f, Hb.Y + 52.0f, RitFit(X.C, RitUpper(rlnet_detail::NetShortName(T.Name)), 34.0f, 24.0f, 520.0f), RitC(RitWhite));
-	RitText(X.C, RitBuyIn(T.BuyInCents) + " BUY-IN" + (T.GtdCents > 0 ? " \xC2\xB7 " + rlnet_detail::NetMoney(T.GtdCents) + " GTD" : std::string()), Hb.X + 24.0f, Hb.Y + 82.0f, 18.0f,
-		RitC(RitChrome));
+	const float BuyW = RitText(X.C, RitBuyIn(T.BuyInCents) + " BUY-IN" + (T.GtdCents > 0 ? " \xC2\xB7 " + rlnet_detail::NetMoney(T.GtdCents) + " GTD" : std::string()), Hb.X + 24.0f, Hb.Y + 82.0f,
+		18.0f, RitC(RitChrome));
+	// G2: on your Watchlist (a starred template: the star on, Hot White).
+	if (std::find(X.P.Watch.begin(), X.P.Watch.end(), T.Id) != X.P.Watch.end())
+	{
+		RitStar(X.C, Hb.X + 40.0f + BuyW, Hb.Y + 76.0f, 7.0f, true);
+		RitLabel(X.C, "On your Watchlist", Hb.X + 52.0f + BuyW, Hb.Y + 81.0f, 12.0f, RitC(RitChrome));
+	}
 	std::string State;
 	bool Red = false;
 	std::string Clock;
@@ -1893,12 +2127,65 @@ void RitLivePage(RitCtx& X)
 			RitSquareAvatar(X.C, Story.X + 20.0f, Ry - 18.0f, 28.0f, N->Name, RitC(R.Kind == site::show::LiveTeam ? RitRed : RitChrome));
 		}
 		const float Nx = Story.X + (N ? 60.0f : 20.0f);
-		const float Lw = RitText(X.C, R.Text, Nx, Ry, 14.0f, RitC(RitInk), RitFace::Body, Align::Left, Baseline::Alphabetic, Story.W - 160.0f);
+		const float Lw = RitText(X.C, R.Text, Nx, Ry, 14.0f, RitC(RitInk), RitFace::Body, Align::Left, Baseline::Alphabetic, Story.W - 260.0f);
+		float Tx = Nx + Lw + 8.0f;
 		if (R.Kind == site::show::LiveTeam)
 		{
-			RitTag(X.C, Nx + Lw + 8.0f, Ry - 13.0f, "TEAM", RitRed, RitWhite, 11.0f);
+			Tx += RitTag(X.C, Tx, Ry - 13.0f, "TEAM", RitRed, RitWhite, 11.0f) + 6.0f;
+		}
+		// G2: your Callout and your League group among them.
+		if (X.P.Callout.On && X.P.Callout.Npc == R.Npc)
+		{
+			Tx += RitTag(X.C, Tx, Ry - 13.0f, "VS", RitAmber, RitOnyx, 11.0f) + 6.0f;
+		}
+		for (const RitLeagueRow& G : X.P.Table)
+		{
+			if (G.Npc >= 0 && G.Npc == R.Npc && L.St != net::Status::Finished)
+			{
+				RitTag(X.C, Tx, Ry - 13.0f, RitGroupTag(X.P) + " \xC2\xB7 " + RitPlace(G.Rank), RitChrome, RitChrome, 11.0f, 5.0f, 16.0f, 4.0f, true);
+			}
 		}
 		++Shown;
+	}
+	// G2: your Callout and your League group's members registered here (the world's registrations), after the site's own.
+	if (L.St != net::Status::Finished)
+	{
+		std::vector<int> Listed;
+		for (const site::show::LiveRow& R : Rows)
+		{
+			Listed.push_back(R.Npc);
+		}
+		for (const int Id : W.RegisteredNow(E.Id))
+		{
+			if (Shown >= 8 || std::find(Listed.begin(), Listed.end(), Id) != Listed.end())
+			{
+				continue;
+			}
+			const RitLeagueRow* G = nullptr;
+			for (const RitLeagueRow& Gr : X.P.Table)
+			{
+				G = Gr.Npc == Id ? &Gr : G;
+			}
+			const bool Co = X.P.Callout.On && X.P.Callout.Npc == Id;
+			const world::Npc* Who = W.Get(Id);
+			if (!Who || (!G && !Co))
+			{
+				continue;
+			}
+			const float Ry = Sy + 26.0f + static_cast<float>(Shown) * 40.0f;
+			RitSquareAvatar(X.C, Story.X + 20.0f, Ry - 18.0f, 28.0f, Who->Name, RitC(Co ? RitAmber : RitChrome));
+			const float Lw = RitText(X.C, Who->Name + " is registered.", Story.X + 60.0f, Ry, 14.0f, RitC(RitInk), RitFace::Body, Align::Left, Baseline::Alphabetic, Story.W - 260.0f);
+			float Tx = Story.X + 68.0f + Lw;
+			if (Co)
+			{
+				Tx += RitTag(X.C, Tx, Ry - 13.0f, "VS", RitAmber, RitOnyx, 11.0f) + 6.0f;
+			}
+			if (G)
+			{
+				RitTag(X.C, Tx, Ry - 13.0f, RitGroupTag(X.P) + " \xC2\xB7 " + RitPlace(G->Rank), RitChrome, RitChrome, 11.0f, 5.0f, 16.0f, 4.0f, true);
+			}
+			++Shown;
+		}
 	}
 	if (Shown == 0)
 	{
@@ -1986,6 +2273,61 @@ std::string RitBoardValue(net::Board B, double V)
 /** The EVENTS column's right edge, from the table's left (between the names, which end by 670, and the form at 860). */
 constexpr float RitRankEvents = 800.0f;
 
+/** RANKINGS' PYRAMID (G2): the five divisions' members (core's counts) as bars in their status metals, through ChartArt. */
+void RitPyramid(RitCtx& X)
+{
+	const RitPlay& P = X.P;
+	const Rect R{232.0f, 168.0f, 1344.0f, 728.0f};
+	RitPanel(X.C, R, 10.0f);
+	RitLabel(X.C, "The League \xC2\xB7 members by division", R.X + 24.0f, R.Y + 32.0f, 12.0f, RitC(RitMuted));
+	RitText(X.C, RitLeagueOther, R.X + R.W - 24.0f, R.Y + 32.0f, 12.0f, RitC(RitMuted), RitFace::Body, Align::Right, Baseline::Alphabetic, 700.0f);
+	chart::BarSet Set;
+	chart::BarOpts O;
+	bool Any = false;
+	for (int D = 0; D < RitDivisions; ++D)
+	{
+		const int N = P.Divisions[static_cast<size_t>(D)].Members;
+		Set.V.push_back(static_cast<double>(N));
+		Set.Each.push_back(RitC(D == 0 ? RitChromeDark : D == 1 ? RitIronBar : RitDivMetal(D)));
+		O.X.Labels.push_back(RitUpper(RitDivName(D)));
+		Any = Any || N > 0;
+	}
+	Set.Name = "Members";
+	O.Integer = true;
+	O.Gap = 0.35f;
+	O.Empty = RitDivNoCount;
+	O.Reveal = X.Preview ? 1.0f : static_cast<float>(Clamp01((X.Now - Access::PageAt(X.RL)) / 0.4));
+	O.Mouse = X.Preview || !X.UI.Ptr.Active ? Vec2{-1.0f, -1.0f} : Vec2{X.UI.Ptr.X, X.UI.Ptr.Y};
+	const chart::Theme T = chart::RunItTwice();
+	const chart::BarOut Out = chart::Bars(X.C, {R.X + 24.0f, R.Y + 60.0f, R.W - 48.0f, 520.0f}, {Any ? Set : chart::BarSet()}, O, T);
+	if (Any && Out.Hover >= 0 && Out.Hover < RitDivisions)
+	{
+		const RitDivision& Dv = P.Divisions[static_cast<size_t>(Out.Hover)];
+		chart::Tooltip(X.C, {Out.HoverSlot.X + Out.HoverSlot.W / 2.0f, Out.HoverSlot.Y}, RitUpper(RitDivName(Out.Hover)),
+			{{"Members", Grouped(Dv.Members)}, {"Scores from", Dv.Floor > 0 ? RitBuyIn(Dv.Floor) : std::string("any buy-in")}}, T, R);
+	}
+	// The crests under the bars and the player's marked.
+	const float Sw = Out.Plot.W / static_cast<float>(RitDivisions);
+	for (int D = 0; D < RitDivisions; ++D)
+	{
+		const float Cx = Out.Plot.X + Sw * (static_cast<float>(D) + 0.5f);
+		RitCrest(X.C, Cx, R.Y + 640.0f, 54.0f, D);
+		if (D == P.Div && (P.InLeague || P.Started))
+		{
+			RitTag(X.C, Cx - 18.0f, R.Y + 682.0f, "YOU", RitWhite, RitOnyx, 12.0f);
+		}
+	}
+	// The YOU bar (its baseline inside the boards' 915-930 window), your division and place.
+	const Rect Yb{232.0f, 905.0f, 1344.0f, 34.0f};
+	RitPanelBegin();
+	RitCutFill(X.C, Yb, 8.0f, RitC(RitRed));
+	RitLedEdge(X.C, Yb.X, Yb.Y, Yb.W - 8.0f);
+	RitText(X.C, "YOU", Yb.X + 16.0f, Yb.Y + 17.0f, 15.0f, RitC(RitWhite), RitFace::Cond, Align::Left, Baseline::Middle);
+	RitText(X.C, X.S.HeroName, Yb.X + 150.0f, Yb.Y + 17.0f, 14.0f, RitC(RitWhite), RitFace::Name, Align::Left, Baseline::Middle);
+	RitText(X.C, P.InLeague ? RitUpper(RitDivName(P.Div)) + " \xC2\xB7 GROUP " + std::to_string(P.Group) + " \xC2\xB7 " + RitPlace(P.Rank) : std::string(RitNoLeagueYet), Yb.X + Yb.W - 20.0f, Yb.Y + 17.0f, 15.0f,
+		RitC(RitWhite), P.InLeague ? RitFace::Cond : RitFace::Body, Align::Right, Baseline::Middle);
+}
+
 void RitRankingsPage(RitCtx& X)
 {
 	const net::Network& Net = net::Site(RitSite);
@@ -2008,7 +2350,7 @@ void RitRankingsPage(RitCtx& X)
 		const float W = RitMeasure(X.C, RitUpper(Label), 14.0f) + 28.0f;
 		const Rect R{Tx, 96.0f, W, 32.0f};
 		const Ui::ClickState St = RitClick(X, "board" + Label, R);
-		const bool On = B == Board;
+		const bool On = B == Board && !X.U.Pyramid;
 		RitCutFill(X.C, R, 6.0f, RitC(On ? RitRed : St.Hover ? RitPanel2 : RitCarbon));
 		if (On)
 		{
@@ -2021,9 +2363,37 @@ void RitRankingsPage(RitCtx& X)
 		RitText(X.C, RitUpper(Label), R.X + W / 2.0f, R.Y + 16.0f, 14.0f, RitC(On ? RitWhite : RitInk), RitFace::Cond, Align::Center, Baseline::Middle);
 		if (St.Clicked && !On)
 		{
+			X.U.Pyramid = false;
 			X.RL.ShowBoard(B, X.Now);
 		}
 		Tx += W + 8.0f;
+	}
+	// PYRAMID (G2, §3.4 D): the League's five divisions, members per tier, you marked (a UI tab: never a net::Board).
+	{
+		const float W = RitMeasure(X.C, "PYRAMID", 14.0f) + 28.0f;
+		const Rect R{Tx, 96.0f, W, 32.0f};
+		const Ui::ClickState St = RitClick(X, "boardPyramid", R);
+		const bool On = X.U.Pyramid;
+		RitCutFill(X.C, R, 6.0f, RitC(On ? RitRed : St.Hover ? RitPanel2 : RitCarbon));
+		if (On)
+		{
+			RitLedEdge(X.C, R.X, R.Y, W - 6.0f);
+		}
+		else
+		{
+			RitCutStroke(X.C, R, 6.0f, RitC(RitHair), 1.0f);
+		}
+		RitText(X.C, "PYRAMID", R.X + W / 2.0f, R.Y + 16.0f, 14.0f, RitC(On ? RitWhite : RitInk), RitFace::Cond, Align::Center, Baseline::Middle);
+		if (St.Clicked && !On)
+		{
+			X.U.Pyramid = true;
+			RitSound(X, SoundId::RitBlip, 0.25f);
+		}
+	}
+	if (X.U.Pyramid)
+	{
+		RitPyramid(X);
+		return;
 	}
 	// Your standings on every board, right of the tabs (the value its own run).
 	float Sx = 1576.0f;
@@ -2180,10 +2550,10 @@ void RitDeskPage(RitCtx& X)
 {
 	const site::Account* A = RitAccount(X.S);
 	RitPanelBegin();
-	// The tabs: LEDGER and TAPE (the Luck Ledger is G2; SPLITS P1), the active one a Signal Red slab; the range.
-	const char* const Tabs[2] = {"LEDGER", "TAPE"};
+	// The tabs: LEDGER, LUCK LEDGER (G2) and TAPE (SPLITS is P1), the active one a Signal Red slab; the range.
+	const char* const Tabs[3] = {"LEDGER", "LUCK LEDGER", "TAPE"};
 	float Tx = 232.0f;
-	for (int I = 0; I < 2; ++I)
+	for (int I = 0; I < 3; ++I)
 	{
 		const float W = RitMeasure(X.C, Tabs[I], 14.0f) + 28.0f;
 		const Rect R{Tx, 92.0f, W, 28.0f};
@@ -2289,8 +2659,17 @@ void RitDeskPage(RitCtx& X)
 		const Chips Net = H.Prize - std::max<Chips>(0, H.BuyInCents);
 		X.C.FillRect({Res.X + 12.0f, Ry - 18.0f, Res.W - 24.0f, 30.0f}, RitC(Listed % 2 == 0 ? RitCarbon : RitPanel2));
 		RitText(X.C, RitDate(net::DayOf(At)), Res.X + 24.0f, Ry, 12.0f, RitC(RitChrome), RitFace::Mono);
-		RitText(X.C, H.Name, Res.X + 100.0f, Ry, 14.0f, RitC(RitInk), RitFace::Body, Align::Left, Baseline::Alphabetic, 250.0f);
-		RitText(X.C, Ordinal(H.Place) + " of " + Grouped(H.Entrants), Res.X + 470.0f, Ry, 13.0f, RitC(RitMuted), RitFace::Mono, Align::Right);
+		RitText(X.C, H.Name, Res.X + 100.0f, Ry, 14.0f, RitC(RitInk), RitFace::Body, Align::Left, Baseline::Alphabetic, 220.0f);
+		RitText(X.C, Ordinal(H.Place) + " of " + Grouped(H.Entrants), Res.X + 430.0f, Ry, 13.0f, RitC(RitMuted), RitFace::Mono, Align::Right);
+		// The League points each scored (G2: core's, this month's results only; a dash when it didn't count).
+		for (const std::pair<std::string, float>& Sc : X.P.Scored)
+		{
+			if (Sc.first == H.EventId)
+			{
+				RitText(X.C, Sc.second > 0.0f ? RitPts(Sc.second) + " pts" : std::string("\xE2\x80\x94"), Res.X + 530.0f, Ry, 12.0f, RitC(Sc.second > 0.0f ? RitChrome : RitMuted), RitFace::Mono,
+					Align::Right);
+			}
+		}
 		RitText(X.C, (Net < 0 ? "-" : "+") + Money(Net < 0 ? -Net : Net), Res.X + Res.W - 24.0f, Ry, 13.0f, RitC(Net < 0 ? RitDown : Net > 0 ? RitUp : RitMuted), RitFace::Mono, Align::Right);
 		Ry += 32.0f;
 		++Listed;
@@ -2299,10 +2678,14 @@ void RitDeskPage(RitCtx& X)
 	{
 		RitParagraph(X.C, RitDeskEmpty, Res.X + 20.0f, Ry, Res.W - 40.0f, 13.0f, RitC(RitMuted), 18.0f, 2);
 	}
-	// The right panel by tab: the ledger's best (LEDGER), or the hands kept for Rerun (TAPE).
+	// The right panel by tab: the ledger's best (LEDGER), the Luck Ledger (G2), or the hands kept for Rerun (TAPE).
 	const Rect Side{912.0f, 538.0f, 664.0f, 412.0f};
 	RitPanel(X.C, Side, 10.0f);
 	if (X.U.DeskTab == 1)
+	{
+		RitLuckPanel(X, Side);
+	}
+	else if (X.U.DeskTab == 2)
 	{
 		RitLabel(X.C, "Tape", Side.X + 20.0f, Side.Y + 28.0f, 12.0f, RitC(RitMuted));
 		int Kept = 0;
@@ -2683,29 +3066,36 @@ void RitClubPage(RitCtx& X)
 	X.C.FillPolygon({{Mx - 5.0f, M.Y - 10.0f}, {Mx + 5.0f, M.Y - 10.0f}, {Mx, M.Y - 3.0f}}, RitC(RitWhite));
 	RitText(X.C, "Rake this month " + Money(Ac.Rake), Acc.X + Acc.W - 24.0f, Acc.Y + Acc.H - 24.0f, 13.0f, RitC(RitMuted), RitFace::Mono, Align::Right);
 	RitText(X.C, RitProvisional, Acc.X + 24.0f, Acc.Y + Acc.H - 24.0f, 12.0f, RitC(RitMuted), RitFace::Body);
-	// The tiers (the Club's table, the player's marked) and Club Day's printout (the last month the Club paid).
-	const Rect Tiers{232.0f, 442.0f, 660.0f, 300.0f};
-	RitPanel(X.C, Tiers, 10.0f);
-	RitLabel(X.C, "The tiers", Tiers.X + 24.0f, Tiers.Y + 32.0f, 12.0f, RitC(RitMuted));
-	const std::vector<site::TierInfo>& Club = site::SecondRunTiers();
-	for (int I = 1; I < static_cast<int>(Club.size()) && I < 5; ++I)
+	// This month's rake by day (G2, the Governor's ring), in the accrual card through ChartArt's bars.
 	{
-		const float Ty = Tiers.Y + 56.0f + static_cast<float>(I - 1) * 56.0f;
-		const bool Here = I == Ac.Tier;
-		if (Here)
+		chart::BarSet Days;
+		chart::BarOpts O;
+		bool Any = false;
+		const int Today = X.P.Today;
+		for (size_t I = 0; I < X.P.Statement.RakeByDay.size(); ++I)
 		{
-			X.C.FillRect({Tiers.X + 12.0f, Ty, Tiers.W - 24.0f, 48.0f}, RitC(RitSelRow));
-			X.C.FillRect({Tiers.X + 12.0f, Ty, 4.0f, 48.0f}, RitC(RitRed));
+			const int32_t C = X.P.Statement.RakeByDay[I];
+			Days.V.push_back(static_cast<double>(C));
+			const bool IsToday = X.P.Statement.Day0 >= 0 && X.P.Statement.Day0 + static_cast<int>(I) == Today;
+			Days.Each.push_back(IsToday ? RitC(RitRed) : Color{0, 0, 0, 0});
+			Any = Any || C > 0;
 		}
-		RitCardGround(X.C, {Tiers.X + 28.0f, Ty + 10.0f, 44.0f, 28.0f}, I);
-		RitText(X.C, RitUpper(Club[static_cast<size_t>(I)].Name), Tiers.X + 88.0f, Ty + 30.0f, 18.0f, RitC(Here ? RitWhite : RitInk));
-		RitText(X.C, "from " + rlnet_detail::NetMoney(Club[static_cast<size_t>(I)].From) + " of rake", Tiers.X + 300.0f, Ty + 30.0f, 13.0f, RitC(RitMuted), RitFace::Mono);
-		RitText(X.C, RitTierPct(I), Tiers.X + Tiers.W - 28.0f, Ty + 30.0f, 18.0f, RitC(Here ? RitWhite : RitChrome), RitFace::Cond, Align::Right);
+		Days.Col = RitC(RitChromeDark);
+		Days.Name = "Rake";
+		O.Y = chart::Units::Money;
+		O.YTicks = 2;
+		O.Gap = 0.3f;
+		O.XLabels = false;
+		O.Empty = RitRakeNone;
+		O.YLabels = Any; // no money axis over nothing (as the Desk's chart)
+		O.Reveal = X.Preview ? 1.0f : static_cast<float>(Clamp01((X.Now - Access::PageAt(X.RL)) / 0.4));
+		const chart::Theme T = chart::RunItTwice();
+		RitLabel(X.C, "Rake by day \xC2\xB7 30 days", Acc.X + 24.0f, Acc.Y + 192.0f, 11.0f, RitC(RitMuted));
+		chart::Bars(X.C, {Acc.X + 220.0f, Acc.Y + 176.0f, Acc.W - 244.0f, 64.0f}, {Any ? Days : chart::BarSet()}, O, T);
 	}
-	// Club Day: the last month the Club paid, printed on paper (its ledger line: "Second Run Club: Regular, October").
-	const Rect Printout{908.0f, 442.0f, 668.0f, 300.0f};
-	RitPanel(X.C, Printout, 10.0f);
-	RitLabel(X.C, "Club Day", Printout.X + 24.0f, Printout.Y + 32.0f, 12.0f, RitC(RitMuted));
+	// Team Scalps (G2, R4) and the Statement (G2, R5), with Club Day's printout as the Statement's second tab.
+	RitScalpsPanel(X, {232.0f, 442.0f, 760.0f, 300.0f});
+	const Rect Printout{1008.0f, 442.0f, 568.0f, 300.0f};
 	const site::Line* Paid = nullptr;
 	if (A)
 	{
@@ -2714,7 +3104,49 @@ void RitClubPage(RitCtx& X)
 			Paid = Ln.Label.rfind("Second Run Club", 0) == 0 && Ln.Cents > 0 ? &Ln : Paid;
 		}
 	}
-	if (Paid)
+	// A slip this laptop hasn't printed yet leads with Club Day, so it prints out of its slot (§3.4 G; the Kast preview draws
+	// its stamped still and leaves the print to come).
+	const bool Fresh = Paid && X.U.ClubDayFor != std::to_string(static_cast<long long>(std::llround(Paid->At))) + "#" + std::to_string(Paid->Cents);
+	if (Fresh && !X.Preview)
+	{
+		X.U.StatementTab = 1;
+	}
+	const int StTab = Fresh ? 1 : X.U.StatementTab;
+	if (StTab == 0)
+	{
+		RitStatementPanel(X, Printout);
+	}
+	else
+	{
+		RitPanel(X.C, Printout, 10.0f);
+		RitLabel(X.C, "Club Day", Printout.X + 24.0f, Printout.Y + 32.0f, 12.0f, RitC(RitMuted));
+	}
+	{
+		const char* const StTabs[2] = {"STATEMENT", "CLUB DAY"};
+		float Sx = Printout.X + Printout.W - 20.0f;
+		for (int I = 1; I >= 0; --I)
+		{
+			const float W = RitMeasure(X.C, StTabs[I], 12.0f) + 14.0f;
+			Sx -= W;
+			const Ui::ClickState Ts = RitClick(X, "stmt" + std::to_string(I), {Sx, Printout.Y + 12.0f, W, 26.0f});
+			const bool On = StTab == I;
+			if (On)
+			{
+				X.C.FillRect({Sx + 4.0f, Printout.Y + 35.0f, W - 8.0f, 3.0f}, RitC(RitRed));
+			}
+			RitText(X.C, StTabs[I], Sx + W / 2.0f, Printout.Y + 29.0f, 12.0f, RitC(On ? RitWhite : Ts.Hover ? RitInk : RitMuted), RitFace::Cond, Align::Center);
+			if (Ts.Clicked)
+			{
+				X.U.StatementTab = I;
+			}
+			Sx -= 6.0f;
+		}
+	}
+	if (StTab == 0)
+	{
+		// (the Statement is drawn)
+	}
+	else if (Paid)
 	{
 		const Rect P{Printout.X + 24.0f, Printout.Y + 50.0f, Printout.W - 48.0f, 228.0f};
 		// It prints out of a slot (§3.4 G, g1-audit L1): the first time this laptop shows a Club Day, the slip feeds down out of
@@ -3059,6 +3491,8 @@ void RitMemberPage(RitCtx& X)
 	RitText(X.C, "Joined RunItTwice " + (A ? net::DateLabel(net::DayOf(A->JoinedAt)) + ", " + std::to_string(world::YearOf(net::DayOf(A->JoinedAt))) : std::string("today")), L.X + 24.0f,
 		L.Y + 384.0f, 15.0f, RitC(RitInk), RitFace::Body);
 	RitParagraph(X.C, RitMemberNote, L.X + 24.0f, L.Y + 420.0f, L.W - 48.0f, 13.0f, RitC(RitMuted), 18.0f, 3);
+	// Credentials (G2, R7): chrome plates engraved with the date and the event.
+	RitCredentials(X, {L.X + 24.0f, L.Y + 504.0f, L.W - 48.0f, 330.0f});
 	// The summary grid: the Desk's numbers over everything, and the record's bests.
 	const Rect R{668.0f, 96.0f, 908.0f, 854.0f};
 	RitPanel(X.C, R, 10.0f);
@@ -3098,8 +3532,10 @@ void RitMemberPage(RitCtx& X)
 			RitTwice(X.C, Cells[I].second, C.X + 12.0f, C.Y + 70.0f, RitFit(X.C, Cells[I].second, 34.0f, 22.0f, C.W - 24.0f), RitC(RitWhite));
 		}
 	}
+	// League history, the Callout record and head-to-head (G2, R2 and R3).
+	RitMemberLeague(X, {R.X + 24.0f, R.Y + 290.0f, R.W - 48.0f, 390.0f});
 	// Club history: the months the Club paid (its ledger lines), as tier bars.
-	const float Hy = R.Y + 290.0f;
+	const float Hy = R.Y + 700.0f;
 	RitLabel(X.C, "Club history", R.X + 24.0f, Hy, 12.0f, RitC(RitMuted));
 	int Months = 0;
 	if (A)
@@ -3117,9 +3553,9 @@ void RitMemberPage(RitCtx& X)
 				Tier = Ln.Label.find(Club[static_cast<size_t>(T)].Name) != std::string::npos ? T : Tier;
 			}
 			const float Bx = R.X + 24.0f + static_cast<float>(Months) * 70.0f;
-			const float Bh = 30.0f + 30.0f * static_cast<float>(Tier);
-			RitCardGround(X.C, {Bx, Hy + 160.0f - Bh, 56.0f, Bh}, Tier);
-			RitText(X.C, RitDate(net::DayOf(Ln.At)).substr(0, 3), Bx + 28.0f, Hy + 180.0f, 11.0f, RitC(RitMuted), RitFace::Cond, Align::Center);
+			const float Bh = 20.0f + 16.0f * static_cast<float>(Tier);
+			RitCardGround(X.C, {Bx, Hy + 110.0f - Bh, 56.0f, Bh}, Tier);
+			RitText(X.C, RitDate(net::DayOf(Ln.At)).substr(0, 3), Bx + 28.0f, Hy + 128.0f, 11.0f, RitC(RitMuted), RitFace::Cond, Align::Center);
 			++Months;
 		}
 	}
@@ -3204,6 +3640,121 @@ void RitClubMeterDraw(RitCtx& X, const Rect& M, const site::show::Accrual& Ac)
 	X.C.FillPolygon({{M.X + M.W * Pos - 5.0f, M.Y - 9.0f}, {M.X + M.W * Pos + 5.0f, M.Y - 9.0f}, {M.X + M.W * Pos, M.Y - 3.0f}}, RitC(RitWhite));
 }
 
+/**
+ * The Settlement's League impact (G2, §3.4 I): "11TH -> 7TH (+4) +38.2 PTS", the group's rows re-sorting into place after the
+ * stamp (RitRank, a tick a place gained). The places are core's, before (as this laptop last saw them) and now.
+ */
+void RitSettleLeague(RitCtx& X, const Rect& R, double Since)
+{
+	const RitPlay& P = X.P;
+	RitPanel(X.C, R, 10.0f);
+	RitLabel(X.C, "The League", R.X + 18.0f, R.Y + 28.0f, 12.0f, RitC(RitMuted));
+	if (!P.InLeague || P.Table.empty())
+	{
+		RitParagraph(X.C, P.Leave ? RitLeagueLeave : RitNoLeagueYet, R.X + 18.0f, R.Y + 60.0f, R.W - 36.0f, 13.0f, RitC(RitMuted), 18.0f, 4);
+		return;
+	}
+	RitText(X.C, RitUpper(RitDivName(P.Div)) + " \xC2\xB7 GROUP " + std::to_string(P.Group), R.X + R.W - 18.0f, R.Y + 28.0f, 12.0f, RitC(RitChrome), RitFace::Cond, Align::Right);
+	const int From = X.U.SettleRanked && X.U.SettleRankFrom > 0 ? X.U.SettleRankFrom : P.Rank;
+	const int To = P.Rank;
+	float Lx = R.X + 18.0f;
+	const float Base = R.Y + 74.0f;
+	Lx += RitTwice(X.C, RitPlace(From), Lx, Base, 32.0f, RitC(From == To ? RitWhite : RitInk)) + 10.0f;
+	if (From != To)
+	{
+		const bool Up = To < From;
+		RitArrow(X.C, Lx, Base - 11.0f, 24.0f, RitC(Up ? RitUp : RitDown), 2.0f);
+		Lx += 34.0f;
+		Lx += RitTwice(X.C, RitPlace(To), Lx, Base, 32.0f, RitC(RitWhite)) + 10.0f;
+		RitText(X.C, std::string("(") + (Up ? "+" : "-") + std::to_string(std::abs(From - To)) + ")", Lx, Base, 18.0f, RitC(Up ? RitUp : RitDown), RitFace::Cond);
+	}
+	float Scored = -1.0f;
+	for (const std::pair<std::string, float>& Sc : P.Scored)
+	{
+		Scored = X.S.HasResults && !X.S.History.empty() && Sc.first == X.S.History.front().EventId ? Sc.second : Scored;
+	}
+	if (Scored > 0.0f)
+	{
+		RitText(X.C, "+" + RitPts(Scored) + " PTS", R.X + R.W - 18.0f, Base, 22.0f, RitC(RitWhite), RitFace::Cond, Align::Right);
+	}
+	bool Best = false;
+	for (const std::pair<int, float>& D : P.HeroDays)
+	{
+		Best = Best || (D.first == P.Today && Scored > 0.0f && std::fabs(D.second - Scored) < 0.05f);
+	}
+	RitText(X.C, Scored > 0.0f ? (Best ? RitTodaysBest : RitNotToday) : RitSideNotCounting, R.X + 18.0f, R.Y + 98.0f, 12.0f, RitC(RitMuted), RitFace::Body, Align::Left, Baseline::Alphabetic,
+		R.W - 150.0f);
+	if (To > 0 && To <= P.Up)
+	{
+		RitTag(X.C, R.X + R.W - 128.0f, R.Y + 86.0f, "PROMOTION ZONE", RitUp, RitOnyx, 11.0f);
+	}
+	const int DaysLeft = std::max(0, static_cast<int>(std::ceil((P.Closes - X.World) / net::MinutesPerDay)));
+	RitText(X.C, "Top " + std::to_string(P.Up) + (RitTopDivision(P) ? " win a Sunday 100K ticket on " : " go up on ") + RitDate(net::DayOf(P.Closes)) + " \xC2\xB7 " + std::to_string(DaysLeft) + (DaysLeft == 1 ? " day left" : " days left"), R.X + 18.0f,
+		R.Y + 118.0f, 11.0f, RitC(RitMuted), RitFace::Mono);
+	// The group around you, re-sorting into its new order 0.8 s in (after the stamp), over 0.4 s.
+	const int N = static_cast<int>(P.Table.size());
+	const int Ws = std::max(0, std::min(To - 3, N - 5));
+	const double K = X.Preview ? 1.0 : motion::CountUp(0.0, 1.0, Since, 0.8, 0.4);
+	const Rect Win{R.X + 12.0f, R.Y + 134.0f, R.W - 24.0f, 5.0f * 24.0f};
+	X.C.PushClip(Win);
+	for (int I = Ws; I < std::min(N, Ws + 5); ++I)
+	{
+		const RitLeagueRow& Rw = P.Table[static_cast<size_t>(I)];
+		const bool You = Rw.Npc < 0;
+		const int Final = Rw.Rank;
+		int Old = Final;
+		if (You)
+		{
+			Old = From;
+		}
+		else if (To < From && Final > To && Final <= From)
+		{
+			Old = Final - 1;
+		}
+		else if (To > From && Final >= From && Final < To)
+		{
+			Old = Final + 1;
+		}
+		const float Pos = static_cast<float>(Old) + (static_cast<float>(Final) - static_cast<float>(Old)) * static_cast<float>(K);
+		const float Y = Win.Y + (Pos - 1.0f - static_cast<float>(Ws)) * 24.0f;
+		// The zones in their tints; your row ruled in Hot White, never red-tinted (red rows are relegation's: the League page's
+		// rule and runittwice_settlement.html; review-ui-rit).
+		if (Rw.Zone != 0)
+		{
+			X.C.FillRect({Win.X, Y, Win.W, 24.0f}, RitC(Rw.Zone > 0 ? RitPromo : 0x321b1e));
+		}
+		if (You)
+		{
+			X.C.FillRect({Win.X, Y, Win.W, 1.0f}, RitC(RitWhite));
+			X.C.FillRect({Win.X, Y + 23.0f, Win.W, 1.0f}, RitC(RitWhite));
+			const int Passed = std::min(std::abs(From - To), static_cast<int>(std::floor(std::fabs(static_cast<float>(From) - Pos) + 0.0001f)));
+			while (!X.Preview && To < From && X.U.SettleTicks < Passed)
+			{
+				++X.U.SettleTicks;
+				RitSound(X, SoundId::RitRank, 0.3f);
+			}
+		}
+		const float Ty = Y + 16.0f;
+		RitText(X.C, std::to_string(static_cast<int>(std::floor(Pos + 0.5f))), Win.X + 24.0f, Ty, 13.0f, RitC(You ? RitWhite : RitInk), RitFace::Cond, Align::Right);
+		const float Nw = RitText(X.C, You ? X.S.HeroName : Rw.Name, Win.X + 36.0f, Ty, 13.0f, RitC(You ? RitWhite : RitInk), RitFace::Name, Align::Left, Baseline::Alphabetic, 220.0f);
+		if (Rw.Team)
+		{
+			RitTag(X.C, Win.X + 42.0f + Nw, Y + 4.0f, "TEAM", RitRed, RitWhite, 10.0f, 4.0f, 15.0f);
+		}
+		else if (Rw.Callout)
+		{
+			RitTag(X.C, Win.X + 42.0f + Nw, Y + 4.0f, "VS", RitAmber, RitOnyx, 10.0f, 4.0f, 15.0f);
+		}
+		RitText(X.C, RitPts(Rw.Points), Win.X + Win.W - 8.0f, Ty, 13.0f, RitC(You ? RitWhite : RitInk), RitFace::Mono, Align::Right);
+	}
+	X.C.PopClip();
+	if (!X.Preview && K >= 1.0 && To <= P.Up && From > P.Up && X.U.SettleTicks < 100)
+	{
+		X.U.SettleTicks = 100;
+		RitSound(X, SoundId::RitRank, 0.55f); // into the promotion places: the two-note rise
+	}
+}
+
 void RitSettlement(RitCtx& X)
 {
 	if (!X.S.HasResults)
@@ -3226,6 +3777,12 @@ void RitSettlement(RitCtx& X)
 		X.U.PrintFor = Key;
 		X.U.PrintAt = X.Now;
 		X.U.Stamped = false;
+		// The League impact (G2): the place this laptop last saw before this result, and the place now (core's).
+		X.U.SettleRanked = X.P.InLeague && X.P.Rank > 0;
+		X.U.SettleRankTo = X.P.Rank;
+		X.U.SettleRankFrom = X.U.RankWasFor == X.P.MonthKey && X.U.RankWas > 0 ? X.U.RankWas : X.P.Rank;
+		X.U.SettlePointsFrom = X.U.RankWasFor == X.P.MonthKey ? X.U.PointsWas : X.P.Points;
+		X.U.SettleTicks = 0;
 	}
 	const double Since = X.Preview ? 10.0 : X.Now - X.U.PrintAt;
 	const float Out = static_cast<float>(EaseOutCubic(Clamp01(Since / 0.6)));
@@ -3237,12 +3794,40 @@ void RitSettlement(RitCtx& X)
 		X.U.Stamped = true;
 		RitSound(X, SoundId::RitStamp, 0.5f);
 	}
-	// The left column: this event's Second Boards (its luck is G2's).
+	// The left column: this event's luck (G2: its all-ins against their equity, the session's own records) and its Second Boards.
 	const Rect Left{232.0f, 96.0f, 282.0f, 830.0f};
 	RitPanel(X.C, Left, 10.0f);
-	RitLabel(X.C, "Second boards", Left.X + 16.0f, Left.Y + 30.0f, 12.0f, RitC(RitMuted));
-	RitText(X.C, "for show", Left.X + Left.W - 16.0f, Left.Y + 30.0f, 11.0f, RitC(RitMuted), RitFace::Body, Align::Right);
-	float By = Left.Y + 50.0f;
+	RitLabel(X.C, "Luck, this event", Left.X + 16.0f, Left.Y + 30.0f, 12.0f, RitC(RitMuted));
+	{
+		int AllIns = 0;
+		double Expected = 0.0;
+		double Won = 0.0;
+		for (const site::show::SecondRecord& Sr : X.S.SecondBoards)
+		{
+			if (Sr.EventId == EventId && Sr.Equity >= 0.0)
+			{
+				++AllIns;
+				Expected += Sr.Equity;
+				Won += Sr.Board.First >= 2 ? 1.0 : Sr.Board.First == 1 ? 0.5 : 0.0;
+			}
+		}
+		if (AllIns == 0)
+		{
+			RitText(X.C, RitNoLuckHere, Left.X + 16.0f, Left.Y + 56.0f, 12.0f, RitC(RitMuted), RitFace::Body, Align::Left, Baseline::Alphabetic, Left.W - 32.0f);
+		}
+		else
+		{
+			RitTerm(X, Left.X + 16.0f, Left.X + Left.W - 16.0f, Left.Y + 56.0f, "ALL-INS", std::to_string(AllIns), RitInk);
+			RitTerm(X, Left.X + 16.0f, Left.X + Left.W - 16.0f, Left.Y + 78.0f, "EXPECTED WINS", Fixed(Expected, 2), RitInk);
+			const double Gap = Won - Expected;
+			RitTerm(X, Left.X + 16.0f, Left.X + Left.W - 16.0f, Left.Y + 100.0f, "ACTUAL WINS", Fixed(Won, Won == std::floor(Won) ? 0 : 1) + " \xC2\xB7 GAP " + (Gap >= 0.0 ? "+" : "-") + Fixed(std::fabs(Gap), 2),
+				Gap >= 0.0 ? RitWhite : RitDown);
+		}
+	}
+	X.C.FillRect({Left.X + 16.0f, Left.Y + 116.0f, Left.W - 32.0f, 1.0f}, RitC(RitHair));
+	RitLabel(X.C, "Second boards", Left.X + 16.0f, Left.Y + 140.0f, 12.0f, RitC(RitMuted));
+	RitText(X.C, "for show", Left.X + Left.W - 16.0f, Left.Y + 140.0f, 11.0f, RitC(RitMuted), RitFace::Body, Align::Right);
+	float By = Left.Y + 160.0f;
 	int Boards = 0;
 	// The session's log (HeroHandDone, both paths: a night skipped to its result keeps its all-ins), newest first.
 	for (auto It = X.S.SecondBoards.rbegin(); It != X.S.SecondBoards.rend() && Boards < 3; ++It)
@@ -3366,8 +3951,34 @@ void RitSettlement(RitCtx& X)
 		const std::vector<site::TierInfo>& Club = site::SecondRunTiers();
 		const Chips Adds = static_cast<Chips>(std::llround(static_cast<double>(Fee) * static_cast<double>(Club[static_cast<size_t>(Ac.Tier)].Permille) / 1000.0));
 		Leader(Y, "Club accrual", "+" + Money(Adds) + " \xC2\xB7 " + RitTierName(Ac.Tier) + " " + RitTierPct(Ac.Tier), false);
-		Y += 32.0f;
+		Y += 25.0f;
 	}
+	// League points (G2): what this result scored for the League (core's; "today's best" when it set the day's best).
+	for (const std::pair<std::string, float>& Sc : X.P.Scored)
+	{
+		if (Sc.first == EventId)
+		{
+			bool Best = false;
+			for (const std::pair<int, float>& D : X.P.HeroDays)
+			{
+				Best = Best || (D.first == X.P.Today && std::fabs(D.second - Sc.second) < 0.05f && Sc.second > 0.0f);
+			}
+			Leader(Y, "League points", Sc.second > 0.0f ? "+" + RitPts(Sc.second) + (Best ? " \xC2\xB7 today's best" : std::string()) : std::string("none \xC2\xB7 didn't score"), false);
+			Y += 25.0f;
+		}
+	}
+	// A Team scalp taken in this event (seen leave at this laptop's table).
+	std::string Scalped;
+	for (const std::pair<std::string, std::string>& Tk : X.U.TakenHere)
+	{
+		Scalped = Tk.first == EventId ? Tk.second : Scalped;
+	}
+	if (!Scalped.empty())
+	{
+		Leader(Y, "Team scalp", Scalped, false);
+		Y += 25.0f;
+	}
+	Y += 7.0f;
 	// The pinned run, the twin of Ignite's.
 	X.C.StrokePolyline({{L, Y - 21.0f}, {Rx, Y - 21.0f}, {Rx, Y + 11.0f}, {L, Y + 11.0f}}, true, RitC(RitPaperInk), 1.0f);
 	RitText(X.C, "RunItTwice balance now " + Money(rlsites_detail::SitesBalance(X.S, RitSite)), L + 12.0f, Y, 15.0f, RitC(RitPaperInk), RitFace::Mono);
@@ -3392,25 +4003,32 @@ void RitSettlement(RitCtx& X)
 		const float Spread = static_cast<float>(Clamp01(1.0 - S0 / 0.6));
 		RitStampPaper(X.C, 862.0f, 772.0f, Word, 28.0f, Scale, Spread);
 	}
+	if (!Scalped.empty() && Since >= 0.6)
+	{
+		// TAKEN beside it for a Team scalp (red ink on paper: the receipt is the one place it's allowed).
+		const double S0 = Since - 0.6;
+		RitStampPaper(X.C, 690.0f, 772.0f, "TAKEN", 22.0f, static_cast<float>(S0 >= 0.12 ? 1.0 : 1.15 - 0.15 * S0 / 0.12), static_cast<float>(Clamp01(1.0 - S0 / 0.6)));
+	}
 	X.C.Restore();
 	X.C.PopClip();
-	// The right column: the Club after this result, what's boarding now, the way back.
+	// The right column: the League after this result (G2), the Club, what's boarding now, the way back.
 	const float Cx0 = 1086.0f;
 	const float Cw = 490.0f;
-	const Rect Club{Cx0, 96.0f, Cw, 220.0f};
+	RitSettleLeague(X, {Cx0, 96.0f, Cw, 272.0f}, Since);
+	const Rect Club{Cx0, 380.0f, Cw, 148.0f};
 	RitPanel(X.C, Club, 10.0f);
 	RitLabel(X.C, "The Club \xC2\xB7 Second Run", Club.X + 18.0f, Club.Y + 28.0f, 12.0f, RitC(RitMuted));
 	RitText(X.C, "PROVISIONAL", Club.X + Cw - 18.0f, Club.Y + 28.0f, 11.0f, RitC(RitMuted), RitFace::Mono, Align::Right);
-	RitLabel(X.C, Ac.Tier > 0 ? "Accrued at " + RitTierName(Ac.Tier) + " (" + RitTierPct(Ac.Tier) + ")" : std::string("Accrued this month"), Club.X + 18.0f, Club.Y + 54.0f, 12.0f, RitC(RitInk));
-	RitTwice(X.C, Money(Ac.Accrued), Club.X + 18.0f, Club.Y + 96.0f, 34.0f, RitC(RitWhite));
-	RitText(X.C, RitToNextLine(Ac), Club.X + Cw - 18.0f, Club.Y + 96.0f, 13.0f, RitC(RitInk), RitFace::Body, Align::Right, Baseline::Alphabetic, 230.0f);
-	RitClubMeterDraw(X, {Club.X + 18.0f, Club.Y + 130.0f, Cw - 36.0f, 8.0f}, Ac);
-	RitText(X.C, "Rake this month " + Money(Ac.Rake), Club.X + Cw - 18.0f, Club.Y + 196.0f, 12.0f, RitC(RitMuted), RitFace::Mono, Align::Right);
-	RitText(X.C, RitNoSpins, Club.X + 18.0f, Club.Y + 196.0f, 11.0f, RitC(RitMuted), RitFace::Body);
+	RitLabel(X.C, Ac.Tier > 0 ? "Accrued at " + RitTierName(Ac.Tier) + " (" + RitTierPct(Ac.Tier) + ")" : std::string("Accrued this month"), Club.X + 18.0f, Club.Y + 50.0f, 12.0f, RitC(RitInk));
+	RitTwice(X.C, Money(Ac.Accrued), Club.X + 18.0f, Club.Y + 88.0f, 32.0f, RitC(RitWhite));
+	RitText(X.C, RitToNextLine(Ac), Club.X + Cw - 18.0f, Club.Y + 88.0f, 13.0f, RitC(RitInk), RitFace::Body, Align::Right, Baseline::Alphabetic, 230.0f);
+	RitClubMeterDraw(X, {Club.X + 18.0f, Club.Y + 106.0f, Cw - 36.0f, 8.0f}, Ac);
+	RitText(X.C, "Rake this month " + Money(Ac.Rake), Club.X + Cw - 18.0f, Club.Y + 136.0f, 12.0f, RitC(RitMuted), RitFace::Mono, Align::Right);
+	RitText(X.C, RitNoSpins, Club.X + 18.0f, Club.Y + 136.0f, 11.0f, RitC(RitMuted), RitFace::Body);
 	(void)A;
 	// Up next: three boarding events, each through the shared register button (the selection follows the pointer, so an
 	// armed confirm always belongs to the row it shows on).
-	const Rect Next{Cx0, 332.0f, Cw, 536.0f};
+	const Rect Next{Cx0, 540.0f, Cw, 336.0f};
 	RitPanel(X.C, Next, 10.0f);
 	RitLabel(X.C, "Up next", Next.X + 18.0f, Next.Y + 28.0f, 12.0f, RitC(RitMuted));
 	RitText(X.C, "boarding now", Next.X + Cw - 18.0f, Next.Y + 28.0f, 11.0f, RitC(RitMuted), RitFace::Body, Align::Right);
@@ -3422,12 +4040,12 @@ void RitSettlement(RitCtx& X)
 			Boarding.push_back(Rw);
 		}
 	}
-	float Uy = Next.Y + 48.0f;
+	float Uy = Next.Y + 40.0f;
 	for (size_t I = 0; I < Boarding.size(); ++I)
 	{
 		const RitRow& Rw = Boarding[I];
 		const net::EventTemplate& Tt = Net.TemplateOf(Rw.E);
-		const Rect Row{Next.X + 12.0f, Uy, Cw - 24.0f, 150.0f};
+		const Rect Row{Next.X + 12.0f, Uy, Cw - 24.0f, 96.0f};
 		if (!X.Preview && X.UI.Hover(Row) && X.RL.SelectedEvent() != Rw.E.Id && !X.S.ConfirmRegister)
 		{
 			X.RL.SelectEvent(Rw.E.Id);
@@ -3438,7 +4056,7 @@ void RitSettlement(RitCtx& X)
 			Row.X + 76.0f, Uy + 44.0f, 11.0f, RitC(RitMuted));
 		if (!X.S.ConfirmRegister || X.RL.SelectedEvent() == Rw.E.Id)
 		{
-			const Rect Rb{Row.X + 6.0f, Uy + 62.0f, Row.W - 12.0f, 60.0f};
+			const Rect Rb{Row.X + 6.0f, Uy + 46.0f, Row.W - 12.0f, 52.0f};
 			if (!X.Preview && X.S.ConfirmRegister && X.S.CurrentScreen == Screen::Results)
 			{
 				// The confirming press (the confirm step's "regok", its left half): leave the Settlement first, as BACK TO THE
@@ -3451,7 +4069,7 @@ void RitSettlement(RitCtx& X)
 			}
 			Access::RegisterBlock(X.RL, Rw.E, Rw.L, Rb, X.Now);
 		}
-		Uy += 160.0f;
+		Uy += 98.0f;
 	}
 	if (Boarding.empty())
 	{
@@ -3642,7 +4260,29 @@ void RiverLine::RitFrame(double Now, bool Preview)
 {
 	using namespace rlrit_detail;
 	RitUi& U = RitOf(this);
-	RitCtx X{*this, S, *C, UI, U, Now, World, Preview};
+	RitCtx X{*this, S, *C, UI, U, Now, World, Preview, RitPlayOf(this, S)};
+	// The desk bell (R1): a bell core rang that this laptop hasn't rung yet rings RitBell once (never in the Kast preview).
+	for (const RitBellView& B : X.P.Bells)
+	{
+		if (!Preview && std::find(U.BellsRung.begin(), U.BellsRung.end(), B.EventId) == U.BellsRung.end())
+		{
+			U.BellsRung.push_back(B.EventId);
+			if (U.BellsRung.size() > 24)
+			{
+				U.BellsRung.erase(U.BellsRung.begin());
+			}
+			U.DeskBellFor = B.EventId;
+			U.DeskBellAt = Now;
+			RitSound(X, SoundId::RitBell, 0.45f);
+		}
+	}
+	// The League place this laptop last saw (the Settlement's move reads it before it updates).
+	if (S.CurrentScreen != Screen::Results && X.P.InLeague && X.P.Rank > 0)
+	{
+		U.RankWasFor = X.P.MonthKey;
+		U.RankWas = X.P.Rank;
+		U.PointsWas = X.P.Points;
+	}
 	// The autoplay panel belongs to the tables (update 2 §2.6.1), as in RiverLine's frame.
 	if (!Preview && S.CurrentScreen != Screen::Table && rlauto_detail::AutoPanelOpen(this))
 	{
@@ -3659,6 +4299,13 @@ void RiverLine::RitFrame(double Now, bool Preview)
 	if (S.CurrentScreen == Screen::Table)
 	{
 		// The octagon under the collapsed rail's chrome: the table first (its seats start at x 70), the chrome over its edges.
+		// INCOMING CALLOUT reaches you mid-session too (§3.8 #5): while it shows, it holds the pointer under it (house law 3).
+		const bool Alert = !Preview && X.P.Callout.On && X.P.Callout.ByThem && U.IncomingSeen == X.P.Callout.Week && Now - U.IncomingAt >= 0.0 && Now - U.IncomingAt <= 6.0;
+		rlsites_detail::SitesBlocked AlertHeld;
+		if (Alert)
+		{
+			AlertHeld = rlsites_detail::SitesBlockUnder(UI, RitIncomingRect(RitRailMini), false);
+		}
 		RitRail(X, true);
 		const bool Card = !Preview && CardOpen();
 		const bool Auto = !Preview && !Card && rlauto_detail::AutoPanelOpen(this);
@@ -3681,6 +4328,11 @@ void RiverLine::RitFrame(double Now, bool Preview)
 			U.SeenPage = Page::Embercrest; // not on a page: the Board waves again when it's opened
 		}
 		RitTableHeader(X);
+		rlsites_detail::SitesUnblock(UI, AlertHeld);
+		if (!Card && !Auto)
+		{
+			RitIncoming(X, RitRailMini);
+		}
 		if (Card)
 		{
 			PlayerCard(Now);
@@ -3694,6 +4346,39 @@ void RiverLine::RitFrame(double Now, bool Preview)
 	else
 	{
 		const bool Card = CardOpen();
+		// League Night (§3.6 R2): the first open in a new month plays the closed month's finale on the League page, once a
+		// save (G2 fix L6: core keeps the mark, so a relaunch doesn't play it again; never in the Kast preview, which leaves the
+		// player's own to come).
+		if (!Preview && !Card && S.CurrentScreen == Screen::Lobby && X.P.Night.On && !X.P.Night.Seen && U.NightSeen != X.P.Night.Month && U.CallNpc < 0)
+		{
+			U.NightSeen = X.P.Night.Month;
+			U.NightOn = true;
+			U.NightAt = Now;
+			U.NightRankTicks = 0;
+			OpenPage(Page::League, Now);
+			if (site::play::SeeLeagueNight(S.Life, X.P.Night.Month, S.WorldMinutes()))
+			{
+				S.Save();
+			}
+		}
+		if (!Preview && S.CurrentScreen != Screen::Lobby)
+		{
+			U.NightOn = false; // the Settlement: the finale and the drawer belong to the pages
+			U.CallNpc = -1;
+		}
+		// House law 3: an open overlay holds the pointer for everything drawn before it (League Night and the Callout drawer
+		// are modal; the incoming Callout alert holds only what's under it).
+		rlsites_detail::SitesBlocked Held;
+		const bool Modal = !Preview && (U.NightOn || U.CallNpc >= 0);
+		const bool Alert = !Preview && !Card && X.P.Callout.On && X.P.Callout.ByThem && U.IncomingSeen == X.P.Callout.Week && Now - U.IncomingAt >= 0.0 && Now - U.IncomingAt <= 6.0;
+		if (Modal)
+		{
+			Held = rlsites_detail::SitesBlockUnder(UI, U.NightOn ? Rect{232.0f, 96.0f, 1344.0f, 854.0f} : RitCallRect(U, Now, Preview), true);
+		}
+		else if (Alert)
+		{
+			Held = rlsites_detail::SitesBlockUnder(UI, RitIncomingRect(RitRailW), false);
+		}
 		const Pointer Real = UI.Ptr;
 		if (Card)
 		{
@@ -3714,8 +4399,8 @@ void RiverLine::RitFrame(double Now, bool Preview)
 		}
 		else
 		{
-			// The page: RunItTwice's own (League hidden until G2), each easing in over 160 ms.
-			PageShown = RitPageOf(rlsites_detail::SitesPageHome(RitSite, PageShown));
+			// The page: RunItTwice's own nine and the Member File, each easing in over 160 ms.
+			PageShown = RitPageOf(rlsites_detail::SitesPageHome(RitSite, PageShown), RitLeagueOpen(X.P));
 			Name = RitPageName(PageShown);
 			const float In = Preview ? 1.0f : static_cast<float>(EaseOutCubic(Clamp01((Now - PageAt) / 0.16)));
 			const float A0 = C->GetAlpha();
@@ -3723,6 +4408,7 @@ void RiverLine::RitFrame(double Now, bool Preview)
 			switch (PageShown)
 			{
 			case Page::Live: RitLivePage(X); break;
+			case Page::League: RitLeaguePage(X); break;
 			case Page::Leaderboards: RitRankingsPage(X); break;
 			case Page::Desk: RitDeskPage(X); break;
 			case Page::Series: RitSeriesPage(X); break;
@@ -3744,6 +4430,25 @@ void RiverLine::RitFrame(double Now, bool Preview)
 		if (Card)
 		{
 			UI.Ptr = Real;
+		}
+		// The overlays, over the chrome, with the pointer back (a scrim click closes them and reaches nothing).
+		rlsites_detail::SitesUnblock(UI, Held);
+		if (Modal && U.NightOn)
+		{
+			RitLeagueNight(X, Held.Scrim);
+		}
+		else if (Modal && U.CallNpc >= 0)
+		{
+			RitCalloutDrawer(X, Held.Scrim);
+		}
+		// Not under an open player card (as at the table): the card is the top overlay, and the alert waits for it to close
+		// (review-ui-rit: it slid in under the card, rang, and its THE LEAGUE button took clicks through the card's backdrop).
+		if (!Card)
+		{
+			RitIncoming(X, RitRailW);
+		}
+		if (Card)
+		{
 			PlayerCard(Now);
 		}
 	}
@@ -3761,23 +4466,64 @@ void RiverLine::RitTableLayer(double Now)
 		return;
 	}
 	RitUi& U = RitOf(this);
-	RitCtx X{*this, S, *C, UI, U, Now, World, Previewing};
+	RitCtx X{*this, S, *C, UI, U, Now, World, Previewing, RitPlayOf(this, S)};
 	const rlsites_detail::SiteLook& Look = rlsites_detail::SitesTableLook(S);
 	// Team RunItTwice's pros at the table: a 3-unit Signal Red top bar and a TEAM tab (Hot White on Signal Red).
 	const std::string Team = net::Def(RitSite).TeamName;
 	const world::World& W = S.Living();
 	for (const SeatVis& V : S.Seats)
 	{
-		if (!V.Present || V.IsHero)
+		if (!V.Present)
 		{
 			continue;
 		}
+		const Rect Box = rlsites_detail::SitesSeatBox(Look, SlotPos(V.Seat), V.IsHero);
+		// G2: the division stripe (§3.5 Seats), 4 units on the card's left in its division's metal: yours, and your League
+		// group's (the world's draw; everyone else's is blank: the world keeps no one else's division).
+		int Div = -1;
+		if (V.IsHero)
+		{
+			Div = X.P.InLeague ? X.P.Div : -1;
+		}
+		else
+		{
+			for (const RitLeagueRow& Row : X.P.Table)
+			{
+				Div = Row.Npc >= 0 && Row.Name == V.Name ? X.P.Div : Div;
+			}
+		}
+		if (Div == 0)
+		{
+			C->StrokePolyline({{Box.X + 0.5f, Box.Y + 8.0f}, {Box.X + 3.5f, Box.Y + 8.0f}, {Box.X + 3.5f, Box.Y + Box.H - 2.0f}, {Box.X + 0.5f, Box.Y + Box.H - 2.0f}}, true, RitC(RitChrome), 1.0f);
+		}
+		else if (Div > 0)
+		{
+			C->FillRect({Box.X, Box.Y + 8.0f, 4.0f, Box.H - 10.0f}, RitC(RitDivMetal(Div)));
+		}
+		if (V.IsHero)
+		{
+			if (X.P.Scalps.Bounty)
+			{
+				RitCrosshair(*C, Box.X + Box.W - 18.0f, Box.Y + 16.0f, 7.0f); // you're the bounty (R4)
+			}
+			continue;
+		}
 		const world::Npc* N = W.Get(W.Find(V.Name));
+		float TagX = Box.X + Box.W - 52.0f;
 		if (N && N->Sponsor == Team)
 		{
-			const Rect Box = rlsites_detail::SitesSeatBox(Look, SlotPos(V.Seat), false);
 			C->FillRect({Box.X, Box.Y, Box.W - 6.0f, 3.0f}, RitC(RitRed));
-			RitTag(*C, Box.X + Box.W - 52.0f, Box.Y - 10.0f, "TEAM", RitRed, RitWhite, 12.0f, 7.0f, 18.0f);
+			RitTag(*C, TagX, Box.Y - 10.0f, "TEAM", RitRed, RitWhite, 12.0f, 7.0f, 18.0f);
+			TagX -= 34.0f;
+		}
+		// Your Callout opponent's amber VS tab; a name you have history with wears a chrome eye.
+		if (X.P.Callout.On && X.P.Callout.Name == V.Name)
+		{
+			RitTag(*C, TagX, Box.Y - 10.0f, "VS", RitAmber, RitOnyx, 12.0f, 7.0f, 18.0f);
+		}
+		else if (std::any_of(X.P.H2H.begin(), X.P.H2H.end(), [&V](const RitH2H& H) { return H.Name == V.Name; }))
+		{
+			RitEye(*C, Box.X + Box.W - 20.0f, Box.Y + Box.H - 12.0f, 12.0f, RitC(RitChrome));
 		}
 	}
 	// Knockouts (§3.5, g1-audit L1): a seat that ended a hand with no chips and is gone when the next is dealt (BuildSeats empties
@@ -3786,6 +4532,20 @@ void RiverLine::RitTableLayer(double Now)
 	if (!Previewing)
 	{
 		const std::string SeatsKey = S.T->Spec.Id + "#" + std::to_string(S.TableId);
+		if (U.ScalpSeatsFor != SeatsKey)
+		{
+			// The Team pros already TAKEN (this year's set) as this laptop sits at this table: their later busts are no scalp of
+			// this event's (core takes a scalp once a year, in the hand that knocks the pro out).
+			U.ScalpSeatsFor = SeatsKey;
+			U.ScalpBefore.clear();
+			for (const RitScalpPro& Pro : X.P.Scalps.Six)
+			{
+				if (Pro.Taken)
+				{
+					U.ScalpBefore.push_back(Pro.Name);
+				}
+			}
+		}
 		if (U.SeatsFor != SeatsKey)
 		{
 			U.Knockouts.clear();
@@ -3811,8 +4571,26 @@ void RiverLine::RitTableLayer(double Now)
 			U.SeatsSeen[I] = {V.Present, V.IsHero, V.Id, V.Name, V.Stack};
 		}
 		U.Knockouts.erase(std::remove_if(U.Knockouts.begin(), U.Knockouts.end(), [Now](const RitKnockout& K) { return Now - K.At >= 0.7 || Now < K.At; }), U.Knockouts.end());
-		for (const RitKnockout& K : U.Knockouts)
+		for (RitKnockout& K : U.Knockouts)
 		{
+			// A Team pro you knocked out gets the stamp on the dark card: core took the scalp in that hand (the View's set says
+			// TAKEN now, and it didn't when this laptop sat down here). A pro already taken this year, busted by anyone, is a
+			// plain knockout (review-ui-rit: it stamped TAKEN, and the receipt claimed a Team scalp core never paid).
+			const bool Fresh = !K.Stamped &&
+				std::any_of(X.P.Scalps.Six.begin(), X.P.Scalps.Six.end(), [&K](const RitScalpPro& Pro) { return Pro.Taken && Pro.Name == K.Name; }) &&
+				std::find(U.ScalpBefore.begin(), U.ScalpBefore.end(), K.Name) == U.ScalpBefore.end();
+			const bool Scalp = K.Stamped || Fresh;
+			if (Fresh)
+			{
+				K.Stamped = true;
+				U.ScalpBefore.push_back(K.Name); // once: a re-entry busting again at this table is no second scalp
+				RitSound(X, SoundId::RitStamp, 0.5f);
+				U.TakenHere.push_back({S.T->Spec.Id, K.Name});
+				if (U.TakenHere.size() > 8)
+				{
+					U.TakenHere.erase(U.TakenHere.begin());
+				}
+			}
 			const Vec2 P = SlotPos(K.Seat);
 			const Rect Box = rlsites_detail::SitesSeatBox(Look, P, false);
 			const float Dx = P.X - Look.Cx;
@@ -3827,6 +4605,15 @@ void RiverLine::RitTableLayer(double Now)
 			C->FillRect({G.X + 12.0f, G.Y + 12.0f, 40.0f, 40.0f}, RitC(RitHair)); // the square avatar, its colour gone
 			RitText(*C, K.Name, G.X + 60.0f, G.Y + 28.0f, 14.0f, RitC(RitMuted), RitFace::Name, Align::Left, Baseline::Alphabetic, G.W - 70.0f);
 			RitTag(*C, G.X + 60.0f, G.Y + 36.0f, "OUT", RitMuted, RitMuted, 11.0f, 5.0f, 16.0f, 4.0f, true);
+			if (Scalp)
+			{
+				const float St = static_cast<float>(Now - K.At >= 0.12 ? 1.0 : 1.15 - 0.15 * (Now - K.At) / 0.12);
+				C->Save();
+				C->Translate(G.X + G.W / 2.0f, G.Y + G.H / 2.0f);
+				C->Scale(St, St);
+				RitStampDark(*C, 0.0f, 0.0f, "TAKEN", 16.0f);
+				C->Restore();
+			}
 			C->SetAlpha(A0);
 		}
 	}

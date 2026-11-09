@@ -314,8 +314,9 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 	// Update 2 (§5.11): each tile wears its site's colours, whatever the client around it wears.
 	const net::SiteId TileSite = rlsites_detail::SitesOfTable(S);
 	const SkinScope Skin(rlsites_detail::SitesSkin(TileSite, World));
-	// Update 3 (§1.11): and its look (its card backs and dealer button; the tile keeps its own geometry).
-	const rlsites_detail::SiteLook& Look = rlsites_detail::SitesLook(TileSite);
+	// Update 3 (§1.11): and its look (its card backs and dealer button; the tile keeps its own geometry), as the player wears it
+	// there (G2: Ignite's equipped back and felt; SitesTableLook is TileSite's).
+	const rlsites_detail::SiteLook& Look = rlsites_detail::SitesTableLook(S);
 	const Tournament& Tn = *S.T;
 	const std::string Id = "t" + std::to_string(Index);
 	const bool Turn = S.HasPrompt;
@@ -483,8 +484,10 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 		const std::string Amt = TileInBb ? rlsites_detail::SitesBbText(Sv.Bet, S.CurHand ? S.CurHand->BigBlind : Lv.Bb) : ChipsText(static_cast<double>(Sv.Bet));
 		const float Aw = UI.Measure(Amt, 11.5f, 700, true);
 		const float X0 = B.X - (Aw + 14.0f) / 2.0f;
-		// The chip's colour is the look's (G1: Ignite's coral candy, RunItTwice's Signal Red lacquer; RiverLine's red as always).
-		const Color ChipCol = Look.ChipSet == 1 ? Hex(rlsites_detail::SitesIgCoral) : Look.ChipSet == 2 ? Hex(rlsites_detail::SitesRitRed) : Hex(0xc8323c);
+		// The chip's colour is the look's (G1: Ignite's coral candy, RunItTwice's Signal Red lacquer; RiverLine's red as always). G2
+		// (review-ui-tablestyle): the set is ChipSet's low bits (a worn look rides above them), and Arcade Tokens are brass.
+		const int TileSet = Look.ChipSet & 15;
+		const Color ChipCol = TileSet == 1 ? Hex(rlsites_detail::SitesIgCoral) : TileSet == 3 ? Hex(0xd1a646) : TileSet == 2 ? Hex(rlsites_detail::SitesRitRed) : Hex(0xc8323c);
 		C->FillCircle(X0 + 5.0f, B.Y - 4.0f, 5.5f, ChipCol);
 		C->StrokeEllipse(X0 + 5.0f, B.Y - 4.0f, 3.5f, 3.5f, Rgba(255, 255, 255, 0.85f), 1.2f, 2.0f);
 		UI.Text(Amt, X0 + 14.0f, B.Y, Ts(11.5f, 700, Hex(0xffffff), Align::Left, Baseline::Alphabetic, true));

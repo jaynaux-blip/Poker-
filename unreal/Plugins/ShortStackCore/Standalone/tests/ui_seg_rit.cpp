@@ -146,6 +146,10 @@ struct RitLaptop
 	}
 };
 
+/** G2's fixture model (the loops' surfaces before core's View fills them): defined with the G2 checks below. */
+using ss::ui::rlrit_detail::RitPlay;
+RitPlay RitFixture(RitLaptop& P, int HeroRank = 6);
+
 uint32_t RitRgb(const ss::ui::Color& C)
 {
 	const auto Byte = [](float V) { return static_cast<uint32_t>(std::min(255.0f, std::max(0.0f, V * 255.0f + 0.5f))); };
@@ -486,23 +490,25 @@ void RitRailAndPages()
 	P.Open(Page::Lobby);
 	DrawList L = P.Settled();
 	WriteList("rit_board", L);
-	const char* const Plates[8] = {"BOARD", "SUNDAY LIVE", "RANKINGS", "THE DESK", "SERIES", "NEWSDESK", "CLUB", "CASHIER"};
+	// G2: the rail's nine plates, LEAGUE third (G1 hid it and numbered the rest 1-8).
+	const char* const Plates[9] = {"BOARD", "SUNDAY LIVE", "LEAGUE", "RANKINGS", "THE DESK", "SERIES", "NEWSDESK", "CLUB", "CASHIER"};
 	bool All = true;
 	for (const char* Plate : Plates)
 	{
 		All = All && DrewRun(L, Plate);
 	}
-	RitExpect(All && !DrewRun(L, "LEAGUE"), "rit: the rail's 8 plates, LEAGUE hidden until G2");
+	const RitBox League = RitRun(L, "LEAGUE", P.M, 84.0f + 80.0f, 84.0f + 80.0f + 36.0f);
+	RitExpect(All && League.Found && DrewRun(L, "9"), "rit: the rail's 9 plates, LEAGUE third (numbered 1-9)");
 	RitExpect(DrewRun(L, "Balance $212.40"), "rit: the header's balance is one run (the sites' pin)");
 	const RitBox Bal = RitRun(L, "Balance $212.40", P.M);
 	RitExpect(Bal.Found && Bal.Face == ss::ui::Font::BoldCondensed && std::fabs(Bal.X + Bal.W - 1576.0f) < 0.6f,
 		"rit: the balance run is BoldCondensed, measured in its own face to end at 1576");
 	RitPageChecks(L, P.M, "the Board");
 	// Each plate opens its page, and the section slab names it.
-	const std::pair<Page, const char*> Pages[8] = {{Page::Lobby, "THE BOARD"}, {Page::Live, "SUNDAY LIVE"}, {Page::Leaderboards, "RANKINGS"}, {Page::Desk, "THE DESK"},
-		{Page::Series, "SERIES"}, {Page::News, "NEWSDESK"}, {Page::Promotions, "THE CLUB"}, {Page::Cashier, "CASHIER"}};
-	const char* const Files[8] = {"rit_board", "rit_live", "rit_rankings", "rit_desk", "rit_series", "rit_news", "rit_club", "rit_cashier"};
-	for (int I = 7; I >= 0; --I)
+	const std::pair<Page, const char*> Pages[9] = {{Page::Lobby, "THE BOARD"}, {Page::Live, "SUNDAY LIVE"}, {Page::League, "THE LEAGUE"}, {Page::Leaderboards, "RANKINGS"},
+		{Page::Desk, "THE DESK"}, {Page::Series, "SERIES"}, {Page::News, "NEWSDESK"}, {Page::Promotions, "THE CLUB"}, {Page::Cashier, "CASHIER"}};
+	const char* const Files[9] = {"rit_board", "rit_live", "rit_league_empty", "rit_rankings", "rit_desk", "rit_series", "rit_news", "rit_club", "rit_cashier"};
+	for (int I = 8; I >= 0; --I)
 	{
 		P.Click(100.0f, 84.0f + 40.0f * static_cast<float>(I) + 18.0f);
 		const DrawList Lp = P.Settled();
@@ -510,10 +516,10 @@ void RitRailAndPages()
 		WriteList(Files[I], Lp);
 		RitPageChecks(Lp, P.M, Pages[I].second);
 	}
-	// The League is G2's: asked for at G1 (ss.Laptop.Open), the client shows its Board.
+	// The League (G2), asked for by ss.Laptop.Open: before core has a group for the player, its honest empty state.
 	RitExpect(P.RL.DebugOpen("riverline league runittwice"), "rit: ss.Laptop.Open names the League");
 	L = P.Settled();
-	RitExpect(P.RL.CurrentPage() == Page::Lobby && DrewRun(L, "THE BOARD"), "rit: the League (G2) shows the Board at G1");
+	RitExpect(P.RL.CurrentPage() == Page::League && DrewRun(L, "THE LEAGUE") && RitDrewSub(L, "The League draws its groups"), "rit: the League opens (G2), empty until a group is drawn");
 	// The Member File, from the member block.
 	P.Click(100.0f, 872.0f);
 	L = P.Settled();
@@ -1084,8 +1090,9 @@ void RitSettlementChecks()
 	RitExpect(DrewRun(L, "SETTLEMENT") && DrewRun(L, "FINAL TABLE") && DrewRun(L, "RunItTwice balance now $676.40"), "rit: the Settlement prints, stamps FINAL TABLE, and says the balance");
 	RitExpect(P.H.Count(ss::SoundId::RitStamp) == 1, "rit: the stamp thunks once (RitStamp)");
 	RitPageChecks(L, P.M, "the Settlement", 2);
-	// The rail works from the Settlement: a plate leaves the results (as BACK TO THE BOARD does) and opens its page.
-	P.Click(100.0f, 84.0f + 40.0f * 2.0f + 18.0f);
+	// The rail works from the Settlement: a plate leaves the results (as BACK TO THE BOARD does) and opens its page (G2: the
+	// fourth plate is RANKINGS, under LEAGUE).
+	P.Click(100.0f, 84.0f + 40.0f * 3.0f + 18.0f);
 	P.Settled();
 	RitExpect(!P.S.HasResults && P.S.CurrentScreen == ss::Screen::Lobby && P.RL.CurrentPage() == Page::Leaderboards, "rit: a plate on the Settlement leaves it for its page");
 }
@@ -1844,6 +1851,38 @@ void RitPreview()
 	const RitBox Own = RitRun(P.Frame(), Head, P.M);
 	std::printf("  rit: Club Day's head in the preview at y %.1f; the player's own print starts at y %.1f (printed: 538)\n", Still.Base, Own.Base);
 	RitExpect(Own.Found && Own.Base < 538.0f - 50.0f, "rit: the preview leaves the player's own Club Day print to come");
+	// G2 under the preview: League Night, a desk bell and INCOMING CALLOUT play no cue and stay the player's (nothing spent).
+	{
+		RitPlay G = RitFixture(P);
+		G.Night.On = true;
+		G.Night.Month = G.MonthKey - 1;
+		G.Night.Final = G.Table;
+		G.Night.Was = G.Table;
+		G.Callout.ByThem = true;
+		const ss::net::Network& Net = ss::net::Site(SiteId::RunItTwice);
+		for (const ss::net::EventInstance& E : Net.Window(P.S.WorldMinutes() - 600.0, P.S.WorldMinutes() + 60.0))
+		{
+			if (G.Bells.empty() && Net.Live(E, P.S.WorldMinutes()).St == ss::net::Status::LateReg)
+			{
+				G.Bells.push_back({E.Id, Net.TemplateOf(E).Name, 33000, E.Start + E.LateReg, P.S.WorldMinutes()});
+			}
+		}
+		ss::ui::rlrit_detail::RitPlayOverride(&P.RL, &G);
+		P.RL.OpenPage(Page::Lobby, P.Now);
+		P.RL.OpenApp(App::Kast, P.Now);
+		P.RL.ShowKastPage(ss::ui::RiverLine::KastPage::Studio);
+		P.H.Sounds.clear();
+		for (int K = 0; K < 20; ++K)
+		{
+			P.Now += 1.0 / 30.0;
+			L = P.Frame();
+		}
+		const ss::ui::rlrit_detail::RitUi& U = ss::ui::rlrit_detail::RitOf(&P.RL);
+		RitExpect(P.H.Cues() == 0 && U.NightSeen != G.Night.Month && !U.NightOn && U.IncomingSeen != G.Callout.Week && U.BellsRung.empty(),
+			"rit: under the Kast preview, League Night, the desk bell and INCOMING CALLOUT play nothing and stay the player's");
+		WriteList("rit_kast_preview_g2", L);
+		ss::ui::rlrit_detail::RitPlayOverride(&P.RL, nullptr);
+	}
 }
 
 // ------------------------------------------------------------------ the art, the copy, the bench
@@ -2254,6 +2293,1139 @@ void RitCopy()
 	RitExpect(!Wire && std::string(ss::ui::rlrit_detail::RitNoFeed).find("feed") != std::string::npos, "rit: no \"wire\" anywhere in RunItTwice's copy");
 }
 
+// ------------------------------------------------------------------ G2 (§3.4, §3.6): the loops' surfaces on fixture data
+//
+// Until core-siteplay fills View's RunItTwice half (patches/ui-rit_to_core-siteplay_1.diff), RitPlayOf returns an empty model
+// (every surface's honest empty state, checked in RitRailAndPages); these checks drive the pages with a fixture model through
+// RitPlayOverride, built from the world's own people. Core's claims (StarEvent, CallOut) are the Session's: the pages call them
+// on Clicked and show what core answers.
+
+/** The world's people for a League group: 19 named members, Team RunItTwice's pros first (they wear TEAM). */
+std::vector<const ss::world::Npc*> RitGroupOf(const ss::Session& S, int N)
+{
+	const ss::world::World& W = S.Living();
+	const std::string Team = ss::net::Def(SiteId::RunItTwice).TeamName;
+	std::vector<const ss::world::Npc*> Out;
+	for (const ss::world::Npc& Np : W.People())
+	{
+		if (Np.Sponsor == Team && Np.Playing() && static_cast<int>(Out.size()) < 2)
+		{
+			Out.push_back(&Np);
+		}
+	}
+	for (const ss::world::Npc& Np : W.People())
+	{
+		if (static_cast<int>(Out.size()) >= N)
+		{
+			break;
+		}
+		if (Np.Playing() && Np.Sponsor != Team && (Np.Sites & (1u << static_cast<int>(SiteId::RunItTwice))) != 0 && Np.Name.size() <= 14)
+		{
+			Out.push_back(&Np);
+		}
+	}
+	for (const ss::world::Npc& Np : W.People())
+	{
+		if (static_cast<int>(Out.size()) >= N)
+		{
+			break;
+		}
+		if (Np.Playing() && Np.Sponsor != Team && std::find(Out.begin(), Out.end(), &Np) == Out.end() && Np.Name.size() <= 14)
+		{
+			Out.push_back(&Np);
+		}
+	}
+	return Out;
+}
+
+/** A G2 fixture: a Steel group of 20 with the player 6th, this week's fixtures, a Callout, scalps, the Statement, the Luck
+ *  Ledger, credentials, H2H, the Briefing, a starred template. Every field a View would carry. */
+RitPlay RitFixture(RitLaptop& P, int HeroRank)
+{
+	namespace R = ss::ui::rlrit_detail;
+	RitPlay F;
+	F.On = F.Member = F.Started = F.InLeague = true;
+	const double World = P.S.WorldMinutes();
+	const int Day = ss::net::DayOf(World);
+	F.MonthKey = ss::world::MonthKeyOf(Day);
+	F.Today = ss::net::DayOf(World - 6.0 * 60.0);
+	F.Div = 2;
+	F.Group = 4;
+	F.Crest = 1;
+	F.Up = 3;
+	F.Down = 4;
+	F.Matchweek = 2;
+	F.Matchweeks = 4;
+	F.Closes = static_cast<double>(ss::world::MonthStart(Day) + 30) * 1440.0 + 360.0;
+	const std::vector<const ss::world::Npc*> G = RitGroupOf(P.S, 19);
+	const std::string Team = ss::net::Def(SiteId::RunItTwice).TeamName;
+	int Npc = 0;
+	for (int Rank = 1; Rank <= 20; ++Rank)
+	{
+		R::RitLeagueRow Row;
+		Row.Rank = Rank;
+		Row.Points = 420.0f - 15.5f * static_cast<float>(Rank);
+		Row.Days = std::max(1, 12 - Rank / 2);
+		for (size_t B = 0; B < 8; ++B)
+		{
+			Row.Best[B] = B < static_cast<size_t>(std::min(8, Row.Days)) ? Row.Points / 8.0f + 12.0f - 3.0f * static_cast<float>(B) : 0.0f;
+		}
+		Row.Form = {{-1, 0, 1, 2, Rank % 3 == 0 ? 0 : 1}};
+		Row.Path = {{-1, 1, 2}};
+		Row.Zone = static_cast<int8_t>(Rank <= 3 ? 1 : Rank >= 17 ? -1 : 0);
+		Row.Move = Rank == 2 ? 3 : Rank == 9 ? -2 : 0;
+		if (Rank == HeroRank)
+		{
+			Row.Npc = -1;
+			Row.Name = P.S.HeroName;
+		}
+		else if (Npc < static_cast<int>(G.size()))
+		{
+			const ss::world::Npc* N = G[static_cast<size_t>(Npc++)];
+			Row.Npc = N->Id;
+			Row.Name = N->Name;
+			Row.Country = N->Country;
+			Row.Team = N->Sponsor == Team;
+			Row.CanCall = Rank > HeroRank - 4 && Rank < HeroRank + 4;
+		}
+		F.Table.push_back(Row);
+	}
+	F.Rank = HeroRank;
+	F.Of = 20;
+	F.Points = F.Table[static_cast<size_t>(HeroRank - 1)].Points;
+	F.ToPromotion = F.Table[2].Points - F.Points + 0.1f;
+	// Core's meanings (SitePlayRit.cpp's RitFillView): the points still short of the line, 0 once there.
+	F.ToSafety = HeroRank <= 16 ? 0.0f : F.Table[15].Points + 0.1f - F.Points;
+	F.HeroDays = {{F.Today - 3, 40.5f}, {F.Today - 2, 36.0f}, {F.Today - 1, 52.25f}};
+	// The Callout: the member two places down, this week.
+	R::RitLeagueRow& Co = F.Table[static_cast<size_t>(HeroRank + 1)];
+	Co.Callout = true;
+	Co.CanCall = false;
+	F.Callout.On = true;
+	F.Callout.Npc = Co.Npc;
+	F.Callout.Name = Co.Name;
+	F.Callout.Country = Co.Country;
+	F.Callout.Week = 1000 + Day / 7;
+	F.Callout.Mine = 214.0f;
+	F.Callout.Theirs = 190.0f;
+	F.Callout.Ends = World + 2.5 * 1440.0;
+	F.Callout.W = 2;
+	F.Callout.L = 1;
+	// This week's Matchdays at Steel: The Sweat tonight, Twin Turbo PKO on Thursday.
+	const ss::net::Network& Net = ss::net::Site(SiteId::RunItTwice);
+	for (const ss::net::EventTemplate& T : Net.Templates())
+	{
+		if (T.Name == "The Sweat")
+		{
+			F.Fixtures.push_back({F.Today, T.Id, T.Name, 1.5f, false});
+		}
+	}
+	F.Fixtures.push_back({F.Today + 2, "runittwice.twin-turbo-pko", "Twin Turbo PKO", 1.5f, false});
+	for (int D = 0; D < 5; ++D)
+	{
+		F.Divisions[static_cast<size_t>(D)].Members = 640 - 120 * D;
+		F.Divisions[static_cast<size_t>(D)].Floor = D == 0 ? 0 : D == 1 ? 550 : D == 2 ? 1100 : D == 3 ? 2200 : 5500;
+	}
+	F.Divisions[3].Matchdays = {"Encore PKO", "Run It Back", "Sunday Grind"};
+	F.Divisions[3].Reward = "$22 Sunday Grind ticket";
+	F.History = {{F.MonthKey - 1, 1, 2, 20, 1}, {F.MonthKey - 2, 1, 9, 20, 0}};
+	F.Scalps.Six.clear();
+	for (size_t I = 0; I < 6; ++I)
+	{
+		R::RitScalpPro Pro;
+		Pro.Name = I < 2 && I < G.size() ? G[I]->Name : "Team pro " + std::to_string(I + 1);
+		Pro.Taken = I < 3;
+		F.Scalps.Six.push_back(Pro);
+	}
+	F.Scalps.Taken = 3;
+	F.Scalps.Week = 1;
+	F.Scalps.Lifetime = 4;
+	F.Scalps.Ladder = {{0, "$5.50 Supper Stack ticket"}, {10900, "$11 The Sweat ticket"}, {53000, "$27.50 Afternoon Deepstack ticket"}};
+	F.Statement.Rake30 = 21240;
+	F.Statement.Promo30 = 5348;
+	F.Statement.Share = 5348.0 / 21240.0;
+	F.Statement.Lines = {{"Second Run Club", F.MonthKey - 1, 3348, 9}, {"League ticket", F.MonthKey - 1, 1100, 11}, {"Team scalp", F.MonthKey, 550, 12}};
+	F.Statement.Holds = {{"$22 Sunday Grind ticket", 2200, 400, 360, Day, false}};
+	F.Statement.Day0 = F.Today - 29;
+	for (size_t I = 0; I < 30; ++I)
+	{
+		F.Statement.RakeByDay[I] = I % 3 == 0 ? 0 : static_cast<int32_t>(300 + 40 * I);
+	}
+	F.Luck.AllIns = 22;
+	F.Luck.Expected = 11.92;
+	F.Luck.Won = 11;
+	for (int I = 0; I < 10; ++I)
+	{
+		F.Luck.N[static_cast<size_t>(I)] = I + 1;
+		F.Luck.Exp[static_cast<size_t>(I)] = (static_cast<double>(I) + 0.5) / 10.0 * static_cast<double>(I + 1) * 0.4;
+		F.Luck.Wins[static_cast<size_t>(I)] = I / 2;
+	}
+	F.Creds = {{1, "First cash", true, Day - 20, "The Sweat"}, {2, "First final table", true, Day - 9, "The Nightcap"}, {3, "First win", false, -1, ""},
+		{4, "Promoted to Gold", false, -1, ""}, {5, "100 events", false, -1, ""}, {6, "Top of the group", false, -1, ""}};
+	F.H2H = {{F.Table[0].Name, 1, 2, 1, 0}, {Co.Name, 2, 1, 0, 1}};
+	F.Briefing.On = true;
+	F.Briefing.Day = F.Today;
+	F.Briefing.Events = 6;
+	F.Briefing.Net = 4120;
+	F.Briefing.RankWas = 7;
+	F.Briefing.RankNow = HeroRank;
+	F.Briefing.ToPromotion = F.ToPromotion;
+	F.Briefing.Matchday = "The Sweat";
+	return F;
+}
+
+/** A row of the League's table drawn with the player's name ruled in Hot White (its top rule's y), or -1. */
+float RitHeroRuleY(const DrawList& L, float X0, float X1)
+{
+	for (const ss::ui::Vertex& V : L.Vertices)
+	{
+		if (V.Col.A > 0.9f && RitRgb(V.Col) == ss::ui::rlrit_detail::RitWhite && std::fabs(V.X - X0) < 0.5f)
+		{
+			for (const ss::ui::Vertex& U : L.Vertices)
+			{
+				if (std::fabs(U.Y - V.Y) < 0.5f && std::fabs(U.X - X1) < 0.5f && RitRgb(U.Col) == ss::ui::rlrit_detail::RitWhite)
+				{
+					return V.Y;
+				}
+			}
+		}
+	}
+	return -1.0f;
+}
+
+void RitLeagueChecks()
+{
+	namespace R = ss::ui::rlrit_detail;
+	RitLaptop P("rit-league");
+	P.At(RitEvening);
+	P.S.BankrollCents = 150000;
+	P.Join(21240);
+	RitPlay F = RitFixture(P);
+	R::RitPlayOverride(&P.RL, &F);
+	P.Open(Page::League);
+	DrawList L = P.Settled();
+	WriteList("rit_league", L);
+	RitPageChecks(L, P.M, "the League");
+	// With core's loops off (RitView::On false), G1's rail: 8 plates, LEAGUE hidden, and the League asked for shows the Board.
+	{
+		RitPlay Off = F;
+		Off.On = false;
+		R::RitPlayOverride(&P.RL, &Off);
+		const DrawList Lo = P.Settled();
+		bool Plate = false;
+		for (const DrawCmd& Cmd : Lo.Cmds)
+		{
+			Plate = Plate || (Cmd.Type == DrawCmd::Kind::Text && Cmd.Text.Text == "LEAGUE" && Cmd.Text.X < 216.0f);
+		}
+		RitExpect(P.RL.CurrentPage() == Page::Lobby && !Plate && RitRun(Lo, "CASHIER", P.M, 84.0f + 40.0f * 7.0f, 84.0f + 40.0f * 8.0f).Found,
+			"rit: with core's loops off, G1's 8 plates (CASHIER eighth) and the League shows the Board");
+		R::RitPlayOverride(&P.RL, &F);
+		P.Open(Page::League);
+		L = P.Settled();
+	}
+	std::printf("  rit league: %zu vertices, %d text runs, %d twice prints\n", L.Vertices.size(), RitRuns(L), R::RitTallyNow().Twice);
+	RitExpect(L.Vertices.size() <= 35000 && RitRuns(L) <= 600, "rit: the League page within a new page's budget (35k vertices, 600 runs)");
+	// The table: every member's name, the player's row ruled in Hot White (never a red tint), the zones in their tints.
+	bool Names = true;
+	for (const R::RitLeagueRow& Row : F.Table)
+	{
+		Names = Names && DrewRun(L, Row.Npc < 0 ? P.S.HeroName : Row.Name);
+	}
+	RitExpect(Names && F.Table.size() == 20, "rit: the League's table names all 20 of the group");
+	const float Rule = RitHeroRuleY(L, 232.0f, 1172.0f);
+	RitExpect(std::fabs(Rule - (210.0f + 34.0f * 5.0f)) < 0.6f, "rit: your row (6th) is ruled in Hot White");
+	RitExpect(RitHasHex(L, ss::ui::rlrit_detail::RitPromo, {232.0f, 210.0f, 940.0f, 102.0f}) && RitHasHex(L, 0x321b1e, {232.0f, 754.0f, 940.0f, 136.0f}),
+		"rit: the promotion rows on 1c2b26, the relegation rows on 321b1e");
+	RitExpect(!RitHasHex(L, ss::ui::rlrit_detail::RitSelRow, {232.0f, 380.0f, 940.0f, 34.0f}), "rit: your row is never tinted red (red rows are relegation's)");
+	RitExpect(DrewRun(L, "STEEL \xC2\xB7 GROUP 4 \xC2\xB7 YOU 6TH \xC2\xB7 " + R::RitPts(F.Points) + " PTS \xC2\xB7 BEST 8 DAYS COUNT \xC2\xB7 TOP 3 UP \xC2\xB7 BOTTOM 4 DOWN"),
+		"rit: the summary line (division, group, place, points, the rules)");
+	RitExpect(RitDrewSub(L, "MATCHWEEK 2 OF 4 \xC2\xB7 DEADLINE "), "rit: the matchweek and the deadline's countdown");
+	RitExpect(DrewRun(L, "THE SWEAT x1.5") || RitDrewSub(L, "THE SWEAT x1.5"), "rit: the footer lists this week's Matchdays");
+	RitExpect(DrewRun(L, "VS") && RitDrewSub(L, "Record 2-1"), "rit: the Callout panel: VS and the record");
+	RitExpect(RitDrewSub(L, "BRIEFING") || DrewRun(L, "BRIEFING"), "rit: the Briefing is pinned on the League page");
+	// Division tabs: another division shows what it is (floor, fixtures, reward), never invented standings.
+	P.Click(232.0f + 3.0f * 196.0f + 90.0f, 112.0f);
+	L = P.Settled();
+	RitExpect(DrewRun(L, "GOLD") && RitDrewSub(L, "Sunday Grind") && !DrewRun(L, F.Table[0].Name) && RitDrewSub(L, "Only your own group"),
+		"rit: a division tab shows the division (its fixtures and reward), not standings the world doesn't keep");
+	WriteList("rit_league_gold", L);
+	RitPageChecks(L, P.M, "the League (another division)");
+	P.Click(232.0f + 2.0f * 196.0f + 90.0f, 112.0f);
+	P.Settled();
+	// The Callout drawer: CALL on a row opens it; a one-frame click over a live plate underneath fires nothing; CALL OUT asks
+	// core (Session::CallOut) and shows its answer; a click on the scrim closes it and is swallowed.
+	const R::RitLeagueRow* Target = nullptr;
+	for (const R::RitLeagueRow& Row : F.Table)
+	{
+		Target = !Target && Row.CanCall ? &Row : Target;
+	}
+	RitExpect(Target != nullptr, "rit: the fixture offers a CALL");
+	if (Target)
+	{
+		const float Ry = 210.0f + 34.0f * static_cast<float>(Target->Rank - 1) + 17.0f;
+		P.Click(232.0f + 812.0f + 30.0f, Ry);
+		L = P.Settled();
+		RitExpect(P.RL.CurrentPage() == Page::League && DrewRun(L, "CALL OUT") && RitDrewSub(L, "CALL OUT " + R::RitUpper(Target->Name)), "rit: CALL opens the Callout drawer on that member");
+		WriteList("rit_callout_drawer", L);
+		RitPageChecks(L, P.M, "the Callout drawer");
+		P.Frame(100.0f, 84.0f + 40.0f * 4.0f + 18.0f, true, true, true); // a one-frame click on THE DESK's plate, under the scrim
+		P.Now += 0.05;
+		P.Frame();
+		RitExpect(P.RL.CurrentPage() == Page::League && ss::ui::rlrit_detail::RitOf(&P.RL).CallNpc < 0, "rit: a one-frame click on the scrim closes the drawer and reaches no plate");
+		P.Click(232.0f + 812.0f + 30.0f, Ry);
+		P.Settled();
+		P.Click(1600.0f - 424.0f + 28.0f + 150.0f, 84.0f + 878.0f - 170.0f + 28.0f); // CALL OUT
+		L = P.Settled();
+		const std::string Said = P.S.CallOut(Target->Npc);
+		RitExpect(Said.empty() || RitDrewSub(L, Said), "rit: CALL OUT asks core and shows its answer");
+		P.Click(1600.0f - 424.0f + 28.0f + 150.0f, 84.0f + 878.0f - 104.0f + 22.0f); // CANCEL
+		P.Settled();
+		RitExpect(ss::ui::rlrit_detail::RitOf(&P.RL).CallNpc < 0, "rit: CANCEL closes the drawer");
+	}
+	// INCOMING CALLOUT: a Signal Red alert slides in once a Matchweek (RitBell), and is gone after 6 s.
+	{
+		RitPlay In = F;
+		In.Callout.ByThem = true;
+		In.Callout.Week += 1;
+		R::RitPlayOverride(&P.RL, &In);
+		const int Bells = P.H.Count(ss::SoundId::RitBell);
+		P.Frame();
+		P.Now += 0.5;
+		L = P.Frame();
+		RitExpect(RitDrewSub(L, "INCOMING CALLOUT \xC2\xB7 " + R::RitUpper(In.Callout.Name)) && P.H.Count(ss::SoundId::RitBell) == Bells + 1, "rit: INCOMING CALLOUT slides in with the desk bell, once");
+		WriteList("rit_incoming", L);
+		RitPageChecks(L, P.M, "the incoming Callout");
+		P.Now += 7.0;
+		L = P.Frame();
+		RitExpect(!RitDrewSub(L, "INCOMING CALLOUT") && P.H.Count(ss::SoundId::RitBell) == Bells + 1, "rit: the alert goes after 6 s and never rings twice");
+		R::RitPlayOverride(&P.RL, &F);
+	}
+	// League Night: the first open in a new month plays the closed month's finale, pointer-blocked and skippable.
+	{
+		RitPlay N = F;
+		N.Night.On = true;
+		N.Night.Month = F.MonthKey - 1;
+		N.Night.From = 2;
+		N.Night.To = 3;
+		N.Night.Rank = 2;
+		N.Night.Of = 20;
+		N.Night.Ticket = "$22 Sunday Grind ticket";
+		N.Night.Final = F.Table;
+		N.Night.Was = F.Table;
+		std::swap(N.Night.Final[1], N.Night.Final[5]); // you rise from 6th to 2nd
+		for (size_t I = 0; I < N.Night.Final.size(); ++I)
+		{
+			N.Night.Final[I].Rank = static_cast<int>(I) + 1;
+		}
+		// (The League's laptop again, its seen state cleared: a laptop that hasn't played this month's finale.)
+		RitLaptop& Q = P;
+		R::RitUi& Qu = R::RitOf(&Q.RL);
+		Qu.NightSeen = -1;
+		R::RitPlayOverride(&Q.RL, &N);
+		const int Ranks0 = Q.H.Count(ss::SoundId::RitRank);
+		Q.Open(Page::Lobby);
+		Q.Frame();
+		RitExpect(Q.RL.CurrentPage() == Page::League && Qu.NightOn, "rit: League Night plays on the first open in the new month, on the League page");
+		Q.Now += 1.0;
+		const DrawList Mid = Q.Frame();
+		RitExpect(DrewRun(Mid, "LEAGUE NIGHT"), "rit: League Night's finale draws over the page");
+		RitPageChecks(Mid, Q.M, "League Night");
+		WriteList("rit_league_night", Mid);
+		for (int K = 0; K < 30; ++K)
+		{
+			Q.Now += 0.1;
+			Q.Frame();
+		}
+		RitExpect(Q.H.Count(ss::SoundId::RitRank) - Ranks0 >= 2, "rit: League Night ticks RitRank as your row rises, and rises on the promotion");
+		RitExpect(!Qu.NightOn, "rit: League Night ends by itself (about 3 s)");
+		Q.Open(Page::Lobby);
+		Q.Frame();
+		RitExpect(!Qu.NightOn, "rit: League Night plays once a laptop");
+		// Skippable and pointer-blocked: a one-frame click on a plate under it skips it and opens nothing.
+		Qu.NightSeen = -1;
+		Q.Open(Page::Lobby);
+		Q.Frame();
+		Q.Now += 0.3;
+		Q.Frame(100.0f, 84.0f + 40.0f * 4.0f + 18.0f, true, true, true);
+		Q.Now += 0.05;
+		Q.Frame();
+		RitExpect(!Qu.NightOn && Q.RL.CurrentPage() == Page::League, "rit: a one-frame click skips League Night and reaches no plate");
+		// Core's own record of a close (the book keeps the player's place, not the closed table): the finale lands your row on
+		// your place of the group and re-forges the crest.
+		RitPlay Own = N;
+		Own.Night.Final.clear();
+		Own.Night.Was.clear();
+		R::RitPlayOverride(&Q.RL, &Own);
+		Qu.NightSeen = -1;
+		Q.Open(Page::Lobby);
+		Q.Frame();
+		Q.Now += 2.6;
+		const DrawList Land = Q.Frame();
+		RitExpect(DrewRun(Land, "LEAGUE NIGHT") && DrewRun(Land, "PROMOTED TO GOLD") && DrewRun(Land, "2ND OF 20") && DrewRun(Land, P.S.HeroName),
+			"rit: League Night from core's own record: your place of the group, the promotion, the crest re-forged");
+		WriteList("rit_league_night_own", Land);
+		RitPageChecks(Land, Q.M, "League Night (core's record)");
+		Q.Now += 2.0;
+		Q.Frame();
+	}
+	R::RitPlayOverride(&P.RL, nullptr);
+}
+
+/**
+ * review-ui-rit (G2): the League's figures mean what core means. TO STAY UP is core's points short (0: clear); Open relegates
+ * nobody; on leave is the clause with no day played here this month (core's close, Lg.Leave); the Callout's week and end
+ * are core's Matchweek's; the Statement's big figure is the Governor's own rounding.
+ */
+void RitLeagueTruths()
+{
+	namespace R = ss::ui::rlrit_detail;
+	RitLaptop P("rit-league-truths");
+	P.At(RitEvening);
+	P.S.BankrollCents = 150000;
+	P.Join(21240);
+	// TO STAY UP: clear at 6th of 20, core's points short at 18th.
+	RitPlay Safe = RitFixture(P, 6);
+	R::RitPlayOverride(&P.RL, &Safe);
+	P.Open(Page::League);
+	DrawList L = P.Settled();
+	RitExpect(DrewRun(L, "clear") && !RitDrewSub(L, "pts short") && !RitDrewSub(L, "pts clear"), "rit: TO STAY UP at 6th of 20 reads clear (core's ToSafety is 0 there)");
+	RitPlay Drop = RitFixture(P, 18);
+	R::RitPlayOverride(&P.RL, &Drop);
+	L = P.Settled();
+	RitExpect(Drop.ToSafety > 0.0f && DrewRun(L, R::RitPts(Drop.ToSafety) + " pts short") && !DrewRun(L, "clear"),
+		"rit: TO STAY UP in the drop zone reads core's points short, never clear");
+	// Open never relegates (core's close and zones): no BOTTOM 4 DOWN, no relegation line, nobody goes down.
+	RitPlay Open = Drop;
+	Open.Div = 0;
+	for (R::RitLeagueRow& Row : Open.Table)
+	{
+		Row.Zone = Row.Zone < 0 ? static_cast<int8_t>(0) : Row.Zone;
+	}
+	R::RitPlayOverride(&P.RL, &Open);
+	L = P.Settled();
+	RitExpect(RitDrewSub(L, "NOBODY GOES DOWN") && !RitDrewSub(L, "BOTTOM 4 DOWN") && DrewRun(L, "nobody goes down") &&
+			!RitHasHex(L, R::RitDown, {232.0f, 210.0f + 34.0f * 16.0f - 6.0f, 940.0f, 8.0f}),
+		"rit: Open relegates nobody: no BOTTOM 4 DOWN, no relegation line");
+	// Nor does a Placement month (core's close: !Lg.Placement), at any division (review-ui-rit mutation: the rule's Placement
+	// term dropped survived every check).
+	{
+		RitPlay Pl = Drop;
+		Pl.Placement = true;
+		R::RitPlayOverride(&P.RL, &Pl);
+		L = P.Settled();
+		RitExpect(RitDrewSub(L, "NOBODY GOES DOWN") && !RitDrewSub(L, "BOTTOM 4 DOWN") && DrewRun(L, "nobody goes down") && DrewRun(L, "PLACEMENT MONTH"),
+			"rit: a Placement month relegates nobody: no BOTTOM 4 DOWN, PLACEMENT MONTH");
+	}
+	// High Bridge can't go higher (core's close: its top places win a Sunday 100K ticket, nobody moves up): no "TOP 3 UP",
+	// no "TO GO UP"; the longer summary still fits its 640 (review-ui-rit).
+	{
+		RitPlay Hb = Safe;
+		Hb.Div = 4;
+		R::RitPlayOverride(&P.RL, &Hb);
+		L = P.Settled();
+		bool Fits = false;
+		for (const DrawCmd& Cmd : L.Cmds)
+		{
+			if (Cmd.Type == DrawCmd::Kind::Text && Cmd.Text.Text.find("TOP 3 WIN A SUNDAY 100K TICKET") != std::string::npos)
+			{
+				Fits = Cmd.Text.SizePx >= 12.0f && P.M.Width(Cmd.Text.Text, ss::ui::Font::BoldCondensed, Cmd.Text.SizePx) <= 640.5f;
+			}
+		}
+		RitExpect(Fits && !RitDrewSub(L, "TOP 3 UP") && DrewRun(L, "TO THE TOP 3") && !DrewRun(L, "TO GO UP"),
+			"rit: High Bridge moves nobody up: its top 3 win a Sunday 100K ticket (the summary fits), TO THE TOP 3");
+	}
+	// The LEAGUE tab's projection by hand (RitRankIf): the player on 249.5, days 40.5 / 36 / 52.25 (128.75; the other 120.75
+	// kept as it is), the group 420 - 15.5 x place (8th 296, 9th 280.5). A 60-point day makes 309.5: 8th; a 30-point day
+	// 279.5: 10th. With a 45-point day already in today (294.5, 9th), a 30 changes nothing (the day's best counts): 9th.
+	{
+		const RitPlay Pr = RitFixture(P, 11);
+		RitPlay Pt = Pr;
+		Pt.HeroDays.push_back({Pt.Today, 45.0f});
+		Pt.Table[10].Points += 45.0f;
+		Pt.Points += 45.0f;
+		std::printf("  rit RitRankIf: 60 -> %d, 30 -> %d, 30 with 45 in today -> %d\n", R::RitRankIf(Pr, 60.0), R::RitRankIf(Pr, 30.0), R::RitRankIf(Pt, 30.0));
+		RitExpect(R::RitRankIf(Pr, 60.0) == 8 && R::RitRankIf(Pr, 30.0) == 10 && R::RitRankIf(Pt, 30.0) == 9,
+			"rit: the LEAGUE tab's projection: a day's best raised to the outcome, the best 8 summed, ranked against the group");
+	}
+	// Every G2 claim (STAR, CALL, CALL OUT, the Statement's tabs, the division tabs) goes through RitClick, which takes no click
+	// while the Kast preview draws (W2: grants only on Clicked, never while Previewing).
+	{
+		DrawList Lp;
+		ss::ui::Canvas Cp(Lp, P.M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+		bool Took = false;
+		for (const bool Preview : {true, false})
+		{
+			R::RitCtx Xp{P.RL, P.S, Cp, P.RL.UI, R::RitOf(&P.RL), P.Now, P.S.WorldMinutes(), Preview, Safe};
+			P.RL.UI.Ptr.Active = true;
+			P.RL.UI.Ptr.X = 10.0f;
+			P.RL.UI.Ptr.Y = 10.0f;
+			P.RL.UI.Ptr.Down = true;
+			P.RL.UI.Ptr.Pressed = true;
+			P.RL.UI.Ptr.Released = false;
+			R::RitClick(Xp, "rit-probe", {0.0f, 0.0f, 20.0f, 20.0f});
+			P.RL.UI.Ptr.Down = false;
+			P.RL.UI.Ptr.Pressed = false;
+			P.RL.UI.Ptr.Released = true;
+			const bool Clicked = R::RitClick(Xp, "rit-probe", {0.0f, 0.0f, 20.0f, 20.0f}).Clicked;
+			P.RL.UI.Ptr.EndFrame();
+			RitExpect(Preview ? !Clicked : Clicked, Preview ? "rit: under the Kast preview a click reaches no claim (RitClick)" : "rit: off the preview the same click lands");
+			Took = Took || (Preview && Clicked);
+		}
+		(void)Took;
+	}
+	// The Statement's big figure is the Governor's rounding (its sentence's).
+	RitPlay Gv = Safe;
+	Gv.Statement.Rake30 = 10000;
+	Gv.Statement.Promo30 = 460;
+	Gv.Statement.Share = 0.046;
+	Gv.Statement.Line = "RunItTwice gave back $4.60 of your $100.00 rake in the last 30 days (5%).";
+	R::RitPlayOverride(&P.RL, &Gv);
+	R::RitOf(&P.RL).StatementTab = 0;
+	P.Open(Page::Promotions);
+	L = P.Settled();
+	RitExpect(DrewRun(L, "5%") && !DrewRun(L, "4.6%"), "rit: the Statement's percentage is the Governor's (5%, as its sentence says)");
+	Gv.Statement.Holds = {{"$11 The Sweat ticket", 1100, 1100, 0, ss::site::play::PlayDay(P.S.WorldMinutes()), false}};
+	R::RitPlayOverride(&P.RL, &Gv);
+	L = P.Settled();
+	RitExpect(RitDrewSub(L, "$11 The Sweat ticket \xC2\xB7 clears at the next 6 AM") && !RitDrewSub(L, "$0.00 more rake"),
+		"rit: a Guest List line with no rake left says it clears at the next 6 AM, as Ignite's does");
+	// INCOMING CALLOUT waits under an open player card (the card is the top overlay, as at the table), then slides in once.
+	{
+		RitPlay In = Safe;
+		In.Callout.On = true;
+		In.Callout.ByThem = true;
+		In.Callout.Week = 777;
+		R::RitPlayOverride(&P.RL, &Safe);
+		P.Open(Page::Lobby);
+		P.Settled();
+		P.RL.ShowPlayer(Safe.Table[0].Npc, P.Now);
+		P.Frame();
+		R::RitPlayOverride(&P.RL, &In); // the call comes in while the card is open
+		const int Bells = P.H.Count(ss::SoundId::RitBell);
+		P.Frame();
+		P.Now += 0.5;
+		L = P.Frame();
+		RitExpect(P.RL.CardOpen() && !RitDrewSub(L, "INCOMING CALLOUT") && P.H.Count(ss::SoundId::RitBell) == Bells && R::RitOf(&P.RL).IncomingSeen != 777,
+			"rit: INCOMING CALLOUT waits under an open player card (no alert, no bell, nothing to click through the card)");
+		P.RL.ShowPlayer(-1, P.Now);
+		P.Frame();
+		P.Now += 0.5;
+		L = P.Frame();
+		RitExpect(RitDrewSub(L, "INCOMING CALLOUT") && P.H.Count(ss::SoundId::RitBell) == Bells + 1, "rit: and slides in, with its bell, once the card closes");
+		P.Now += 7.0;
+		P.Frame();
+	}
+	// Core's own path (no override): a drawn group with two days played, the Callout, then on leave under the clause.
+	R::RitPlayOverride(&P.RL, nullptr);
+	ss::Session& S = P.S;
+	const double W0 = S.WorldMinutes();
+	ss::site::play::League& Lg = S.Life.SitePlay.Rt.L;
+	const int Day = ss::site::play::PlayDay(W0);
+	Lg.Month = ss::site::play::PlayMonth(Day);
+	Lg.Div = 2;
+	Lg.Placement = false;
+	Lg.Leave = false;
+	Lg.Npcs.fill(-1);
+	const std::vector<const ss::world::Npc*> G = RitGroupOf(S, 3);
+	for (size_t I = 0; I < G.size() && I < Lg.Npcs.size(); ++I)
+	{
+		Lg.Npcs[I] = G[I]->Id;
+	}
+	Lg.Days = {{Day - 2, 12.5f}, {Day, 0.0f}};
+	// Core's form is newest first; the page's oldest first (today's blank last, the cash two days ago before it).
+	const RitPlay B0 = R::RitPlayFrom(S, W0);
+	const R::RitLeagueRow* Me = R::RitHeroRow(B0);
+	RitExpect(B0.InLeague && Me && Me->Form[4] == 0 && Me->Form[3] == 1 && Me->Form[2] == -1 && Me->Days == 2 && Me->Best[0] > 12.4f,
+		"rit: the player's row maps core's form (newest last on the page), days and best-8");
+	// The Callout runs to core's Matchweek's end (days 1-7, 8-14, 15-21, 22-28, 29 on), keyed as core keys it.
+	S.Life.SitePlay.Rt.C = ss::site::play::Callout();
+	const std::string Said = G.empty() ? std::string("no group") : S.CallOut(G[0]->Id);
+	const RitPlay C = R::RitPlayFrom(S, W0);
+	int Cy = 0, Cm = 0, Cd = 1;
+	ss::world::CivilDate(Day, Cy, Cm, Cd);
+	const int End = std::min(ss::world::MonthStart(Day) + 7 * ((Cd - 1) / 7 + 1), ss::world::MonthStart(ss::world::MonthStart(Day) + 32));
+	std::printf("  rit callout: \"%s\", week %d (core's %d), ends at %.0f (the Matchweek's close %.0f)\n", Said.c_str(), C.Callout.Week, S.Life.SitePlay.Rt.C.Week, C.Callout.Ends,
+		ss::site::play::PlayDayStart(End));
+	RitExpect(Said.empty() && C.Callout.On && C.Callout.Week == S.Life.SitePlay.Rt.C.Week && std::fabs(C.Callout.Ends - ss::site::play::PlayDayStart(End)) < 0.5,
+		"rit: the Callout's week is core's Matchweek, and it ends when core settles it");
+	S.Life.SitePlay.Rt.C = ss::site::play::Callout();
+	// The desk bell's row (R1) from core's own book: a bell core rang 5 world minutes ago shows (registration open); one rung
+	// 100 minutes ago stays quiet (review-ui-rit mutation: a 1,500-minute window survived every check).
+	{
+		const ss::net::Network& Net = ss::net::Site(SiteId::RunItTwice);
+		std::string Star;
+		ss::net::EventInstance E;
+		for (const ss::net::EventTemplate& T : Net.Templates())
+		{
+			ss::net::EventInstance Ei;
+			if (Star.empty() && Net.Next(T.Id, W0 - 15.0, Ei))
+			{
+				const ss::net::Status St = Net.Live(Ei, W0).St;
+				if (St == ss::net::Status::LateReg || St == ss::net::Status::Registering)
+				{
+					Star = T.Id.substr(T.Id.find('.') + 1); // core keeps a star as the template's own id ("the-sweat")
+					E = Ei;
+				}
+			}
+		}
+		ss::site::play::Rit& Rt = S.Life.SitePlay.Rt;
+		const std::vector<std::string> Stars0 = Rt.Stars;
+		const std::set<std::string> Keys0 = Rt.BellKeys;
+		Rt.Stars = {Star};
+		Rt.BellKeys = {E.Id + "@" + std::to_string(static_cast<long long>(W0 - 100.0))};
+		const RitPlay Old = R::RitPlayFrom(S, W0);
+		Rt.BellKeys = {E.Id + "@" + std::to_string(static_cast<long long>(W0 - 5.0))};
+		const RitPlay Fresh = R::RitPlayFrom(S, W0);
+		std::printf("  rit desk bell: %s (%s), an old ring %zu rows, a fresh one %zu\n", Star.c_str(), E.Id.c_str(), Old.Bells.size(), Fresh.Bells.size());
+		RitExpect(!Star.empty() && Old.Bells.empty() && Fresh.Bells.size() == 1 && Fresh.Bells[0].EventId == E.Id,
+			"rit: the desk bell's row shows core's ring for 15 world minutes while registration is open, never an old one");
+		Rt.Stars = Stars0;
+		Rt.BellKeys = Keys0;
+	}
+	// League Night from core's record: the month the book closed last, through the month after it (review-ui-rit mutation:
+	// a two-months-back trigger survived every check, the finale's tests being on fixture models).
+	{
+		ss::site::play::Rit& Rt = S.Life.SitePlay.Rt;
+		const std::vector<ss::site::play::LeagueHist> Hist0 = Rt.Hist;
+		const int Mk = ss::world::MonthKeyOf(ss::net::DayOf(W0 - 6.0 * 60.0));
+		Rt.Hist = {{Mk - 1, 2, 2, 20, 1}};
+		const RitPlay Nt = R::RitPlayFrom(S, W0);
+		Rt.Hist = {{Mk - 2, 2, 2, 20, 1}};
+		const RitPlay Old = R::RitPlayFrom(S, W0);
+		RitExpect(Nt.Night.On && Nt.Night.Month == Mk - 1 && Nt.Night.From == 2 && Nt.Night.To == 3 && Nt.Night.Rank == 2 && Nt.Night.Of == 20 && !Old.Night.On,
+			"rit: League Night plays core's last close (Steel to Gold, 2nd of 20), and only in the month after it");
+		Rt.Hist = Hist0;
+	}
+	// Under the Team RiverLine deal: on leave (no relegation) only while no RunItTwice day has been played this month, the
+	// rule core's close applies; the Callout panel never invites a call core would refuse.
+	S.DebugSponsor("offer riverline");
+	for (ss::sponsor::Contract& K : S.Life.Sponsors.Contracts)
+	{
+		if (K.Brand == "riverline")
+		{
+			K.T.Only = "riverline";
+		}
+	}
+	if (!S.Life.Sponsors.Contracts.empty())
+	{
+		S.SignDeal(S.Life.Sponsors.Contracts.back().Id);
+	}
+	const RitPlay B = R::RitPlayFrom(S, W0);
+	RitExpect(B.Clause && B.InLeague && !B.Leave, "rit: a RunItTwice day played this month under the deal is no leave (core's close can relegate)");
+	P.Open(Page::League);
+	L = P.Settled();
+	bool AnyCall = false;
+	for (const R::RitLeagueRow& Row : B.Table)
+	{
+		AnyCall = AnyCall || Row.CanCall;
+	}
+	RitExpect(!DrewRun(L, "ON LEAVE") && !RitDrewSub(L, "On leave") && (AnyCall || !RitDrewSub(L, "Call out a member")),
+		"rit: the League page doesn't promise on leave's no-relegation to a member who has played, nor offer a call core refuses");
+	const std::vector<std::pair<int, float>> Played = Lg.Days;
+	Lg.Days.clear();
+	const RitPlay A = R::RitPlayFrom(S, W0);
+	RitExpect(A.Clause && A.Leave, "rit: under the Team RiverLine deal with no RunItTwice day this month, on leave");
+	Lg.Days = Played;
+	R::RitPlayOverride(&P.RL, nullptr);
+}
+
+/** The Board's G2 (R1, R9, §1.5): the star column and MINE, the LEAGUE column, the WATCH chips from the stars, the desk bell
+ *  (RitBell once, the tape's line), the Briefing and the clause's banner in the KPI strip, Deadline Day's red tape. */
+void RitBoardG2()
+{
+	namespace R = ss::ui::rlrit_detail;
+	RitLaptop P("rit-board-g2");
+	P.At(RitEvening + 60.0);
+	P.S.BankrollCents = 150000;
+	P.Join(21240);
+	RitPlay F = RitFixture(P);
+	const ss::net::Network& Net = ss::net::Site(SiteId::RunItTwice);
+	P.Open(Page::Lobby);
+	P.Settled();
+	const std::vector<std::string> Listed = P.RL.ListedEvents();
+	RitExpect(Listed.size() >= 3, "rit: the Board lists tonight's events");
+	if (Listed.size() < 3)
+	{
+		return;
+	}
+	// Star the first two rows' templates; a desk bell on the first open row in late registration.
+	F.Watch = {R::RitTemplateOf(Listed[0]), R::RitTemplateOf(Listed[1])};
+	F.Briefing.On = false;
+	std::string Belled;
+	for (const std::string& Id : Listed)
+	{
+		ss::net::EventInstance E;
+		if (Belled.empty() && Net.FindInstance(Id, E) && Net.Live(E, P.S.WorldMinutes()).St == ss::net::Status::LateReg)
+		{
+			Belled = Id;
+			F.Bells.push_back({Id, Net.TemplateOf(E).Name, 33000, E.Start + E.LateReg, P.S.WorldMinutes()});
+		}
+	}
+	R::RitPlayOverride(&P.RL, &F);
+	const int Bells0 = P.H.Count(ss::SoundId::RitBell);
+	DrawList L = P.Settled();
+	WriteList("rit_board_g2", L);
+	RitPageChecks(L, P.M, "the Board (G2)");
+	std::printf("  rit board G2: %zu vertices, %d text runs, %d twice prints\n", L.Vertices.size(), RitRuns(L), R::RitTallyNow().Twice);
+	RitExpect(L.Vertices.size() <= 22000 && RitRuns(L) <= 345, "rit: the Board at rest within its budget with G2's columns (22k vertices, 345 runs)");
+	RitExpect(DrewRun(L, "LEAGUE") && DrewRun(L, "MINE"), "rit: the Board's LEAGUE column and the MINE filter");
+	if (!Belled.empty())
+	{
+		RitExpect(P.H.Count(ss::SoundId::RitBell) == Bells0 + 1, "rit: the desk bell rings once (RitBell)");
+		RitExpect(RitDrewSub(L, "PROJ. SHORT $330.00 \xC2\xB7 REG CLOSES"), "rit: the bell posts its line to the tape");
+		P.Settled();
+		RitExpect(P.H.Count(ss::SoundId::RitBell) == Bells0 + 1, "rit: and never twice");
+	}
+	// The stars: Hot White when on (filled), never red; the WATCH chips carry the starred templates.
+	int Filled = 0;
+	for (size_t I = 0; I < P.RL.ListedEvents().size() && I < 12; ++I)
+	{
+		const bool On = std::find(F.Watch.begin(), F.Watch.end(), R::RitTemplateOf(P.RL.ListedEvents()[I])) != F.Watch.end();
+		const bool White = RitHasHex(L, R::RitWhite, {238.0f, 252.0f + 34.0f * static_cast<float>(I) + 6.0f, 16.0f, 22.0f});
+		Filled += On && White ? 1 : 0;
+		RitExpect(On || !White, "rit: an unstarred row's star is an outline");
+	}
+	RitExpect(Filled >= 2, "rit: the starred rows' stars draw Hot White");
+	RitExpect(RitHasHex(L, R::RitWhite, {552.0f, 51.0f, 14.0f, 14.0f}), "rit: the WATCH chips carry the starred templates (their stars on)");
+	// MINE shows only the starred templates' rows.
+	const RitBox Mine = RitRun(L, "MINE", P.M, 180.0f, 212.0f);
+	RitExpect(Mine.Found, "rit: the MINE chip");
+	if (Mine.Found)
+	{
+		P.Click(Mine.X + Mine.W / 2.0f, 196.0f);
+		P.Settled();
+		bool Only = !P.RL.ListedEvents().empty();
+		for (const std::string& Id : P.RL.ListedEvents())
+		{
+			Only = Only && std::find(F.Watch.begin(), F.Watch.end(), R::RitTemplateOf(Id)) != F.Watch.end();
+		}
+		RitExpect(Only, "rit: MINE lists only the Watchlist's starred templates");
+		P.Click(Mine.X + Mine.W / 2.0f, 196.0f);
+		P.Settled();
+	}
+	// A click on a star asks core (Session::StarEvent) and never selects the row.
+	const std::string Sel = P.RL.SelectedEvent();
+	P.Click(248.0f, 252.0f + 34.0f * 2.0f + 17.0f);
+	P.Settled();
+	RitExpect(P.RL.SelectedEvent() == Sel, "rit: the star's cell is its own (a click there never selects the row)");
+	// The Briefing in the KPI strip's place, dismissed for the day; the clause's banner under a Team RiverLine deal.
+	F.Briefing.On = true;
+	R::RitPlayOverride(&P.RL, &F);
+	L = P.Settled();
+	RitExpect(DrewRun(L, "BRIEFING") && !RitSpelled(L, "TONIGHT GTD") && RitDrewSub(L, "MATCHDAY TONIGHT: THE SWEAT"), "rit: the Briefing leads the Board in the KPI strip's place");
+	WriteList("rit_board_briefing", L);
+	RitPageChecks(L, P.M, "the Briefing");
+	P.Click(232.0f + 880.0f - 22.0f, 116.0f);
+	L = P.Settled();
+	RitExpect(!DrewRun(L, "BRIEFING"), "rit: the Briefing is dismissed for the day");
+	F.Clause = true;
+	R::RitPlayOverride(&P.RL, &F);
+	L = P.Settled();
+	RitExpect(DrewRun(L, R::RitClauseBanner), "rit: under a Team RiverLine deal the Board says every table here is a strike");
+	WriteList("rit_board_clause", L);
+	RitPageChecks(L, P.M, "the clause's banner");
+	// Deadline Day: the tape turns Signal Red with Hot White type.
+	F.Clause = false;
+	F.Deadline = true;
+	R::RitPlayOverride(&P.RL, &F);
+	L = P.Settled();
+	RitExpect(RitHasHex(L, R::RitRed, {1590.0f, 0.0f, 10.0f, 32.0f}) && RitDrewSub(L, "DEADLINE DAY \xC2\xB7 "), "rit: Deadline Day turns the tape Signal Red");
+	WriteList("rit_board_deadline", L);
+	RitPageChecks(L, P.M, "Deadline Day's tape");
+	R::RitPlayOverride(&P.RL, nullptr);
+}
+
+/** The Club (R4, R5), the Desk's Luck Ledger (R7), the Member File (R2, R3, R7), RANKINGS' PYRAMID. */
+void RitPagesG2()
+{
+	namespace R = ss::ui::rlrit_detail;
+	RitLaptop P("rit-pages-g2");
+	P.At(RitEvening);
+	P.S.BankrollCents = 150000;
+	P.Join(21240);
+	RitPlay F = RitFixture(P);
+	R::RitPlayOverride(&P.RL, &F);
+	// The Club: Team Scalps (TAKEN on the dark cards: a filled red octagon with Hot White type) and the Statement.
+	P.Open(Page::Promotions);
+	DrawList L = P.Settled();
+	WriteList("rit_club_g2", L);
+	RitPageChecks(L, P.M, "the Club (G2)");
+	RitExpect(RitSpelled(L, "TEAM SCALPS") && DrewRun(L, "3 OF 6 TAKEN") && DrewRun(L, "TAKEN"), "rit: Team Scalps: the six and TAKEN");
+	RitExpect(DrewRun(L, "25%") && RitDrewSub(L, "gave back $53.48 of your $212.40 rake"), "rit: the Statement's given-back share is the Governor's (25%)");
+	RitExpect(RitSpelled(L, "SECOND RUN CLUB") && RitSpelled(L, "WELCOME TICKETS"), "rit: the Club's kickers stay (the sites' pins)");
+	RitExpect(RitDrewSub(L, "clears after $3.60 more rake"), "rit: the Guest List's line on the Statement");
+	F.Scalps.Bounty = true;
+	R::RitPlayOverride(&P.RL, &F);
+	L = P.Settled();
+	RitExpect(DrewRun(L, "YOU'RE THE BOUNTY"), "rit: signed with the team, scalps turn into \"you're the bounty\"");
+	RitPageChecks(L, P.M, "you're the bounty");
+	F.Scalps.Bounty = false;
+	R::RitPlayOverride(&P.RL, &F);
+	// The Desk's Luck Ledger.
+	P.Open(Page::Desk);
+	L = P.Settled();
+	const RitBox Luck = RitRun(L, "LUCK LEDGER", P.M, 92.0f, 122.0f);
+	RitExpect(Luck.Found, "rit: the Desk's LUCK LEDGER tab");
+	P.Click(Luck.X + Luck.W / 2.0f, 106.0f);
+	L = P.Settled();
+	WriteList("rit_desk_luck", L);
+	RitPageChecks(L, P.M, "the Luck Ledger");
+	RitExpect(DrewRun(L, "You are running 7.7% below expectation."), "rit: the Luck Ledger says the gap in plain words");
+	// The Member File: credentials as chrome plates, League history, the Callout record, head to head.
+	P.Open(Page::Profile);
+	L = P.Settled();
+	WriteList("rit_member_g2", L);
+	RitPageChecks(L, P.M, "the Member File (G2)");
+	RitExpect(DrewRun(L, "FIRST FINAL TABLE") && DrewRun(L, "FIRST WIN") && DrewRun(L, "2 of 6"), "rit: credentials, earned and not");
+	RitExpect(DrewRun(L, "2 won \xC2\xB7 1 lost") && DrewRun(L, F.H2H[0].Name), "rit: the Callout record and head to head");
+	// RANKINGS' PYRAMID.
+	P.Open(Page::Leaderboards);
+	L = P.Settled();
+	const RitBox Pyr = RitRun(L, "PYRAMID", P.M, 96.0f, 130.0f);
+	RitExpect(Pyr.Found, "rit: RANKINGS has a PYRAMID tab");
+	P.Click(Pyr.X + Pyr.W / 2.0f, 112.0f);
+	L = P.Settled();
+	WriteList("rit_rankings_pyramid", L);
+	RitPageChecks(L, P.M, "the Pyramid");
+	const RitBox You = RitRun(L, "YOU", P.M, 915.0f, 930.0f);
+	RitExpect(DrewRun(L, "HIGH BRIDGE") && You.Found, "rit: the Pyramid's five divisions and the YOU bar in its window");
+	R::RitPlayOverride(&P.RL, nullptr);
+}
+
+/** The table (§3.5, G2): the division stripe, the VS tab, "you're the bounty"; the LEAGUE tab's body; the Settlement's League. */
+void RitTableG2()
+{
+	namespace R = ss::ui::rlrit_detail;
+	RitLaptop P("rit-table-g2");
+	if (!RitSit(P))
+	{
+		std::printf("  rit: no RunItTwice table (G2 checks skipped)\n");
+		return;
+	}
+	P.Now = Step(P.S, P.Now, 3.0);
+	P.Settled();
+	// Core's own path first (no override): after a paid RunItTwice entry the View says what core has (a group drawn at the
+	// next step, the world's members' scores); the League page draws exactly that, or its empty state.
+	{
+		const RitPlay Core = R::RitPlayOf(&P.RL, P.S);
+		std::printf("  rit core view after a paid entry: started %d, group %d (%zu rows, div %d, rank %d of %d), watch %zu, briefing \"%s\"\n", Core.Started ? 1 : 0,
+			Core.InLeague ? 1 : 0, Core.Table.size(), static_cast<int>(Core.Div), Core.Rank, Core.Of, Core.Watch.size(), Core.Briefing.Line.c_str());
+		bool Rows = true;
+		for (const R::RitLeagueRow& Row : Core.Table)
+		{
+			Rows = Rows && !Row.Name.empty() && Row.Rank >= 1 && Row.Rank <= static_cast<int>(Core.Table.size());
+		}
+		RitExpect(Rows && (Core.InLeague == !Core.Table.empty()), "rit: core's League rows are named and ranked (or there is no group)");
+		RitExpect(!Core.InLeague || R::RitHeroRow(Core) != nullptr, "rit: a drawn group has the player's own row");
+	}
+	// The group around the player: two of the table's own seats (so their stripe and VS show).
+	RitPlay F = RitFixture(P, 11);
+	std::vector<std::string> Seated;
+	for (const ss::SeatVis& V : P.S.Seats)
+	{
+		if (V.Present && !V.IsHero)
+		{
+			Seated.push_back(V.Name);
+		}
+	}
+	RitExpect(Seated.size() >= 2, "rit: the table has seats to mark");
+	if (Seated.size() >= 2)
+	{
+		F.Table[0].Name = Seated[0];
+		F.Table[12].Name = Seated[1];
+		F.Callout.Name = Seated[1];
+		F.Table[12].Callout = true;
+	}
+	F.Scalps.Bounty = true;
+	F.Counting = {P.S.T->Spec.Id}; // this event is among today's counting entries: the LEAGUE tab projects it
+	R::RitPlayOverride(&P.RL, &F);
+	DrawList L = P.Settled();
+	WriteList("rit_table_g2", L);
+	RitPageChecks(L, P.M, "the octagon (G2)");
+	RitExpect(DrewRun(L, "VS"), "rit: your Callout opponent's seat wears the amber VS tab");
+	std::printf("  rit table G2: %zu vertices, %d text runs\n", L.Vertices.size(), RitRuns(L));
+	RitExpect(L.Vertices.size() <= 19000, "rit: the octagon within its budget with G2's marks (19k vertices)");
+	// INCOMING CALLOUT mid-session (§3.8 #5): the alert slides in over the table too, and holds the pointer under it.
+	{
+		RitPlay In = F;
+		In.Callout.ByThem = true;
+		In.Callout.Week += 7;
+		R::RitPlayOverride(&P.RL, &In);
+		P.Frame();
+		P.Now += 0.5;
+		const DrawList La = P.Frame();
+		RitExpect(RitDrewSub(La, "INCOMING CALLOUT \xC2\xB7 ") && P.S.CurrentScreen == ss::Screen::Table, "rit: INCOMING CALLOUT reaches you at the table");
+		WriteList("rit_table_incoming", La);
+		RitPageChecks(La, P.M, "the incoming Callout at the table");
+		P.Now += 7.0;
+		P.Frame();
+		R::RitPlayOverride(&P.RL, &F);
+	}
+	// The side panel's LEAGUE tab (ui-tablestyle's SidePanel, patch 3): INFO, LEAGUE, PAYOUTS, CHAT; a click shows the group live.
+	{
+		RitBox Tab;
+		for (const DrawCmd& Cmd : L.Cmds)
+		{
+			if (!Tab.Found && Cmd.Type == DrawCmd::Kind::Text && Cmd.Text.Text == "LEAGUE" && Cmd.Text.X >= 1188.0f && Cmd.Text.BaselineY < 200.0f)
+			{
+				Tab.Found = true;
+				Tab.X = Cmd.Text.X;
+				Tab.Base = Cmd.Text.BaselineY;
+			}
+		}
+		RitExpect(Tab.Found, "rit: the table's side panel has its LEAGUE tab (G2)");
+		if (Tab.Found)
+		{
+			P.Click(Tab.X + 10.0f, Tab.Base);
+			const DrawList Ls = P.Settled();
+			RitExpect(R::RitOf(&P.RL).SideLeague && RitDrewSub(Ls, "GROUP 4 \xC2\xB7 LIVE"), "rit: LEAGUE shows the group live at the table");
+			WriteList("rit_table_league", Ls);
+			RitPageChecks(Ls, P.M, "the table's LEAGUE tab");
+			R::RitOf(&P.RL).SideLeague = false;
+			P.Settled();
+		}
+	}
+	// The LEAGUE tab's body, drawn directly (its projection).
+	{
+		DrawList Ls;
+		ss::ui::Canvas C(Ls, P.M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+		P.RL.Draw(C, P.Now);
+		const size_t From = Ls.Cmds.size();
+		R::RitSideLeague(P.RL, C, {1204.0f, 150.0f, 360.0f, 760.0f}, P.Now);
+		DrawList Side = Ls;
+		Side.Cmds.erase(Side.Cmds.begin(), Side.Cmds.begin() + static_cast<long long>(From));
+		RitExpect(RitDrewSub(Side, "STEEL \xC2\xB7 GROUP 4") && RitDrewSub(Side, "your best 8 days count") && DrewRun(Side, "11TH"), "rit: the table's LEAGUE tab: the group and your place");
+		RitExpect(RitDrewSub(Side, "THIS EVENT") && RitDrewSub(Side, "GROUP 4 \xC2\xB7 LIVE"), "rit: the LEAGUE tab projects this event and lists the group live");
+		RitExpect(!RitHasHex(Side, R::RitSelRow, {1190.0f, 150.0f, 384.0f, 760.0f}) && RitHasHex(Side, R::RitPromo, {1190.0f, 150.0f, 384.0f, 760.0f}),
+			"rit: the LEAGUE tab's group: the zones tinted, your row ruled in Hot White, never red-tinted (red rows are relegation's)");
+		// The projection: a win's place by core's LeagueScore against the table's points (a win can't rank below a cash).
+		const ss::net::EventTemplate* Tm = ss::net::Site(SiteId::RunItTwice).FindTemplate(R::RitTemplateOf(P.S.T->Spec.Id));
+		const int Field = static_cast<int>(P.S.T->Players.size());
+		const double Win = ss::site::play::LeagueScore(F.Div, R::RitTemplateOf(P.S.T->Spec.Id), P.S.T->Spec.BuyInCents, F.Today, ss::net::Points(1, Field, P.S.T->Spec.BuyInCents), false, false);
+		const double Cash = ss::site::play::LeagueScore(F.Div, R::RitTemplateOf(P.S.T->Spec.Id), P.S.T->Spec.BuyInCents, F.Today, ss::net::Points(std::max(1, P.S.T->PaidPlaces()), Field, P.S.T->Spec.BuyInCents), false, false);
+		const int IfWin = R::RitRankIf(F, Win);
+		const int IfCash = R::RitRankIf(F, Cash);
+		std::printf("  rit LEAGUE tab: a cash scores %.1f (place %d), a win %.1f (place %d) at %s\n", Cash, IfCash, Win, IfWin, Tm ? Tm->Name.c_str() : "?");
+		RitExpect(IfWin >= 1 && IfWin <= IfCash && (Win <= 0.0 || DrewRun(Side, R::RitPlace(IfWin))), "rit: the LEAGUE tab's places by outcome (core's LeagueScore, best 8, the group's points)");
+		WriteList("rit_table_league_tab", Ls);
+	}
+	// A RunItTwice series event projects with core's x1.25 (review-ui-rit: the tab passed Series false while core scores the
+	// result with the template's series): the table's event dressed as a series template at Steel's floor or above.
+	{
+		const ss::net::Network& Net = ss::net::Site(SiteId::RunItTwice);
+		const ss::net::EventTemplate* Sr = nullptr;
+		for (const ss::net::EventTemplate& Tm : Net.Templates())
+		{
+			Sr = !Sr && !Tm.Series.empty() && Tm.BuyInCents >= 1100 ? &Tm : Sr;
+		}
+		if (!Sr)
+		{
+			std::printf("  rit: no RunItTwice series template at $11 or more (the series projection check is skipped)\n");
+		}
+		else
+		{
+			const std::string IdWas = P.S.T->Spec.Id;
+			const ss::Chips BuyWas = P.S.T->Spec.BuyInCents;
+			P.S.T->Spec.Id = Sr->Id + "@" + std::to_string(static_cast<long long>(P.S.WorldMinutes()));
+			P.S.T->Spec.BuyInCents = Sr->BuyInCents;
+			RitPlay Fs = F;
+			Fs.Counting = {P.S.T->Spec.Id};
+			R::RitPlayOverride(&P.RL, &Fs);
+			DrawList Ls;
+			ss::ui::Canvas C(Ls, P.M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+			R::RitSideLeague(P.RL, C, {1204.0f, 150.0f, 360.0f, 760.0f}, P.Now);
+			const int Field = std::max(static_cast<int>(P.S.T->Players.size()), 2);
+			const int Paid = std::max(1, P.S.T->PaidPlaces());
+			const std::string Tmpl = R::RitTemplateOf(P.S.T->Spec.Id);
+			const int IfCash = R::RitRankIf(Fs, ss::site::play::LeagueScore(Fs.Div, Tmpl, Sr->BuyInCents, Fs.Today, ss::net::Points(Paid, Field, Sr->BuyInCents), true, false));
+			const int IfCashNo = R::RitRankIf(Fs, ss::site::play::LeagueScore(Fs.Div, Tmpl, Sr->BuyInCents, Fs.Today, ss::net::Points(Paid, Field, Sr->BuyInCents), false, false));
+			float By = -1.0f;
+			for (const DrawCmd& Cmd : Ls.Cmds)
+			{
+				By = Cmd.Type == DrawCmd::Kind::Text && Cmd.Text.Text == "cash" ? Cmd.Text.BaselineY : By;
+			}
+			std::string Drawn;
+			for (const DrawCmd& Cmd : Ls.Cmds)
+			{
+				if (Cmd.Type == DrawCmd::Kind::Text && std::fabs(Cmd.Text.BaselineY - By) < 0.5f && Cmd.Text.Text != "cash" && Cmd.Text.Text != "PROMOTED")
+				{
+					Drawn = Cmd.Text.Text;
+				}
+			}
+			std::printf("  rit LEAGUE tab at a series event (%s): a cash projects %s (x1.25: %s; without: %s)\n", Sr->Name.c_str(), Drawn.c_str(), R::RitPlace(IfCash).c_str(),
+				R::RitPlace(IfCashNo).c_str());
+			RitExpect(By > 0.0f && Drawn == R::RitPlace(IfCash), "rit: the LEAGUE tab projects a series event with core's x1.25");
+			P.S.T->Spec.Id = IdWas;
+			P.S.T->Spec.BuyInCents = BuyWas;
+			R::RitPlayOverride(&P.RL, &F);
+		}
+	}
+	// Team Scalps at the table (review-ui-rit): a Team pro already TAKEN this year who busts at your table (by anyone) is a
+	// plain knockout: no TAKEN, no RitStamp, no "Team scalp" for the receipt. One core takes in this sitting (its bit set in
+	// the hand that busts him) stamps TAKEN once.
+	{
+		std::vector<int> Busts;
+		for (size_t I = 0; I < P.S.Seats.size(); ++I)
+		{
+			if (P.S.Seats[I].Present && !P.S.Seats[I].IsHero)
+			{
+				Busts.push_back(static_cast<int>(I));
+			}
+		}
+		RitExpect(Busts.size() >= 2, "rit: the table has two seats to knock out");
+		if (Busts.size() >= 2)
+		{
+			R::RitUi& U = R::RitOf(&P.RL);
+			ss::SeatVis& Old = P.S.Seats[static_cast<size_t>(Busts[0])];
+			ss::SeatVis& Fresh = P.S.Seats[static_cast<size_t>(Busts[1])];
+			const ss::Chips OldStack = Old.Stack;
+			const ss::Chips FreshStack = Fresh.Stack;
+			RitPlay K = F;
+			K.Scalps.Bounty = false;
+			K.Scalps.Six = {{-1, Old.Name, true}, {-1, Fresh.Name, false}};
+			R::RitPlayOverride(&P.RL, &K);
+			U.ScalpSeatsFor.clear(); // this laptop sits down here with K's set
+			U.TakenHere.clear();
+			P.Frame();
+			const int Stamps0 = P.H.Count(ss::SoundId::RitStamp);
+			Old.Stack = 0;
+			P.Frame();
+			Old.Present = false;
+			const DrawList K0 = P.Frame();
+			const bool Plain = !DrewRun(K0, "TAKEN") && P.H.Count(ss::SoundId::RitStamp) == Stamps0 && U.TakenHere.empty();
+			RitExpect(Plain, "rit: a Team pro taken earlier this year busting at your table is no scalp (no TAKEN, no stamp, no receipt line)");
+			P.Now += 0.8;
+			P.Frame();
+			Fresh.Stack = 0;
+			K.Scalps.Six[1].Taken = true; // core takes the scalp in the hand that busts him
+			R::RitPlayOverride(&P.RL, &K);
+			P.Frame();
+			Fresh.Present = false;
+			const DrawList K1 = P.Frame();
+			P.Now += 0.05;
+			P.Frame();
+			RitExpect(DrewRun(K1, "TAKEN") && P.H.Count(ss::SoundId::RitStamp) == Stamps0 + 1 && U.TakenHere.size() == 1 && U.TakenHere.front().second == Fresh.Name,
+				"rit: the scalp core takes at your table stamps TAKEN once");
+			WriteList("rit_table_taken", K1);
+			Old.Present = true;
+			Fresh.Present = true;
+			Old.Stack = OldStack;
+			Fresh.Stack = FreshStack;
+			U.TakenHere.clear();
+			R::RitPlayOverride(&P.RL, &F);
+			P.Now += 1.0;
+			P.Frame();
+		}
+	}
+	// The Settlement after this event: the League moved from 11th to 7th (+4), RitRank a tick a place.
+	RitPlay After = F;
+	After.Rank = 7;
+	std::swap(After.Table[6], After.Table[10]);
+	for (size_t I = 0; I < After.Table.size(); ++I)
+	{
+		After.Table[I].Rank = static_cast<int>(I) + 1;
+		After.Table[I].Points = 420.0f - 15.5f * static_cast<float>(I + 1);
+	}
+	After.Points = After.Table[6].Points;
+	After.Scored = {{P.S.T->Spec.Id, 38.25f}};
+	After.HeroDays.push_back({After.Today, 38.25f});
+	R::RitPlayOverride(&P.RL, &After);
+	const int Ranks = P.H.Count(ss::SoundId::RitRank);
+	{
+		// RitSettleHere's results, stepped through the print, the stamp and the re-sort (2 s at 20 frames a second).
+		ss::HistoryEntry H;
+		H.Name = P.S.T->Spec.Name;
+		H.Place = 9;
+		H.Entrants = 54;
+		H.BuyInCents = 330;
+		H.EventId = P.S.T->Spec.Id;
+		P.S.History.insert(P.S.History.begin(), H);
+		P.S.LastResults = ss::Results();
+		P.S.LastResults.EventName = H.Name;
+		P.S.LastResults.Place = H.Place;
+		P.S.LastResults.Entrants = H.Entrants;
+		P.S.LastResults.BuyInCents = H.BuyInCents;
+		P.S.HasResults = true;
+		P.S.LastSiteResult = SiteId::RunItTwice;
+		const ss::Screen Was = P.S.CurrentScreen;
+		P.S.CurrentScreen = ss::Screen::Results;
+		for (int K = 0; K < 40; ++K)
+		{
+			P.Now += 0.05;
+			L = P.Frame();
+		}
+		P.S.CurrentScreen = Was;
+		P.S.HasResults = false;
+		P.S.History.erase(P.S.History.begin());
+	}
+	WriteList("rit_settlement_g2", L);
+	RitExpect(DrewRun(L, "11TH") && DrewRun(L, "7TH") && DrewRun(L, "(+4)") && DrewRun(L, "+38.2 PTS"), "rit: the Settlement's League: 11TH to 7TH (+4), the points it scored");
+	RitExpect(RitDrewSub(L, "+38.2 \xC2\xB7 today's best"), "rit: the receipt's League points line");
+	RitExpect(!RitHasHex(L, R::RitSelRow, {1098.0f, 230.0f, 466.0f, 120.0f}), "rit: the Settlement's group: your row ruled in Hot White, never red-tinted");
+	RitExpect(P.H.Count(ss::SoundId::RitRank) - Ranks == 4, "rit: the rows re-sort with a RitRank tick a place (4)");
+	RitPageChecks(L, P.M, "the Settlement (G2)", 2);
+	// review-ui-rit mutations: the PROMOTION ZONE tag is the places' only (Up 3: none at 4th, the tag at 3rd), and the Kast
+	// preview's still of a newer Settlement ticks nothing (its re-sort plays only in the player's own view).
+	{
+		ss::HistoryEntry H;
+		H.Name = P.S.T->Spec.Name;
+		H.Place = 3;
+		H.Entrants = 54;
+		H.BuyInCents = 330;
+		H.EventId = P.S.T->Spec.Id;
+		P.S.History.insert(P.S.History.begin(), H);
+		P.S.LastResults = ss::Results();
+		P.S.LastResults.EventName = H.Name;
+		P.S.LastResults.Place = H.Place;
+		P.S.LastResults.Entrants = H.Entrants;
+		P.S.LastResults.BuyInCents = H.BuyInCents;
+		P.S.HasResults = true;
+		P.S.LastSiteResult = SiteId::RunItTwice;
+		const ss::Screen Was = P.S.CurrentScreen;
+		P.S.CurrentScreen = ss::Screen::Results;
+		RitPlay Z = After;
+		std::swap(Z.Table[2], Z.Table[6]); // the player's row to 3rd (in the Settlement's five-row window)
+		for (size_t I = 0; I < Z.Table.size(); ++I)
+		{
+			Z.Table[I].Rank = static_cast<int>(I) + 1;
+			Z.Table[I].Points = 420.0f - 15.5f * static_cast<float>(I + 1);
+		}
+		Z.Rank = 3;
+		Z.Points = Z.Table[2].Points;
+		R::RitPlayOverride(&P.RL, &Z);
+		// The preview first (a newer result the player hasn't opened: the last Settlement's 11th is still the laptop's), its
+		// League panel drawn as the Kast preview draws it (Previewing: the still, every row in its final place).
+		{
+			R::RitUi& U = R::RitOf(&P.RL);
+			const int Ticks0 = U.SettleTicks;
+			const int Before = P.H.Count(ss::SoundId::RitRank);
+			DrawList Lp;
+			ss::ui::Canvas Cp(Lp, P.M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+			R::RitCtx Xp{P.RL, P.S, Cp, P.RL.UI, U, P.Now, P.S.WorldMinutes(), true, Z};
+			R::RitSettleLeague(Xp, {1098.0f, 96.0f, 466.0f, 270.0f}, 10.0);
+			std::printf("  rit Settlement under the Kast preview: from %d (ranked %d), 11TH %d, 3RD %d, RitRank %d, ticks %d -> %d\n", U.SettleRankFrom, U.SettleRanked ? 1 : 0,
+				DrewRun(Lp, "11TH") ? 1 : 0, DrewRun(Lp, "3RD") ? 1 : 0, P.H.Count(ss::SoundId::RitRank) - Before, Ticks0, U.SettleTicks);
+			RitExpect(DrewRun(Lp, "11TH") && DrewRun(Lp, "3RD") && P.H.Count(ss::SoundId::RitRank) == Before && U.SettleTicks == Ticks0,
+				"rit: the Kast preview's still of a newer Settlement (11TH to 3RD) plays no RitRank and keeps the player's ticks");
+		}
+		for (const int At : {4, 3})
+		{
+			Z.Rank = At;
+			R::RitPlayOverride(&P.RL, &Z);
+			for (int K = 0; K < 4; ++K)
+			{
+				P.Now += 0.05;
+				L = P.Frame();
+			}
+			RitExpect(DrewRun(L, "PROMOTION ZONE") == (At <= After.Up), At <= After.Up ? "rit: the Settlement tags PROMOTION ZONE in the places (3rd)" : "rit: and never just outside them (4th)");
+		}
+		P.S.CurrentScreen = Was;
+		P.S.HasResults = false;
+		P.S.History.erase(P.S.History.begin());
+	}
+	R::RitPlayOverride(&P.RL, nullptr);
+}
+
 void RitBench()
 {
 	if (!std::getenv("SS_UI_BENCH"))
@@ -2298,12 +3470,36 @@ void RitBench()
 		BestA = std::min(BestA, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count() / 40.0);
 	}
 	std::printf("UI BENCH runittwice board running+arrivals %6.3f ms/draw, %zu vertices, %d runs\n", BestA, La.Vertices.size(), RitRuns(La));
+	// G2's pages on the fixture model (the League, the Board with the stars, the Club, the Desk's Luck Ledger, the Member File).
+	P.At(RitEvening + 5.0 * 60.0);
+	RitPlay F = RitFixture(P);
+	F.Briefing.On = false;
+	ss::ui::rlrit_detail::RitPlayOverride(&P.RL, &F);
+	ss::ui::rlrit_detail::RitOf(&P.RL).DeskTab = 1;
+	for (const Page Pg : {Page::League, Page::Lobby, Page::Promotions, Page::Desk, Page::Profile, Page::Leaderboards})
+	{
+		P.Open(Pg);
+		const DrawList L = P.Settled();
+		double Best = 1.0e9;
+		for (int Round = 0; Round < 5; ++Round)
+		{
+			const auto T0 = std::chrono::steady_clock::now();
+			for (int K = 0; K < 40; ++K)
+			{
+				P.Frame();
+			}
+			Best = std::min(Best, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count() / 40.0);
+		}
+		std::printf("UI BENCH runittwice G2 page %d %6.3f ms/draw, %zu vertices, %d runs\n", static_cast<int>(Pg), Best, L.Vertices.size(), RitRuns(L));
+	}
+	ss::ui::rlrit_detail::RitPlayOverride(&P.RL, nullptr);
 }
 } // namespace rit_seg
 
 void SegRit()
 {
 	using namespace rit_seg;
+	const auto T0 = std::chrono::steady_clock::now();
 	RitArtChecks();
 	RitRailAndPages();
 	RitBoard();
@@ -2321,8 +3517,16 @@ void SegRit()
 	RitDeskOneRake();
 	RitClubDayPrints();
 	RitPuckAndSlide();
+	const auto T1 = std::chrono::steady_clock::now();
+	RitLeagueChecks();
+	RitLeagueTruths();
+	RitBoardG2();
+	RitPagesG2();
+	RitTableG2();
+	const auto T2 = std::chrono::steady_clock::now();
 	RitCopy();
 	RitBench();
-	std::printf("  ui-rit: %d checks\n", RitChecks);
+	std::printf("  ui-rit: %d checks in %.1f s (G1's %.1f s, G2's %.1f s)\n", RitChecks, std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count(),
+		std::chrono::duration<double>(T1 - T0).count(), std::chrono::duration<double>(T2 - T1).count());
 }
 } // namespace ui_test

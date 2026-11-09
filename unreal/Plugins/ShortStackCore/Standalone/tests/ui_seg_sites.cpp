@@ -9,7 +9,9 @@
 #include "UiSeg.h"
 
 #include "CopyLint.h"
+#include "ShortStack/Cards.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Fuse.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
@@ -485,18 +487,21 @@ void SitesLobbies()
 		const DrawList L = P.Settled();
 		WriteList("site_lobby_" + Key, L);
 		const std::string Short = ss::ui::rlsites_detail::SitesShortName(Site);
+		const ss::site::play::View Play = S.SitePlayView(Site);
 		if (Site == SiteId::RunItTwice)
 		{
-			// Update 3 (G1, SPEC §7.7's deliberate rewrite, ui-rit's patch): RunItTwice's rail of plates in caps (BOARD ... CLUB, CASHIER;
-			// LEAGUE hidden until G2), and its Board in place of the featured slides (SECOND RUN CLUB's kicker moved to the Club page).
-			SitesExpect(DrewRun(L, "BOARD") && DrewRun(L, "CLUB") && DrewRun(L, "CASHIER") && !DrewRun(L, "LEAGUE") && !DrewRun(L, "Career") && !DrewRun(L, "Embercrest"),
+			// Update 3 (G1, SPEC §7.7's deliberate rewrite, ui-rit's patch): RunItTwice's rail of plates in caps (BOARD ... CLUB, CASHIER),
+			// and its Board in place of the featured slides (SECOND RUN CLUB's kicker moved to the Club page). G2 (§3.4): the LEAGUE
+			// plate shows once the loops are live (core-siteplay's RitView.On), hidden before.
+			SitesExpect(DrewRun(L, "BOARD") && DrewRun(L, "CLUB") && DrewRun(L, "CASHIER") && DrewRun(L, "LEAGUE") == Play.Rt.On && !DrewRun(L, "Career") && !DrewRun(L, "Embercrest"),
 				("sites: " + Short + "'s rail has its own pages").c_str());
 		}
 		else
 		{
-			// Update 3 (G1, SPEC §7.7's deliberate rewrite): Ignite's dock, PLAY, REWARDS, the raised FLIP (FUSE from G2), BOARDS and
-			// WALLET; nothing of RiverLine's.
-			SitesExpect(DrewRun(L, "PLAY") && DrewRun(L, "REWARDS") && DrewRun(L, "FLIP") && DrewRun(L, "BOARDS") && DrewRun(L, "WALLET") && !DrewRun(L, "Career") && !DrewRun(L, "Embercrest"),
+			// Update 3 (G1, SPEC §7.7's deliberate rewrite): Ignite's dock, PLAY, REWARDS, the raised centre button, BOARDS and WALLET;
+			// nothing of RiverLine's. G2 (§2.4, F7): the centre button reads FUSE while FUSE is lit (IgniteView.FuseOn), FLIP otherwise.
+			SitesExpect(DrewRun(L, "PLAY") && DrewRun(L, "REWARDS") && DrewRun(L, Play.Ig.FuseOn ? "FUSE" : "FLIP") && DrewRun(L, "BOARDS") && DrewRun(L, "WALLET") && !DrewRun(L, "Career") &&
+							!DrewRun(L, "Embercrest"),
 				("sites: " + Short + "'s dock has its own pages").c_str());
 		}
 		SitesExpect(DrewRun(L, "Balance $212.40"), ("sites: " + Short + "'s top bar shows its wallet").c_str());
@@ -2128,6 +2133,763 @@ void SitesRitTable()
 	}
 }
 
+// ------------------------------------------------------------------ G2 (ui-tablestyle): the rivals' bet stacks (G1_AUDIT N12)
+
+/** A stack drawn alone: its vertices. */
+size_t SitesStackVertices(ss::Chips Amount, int Set)
+{
+	DrawList L;
+	TableMeasurer M;
+	ss::ui::Canvas C(L, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+	ss::ui::DrawChipStack(C, Amount, 400.0f, 400.0f, 0.85f, 1.0f, Set);
+	return L.Vertices.size();
+}
+
+void SitesCrowd(SitesLaptop& P, SiteId Site, const char* Key, size_t Budget);
+void SitesStickers(SitesLaptop& P);
+
+/** A rival's table with a bet in front of every seat and a pot in the middle (every seat in: an eight-way pot and its pot). */
+void SitesMultiway(SiteId Site, const char* Key, size_t Budget)
+{
+	namespace sd = ss::ui::rlsites_detail;
+	SitesLaptop P(std::string("sites-multiway-") + Key);
+	ss::Session& S = P.S;
+	P.At(SitesEvening);
+	S.BankrollCents = 200000;
+	P.Join(Site, 50000);
+	ss::net::EventInstance E;
+	if (!SitesOpenEvent(S, Site, E, 2200))
+	{
+		std::printf("  sites: no %s event open at this hour; the multiway checks are skipped\n", Key);
+		return;
+	}
+	S.RegisterEvent(ss::net::Site(Site).Listing(E, nullptr, S.Unlocks()));
+	S.CurrentPace = ss::Pace::Full;
+	P.Now = Step(S, P.Now, 3.0);
+	const DrawList Before = P.Settled();
+	// The heaviest bets a felt sees: three columns each (4,475 is four 1k, four 100s and three 25s), the pot three more.
+	static const ss::Chips Bets[8] = {4475, 4475, 4400, 4475, 3975, 4475, 4400, 4475};
+	int Seats = 0;
+	int Want = 0;
+	for (ss::SeatVis& V : S.Seats)
+	{
+		if (V.Present)
+		{
+			V.Bet = Bets[Seats % 8];
+			Want += sd::SitesChipVertices(V.Bet, sd::SitesLook(Site).ChipSet, 0);
+			++Seats;
+		}
+	}
+	S.PotChips = 26475;
+	Want += sd::SitesChipVertices(S.PotChips, sd::SitesLook(Site).ChipSet, 0);
+	const DrawList L = P.Settled();
+	WriteList(std::string("site_table_") + Key + "_multiway", L);
+	SitesNoLeak(L, Site, (std::string(Key) + "'s multiway table").c_str());
+	// The detail the felt picks: the finest whose stacks fit its 1,800.
+	int Got = 0;
+	for (int D = 0; D < 3; ++D)
+	{
+		Got = sd::SitesChipVertices(S.PotChips, sd::SitesLook(Site).ChipSet, D);
+		for (const ss::SeatVis& Vs : S.Seats)
+		{
+			Got += Vs.Present ? sd::SitesChipVertices(Vs.Bet, sd::SitesLook(Site).ChipSet, D) : 0;
+		}
+		if (Got <= 1800)
+		{
+			break;
+		}
+	}
+	std::printf("  %s's table, %d bets and the pot out: %zu vertices (%zu before them; budget %zu); the stacks %d at full detail, %d as drawn\n", Key, Seats, L.Vertices.size(),
+		Before.Vertices.size(), Budget, Want, Got);
+	SitesExpect(Seats >= 6 && L.Vertices.size() <= Budget, (std::string("bet stacks: ") + Key + "'s table with every seat in and the pot out stays within its vertex budget (§10, G1_AUDIT N12)").c_str());
+	SitesExpect(Got <= 1800, (std::string("bet stacks: ") + Key + "'s felt draws its stacks within its chip budget (1,800 vertices)").c_str());
+	// G2 fix (G2_AUDIT M5): then the crowded felt on the same table (and Ignite's stickers): a fresh laptop's 30 days to the
+	// evening are most of a check's time (riverline_ui's budget, L15).
+	SitesCrowd(P, Site, Key, Budget);
+	if (Site == SiteId::Ignite)
+	{
+		SitesStickers(P);
+	}
+}
+
+/**
+ * Review (review-ui-tablestyle, G1_AUDIT N12): a quiet felt keeps its stacks at full detail; only a busy one drops. One bet out
+ * and nothing else on the felt: two bets drawn at the same instant move the page by exactly their full-detail difference (the
+ * bet's pill is the same size for both, and text isn't geometry).
+ */
+void SitesFeltDetail(SiteId Site, const char* Key)
+{
+	namespace sd = ss::ui::rlsites_detail;
+	SitesLaptop P(std::string("sites-felt-detail-") + Key);
+	ss::Session& S = P.S;
+	P.At(SitesEvening);
+	S.BankrollCents = 200000;
+	P.Join(Site, 50000);
+	ss::net::EventInstance E;
+	if (!SitesOpenEvent(S, Site, E, 2200))
+	{
+		std::printf("  sites: no %s event open at this hour; the felt detail checks are skipped\n", Key);
+		return;
+	}
+	S.RegisterEvent(ss::net::Site(Site).Listing(E, nullptr, S.Unlocks()));
+	S.CurrentPace = ss::Pace::Full;
+	P.Now = Step(S, P.Now, 3.0);
+	ss::SeatVis* One = nullptr;
+	for (ss::SeatVis& V : S.Seats)
+	{
+		V.Bet = 0;
+		One = !One && V.Present && !V.IsHero ? &V : One;
+	}
+	S.PotChips = 0;
+	S.Flights.clear();
+	if (!One)
+	{
+		return;
+	}
+	const auto At = [&](ss::Chips Bet, double T) {
+		One->Bet = Bet;
+		P.Now = T - 3.0;
+		P.Frame();
+		P.Now = T - 1.0;
+		P.Frame();
+		P.Now = T;
+		return P.Frame();
+	};
+	const double T = P.Now + 5.0;
+	const DrawList A = At(916, T);
+	const DrawList B = At(5, T);
+	const int Set = sd::SitesLook(Site).ChipSet;
+	const long Moved = static_cast<long>(A.Vertices.size()) - static_cast<long>(B.Vertices.size());
+	const long Full = sd::SitesChipVertices(916, Set, 0) - sd::SitesChipVertices(5, Set, 0);
+	std::printf("  bet stacks: %s's quiet felt, a 916 bet against a 5: the page moves %ld vertices (%ld at full detail, %ld busy)\n", Key, Moved, Full,
+		static_cast<long>(sd::SitesChipVertices(916, Set, 1) - sd::SitesChipVertices(5, Set, 1)));
+	SitesExpect(Moved == Full, (std::string("bet stacks: ") + Key + "'s quiet felt (one bet out) draws its stack at full detail").c_str());
+	// Chips in the air count too: three stacks flying to the pot make the felt busy, so the same two bets move it by their
+	// lighter difference.
+	for (int K = 0; K < 3; ++K)
+	{
+		ss::Flight F;
+		F.IsChips = true;
+		F.Amount = 4475;
+		F.From.Type = ss::FlightEnd::Kind::Seat;
+		F.From.Seat = One->Seat;
+		F.To.Type = ss::FlightEnd::Kind::Pot;
+		F.Start = T - 0.2;
+		F.Dur = 0.6;
+		S.Flights.push_back(F);
+	}
+	const DrawList Ab = At(916, T);
+	const DrawList Bb = At(5, T);
+	const long MovedBusy = static_cast<long>(Ab.Vertices.size()) - static_cast<long>(Bb.Vertices.size());
+	const long Busy = sd::SitesChipVertices(916, Set, 1) - sd::SitesChipVertices(5, Set, 1);
+	std::printf("  bet stacks: %s's felt with three stacks in the air: the same bets move it %ld vertices (%ld busy)\n", Key, MovedBusy, Busy);
+	SitesExpect(MovedBusy == Busy, (std::string("bet stacks: ") + Key + "'s felt counts the chips in the air (three flying stacks make it busy)").c_str());
+	S.Flights.clear();
+}
+
+/**
+ * G2 fix (G2_AUDIT M5; §10: Ignite's table within 22k vertices, RunItTwice's within 19k): the busiest frame a felt sees, staged.
+ * At the hero's turn every other seat has called a three-column 1,600 (their stickers up) and the pot is out; then, on
+ * Ignite, the same felt in a PKO, every seat wearing its bounty tag. It measured 22,848-23,142 on Ignite before the fix. P is
+ * seated at Site's table (SitesMultiway's, its bets and pot restaged here).
+ */
+void SitesCrowd(SitesLaptop& P, SiteId Site, const char* Key, size_t Budget)
+{
+	ss::Session& S = P.S;
+	// Played on to the hero's turn (the action bar up: its pills and slider are part of the busiest frame).
+	for (int K = 0; K < 400 && !S.HasPrompt; ++K)
+	{
+		P.Now = Step(S, P.Now, 0.1);
+	}
+	int Seats = 0;
+	for (ss::SeatVis& V : S.Seats)
+	{
+		if (V.Present)
+		{
+			V.Bet = 1600;
+			if (!V.IsHero)
+			{
+				// In the hand with its cards (a seat that folded before the hero's turn is staged in, too).
+				V.LastAction = "Call 1,600";
+				V.LastActionAt = P.Now;
+				V.Folded = false;
+				V.HasCards = true;
+			}
+			++Seats;
+		}
+	}
+	S.PotChips = 1625;
+	const auto Check = [&](bool Pko) {
+		const DrawList L = P.Settled();
+		if (!Pko)
+		{
+			WriteList(std::string("site_table_") + Key + "_crowd", L);
+		}
+		std::printf("  crowded felt: %s%s, %d seats called 1,600 at the hero's turn (%s): %zu vertices (budget %zu)\n", Key, Pko ? " (PKO, bounty tags)" : "", Seats,
+			S.HasPrompt ? "action bar up" : "no prompt", L.Vertices.size(), Budget);
+		SitesExpect(Seats >= 6 && S.HasPrompt && L.Vertices.size() <= Budget,
+			(std::string("crowded felt: ") + Key + (Pko ? " in a PKO" : "") + ": every seat called with its sticker up at the hero's turn stays within the table's budget (§10, G2_AUDIT M5)").c_str());
+	};
+	Check(false);
+	if (Site != SiteId::Ignite || !S.T)
+	{
+		return;
+	}
+	const auto Bounty = S.T->Spec.BountyCents;
+	const bool Mystery = S.T->Spec.MysteryBounty;
+	S.T->Spec.BountyCents = 500;
+	S.T->Spec.MysteryBounty = false;
+	Check(true);
+	// Review fix (review-g2f-tablestyle): a folded seat's bounty tag dims with its bubble (0.55), and its Orange rim stays a rim
+	// over the dark body's edge: drawn as a fill under the body (SitesOutlined's two fills), the rim showed through the dimmed
+	// body, a quarter Orange under the Orange figure. Each dimmed body (a run of 0x3a1f08 vertices at 0.55) is checked for an
+	// Orange vertex at its middle (a fill's centre vertex; a stroke's sit within 1.5 of the edge, 9.5 or more from the middle).
+	{
+		std::vector<ss::SeatVis*> Dimmed;
+		for (ss::SeatVis& V : S.Seats)
+		{
+			if (V.Present && !V.IsHero && Dimmed.size() < 3)
+			{
+				V.Folded = true;
+				Dimmed.push_back(&V);
+			}
+		}
+		const DrawList Ld = P.Settled();
+		const ss::net::SiteDef& D = ss::net::Def(SiteId::Ignite);
+		const ss::ui::Color Rim = ss::ui::Skin::FromHex(D.Palette).Orange;
+		const ss::ui::Color RimNight = ss::ui::Skin::FromHex(D.NightPalette).Orange;
+		const ss::ui::Color Body = ss::ui::Hex(0x3a1f08);
+		const auto Rgb = [](const ss::ui::Color& A, const ss::ui::Color& B) { return std::fabs(A.R - B.R) < 0.003f && std::fabs(A.G - B.G) < 0.003f && std::fabs(A.B - B.B) < 0.003f; };
+		std::vector<ss::ui::Rect> Bodies;
+		for (size_t K = 0; K < Ld.Vertices.size();)
+		{
+			const ss::ui::Vertex& Vx = Ld.Vertices[K];
+			if (!Rgb(Vx.Col, Body) || Vx.Col.A < 0.5f || Vx.Col.A > 0.6f)
+			{
+				++K;
+				continue;
+			}
+			float X0 = Vx.X, Y0 = Vx.Y, X1 = Vx.X, Y1 = Vx.Y;
+			for (; K < Ld.Vertices.size() && Rgb(Ld.Vertices[K].Col, Body); ++K)
+			{
+				const ss::ui::Vertex& Bv = Ld.Vertices[K];
+				if (Bv.Col.A > 0.01f)
+				{
+					X0 = std::min(X0, Bv.X);
+					Y0 = std::min(Y0, Bv.Y);
+					X1 = std::max(X1, Bv.X);
+					Y1 = std::max(Y1, Bv.Y);
+				}
+			}
+			Bodies.push_back({X0, Y0, X1 - X0, Y1 - Y0});
+		}
+		int Inside = 0;
+		for (const ss::ui::Rect& B : Bodies)
+		{
+			for (const ss::ui::Vertex& Vx : Ld.Vertices)
+			{
+				const bool Mid = std::fabs(Vx.X - (B.X + B.W / 2.0f)) < 3.0f && std::fabs(Vx.Y - (B.Y + B.H / 2.0f)) < 3.0f;
+				Inside += Mid && Vx.Col.A > 0.05f && (Rgb(Vx.Col, Rim) || Rgb(Vx.Col, RimNight)) ? 1 : 0;
+			}
+		}
+		std::printf("  crowded felt: ignite PKO, %zu seats folded: %zu dimmed bounty tags, %d Orange vertices at their bodies' middles\n", Dimmed.size(), Bodies.size(), Inside);
+		SitesExpect(Bodies.size() == Dimmed.size() && Inside == 0, "crowded felt: a folded seat's dimmed bounty tag keeps its Orange rim out of its dark body (review-g2f-tablestyle)");
+		for (ss::SeatVis* V : Dimmed)
+		{
+			V->Folded = false;
+		}
+	}
+	S.T->Spec.BountyCents = Bounty;
+	S.T->Spec.MysteryBounty = Mystery;
+}
+
+/**
+ * G2 fix (M5): Ignite's stickers. A sticker is three 16-point bursts (shadow, cream rim, fill: 65 vertices each); from four up at
+ * once the felt is crowded and they draw without the shadow, as do the others' small backs. A seat whose hand is named at the
+ * showdown shows the name, not its last action (RunItTwice's tag gives way the same). P is seated at Ignite's table, every
+ * visible part of the felt cleared here first.
+ */
+void SitesStickers(SitesLaptop& P)
+{
+	ss::Session& S = P.S;
+	std::vector<ss::SeatVis*> Others;
+	for (ss::SeatVis& V : S.Seats)
+	{
+		V.LastAction.clear();
+		V.Bet = 0;
+		if (V.Present && !V.IsHero)
+		{
+			Others.push_back(&V);
+		}
+	}
+	S.PotChips = 0;
+	S.Flights.clear();
+	if (Others.size() < 7 || !S.CurHand)
+	{
+		std::printf("  sites: %zu others at the table; the sticker checks are skipped\n", Others.size());
+		return;
+	}
+	const double T = P.Now + 5.0;
+	// Stickers on the first N others (cards in hand or not), all drawn at the same instant.
+	const auto At = [&](size_t N, bool Cards) {
+		for (size_t K = 0; K < Others.size(); ++K)
+		{
+			Others[K]->LastAction = K < N ? "Call 1,600" : std::string();
+			Others[K]->LastActionAt = T - 1.0;
+			Others[K]->HasCards = Cards;
+			Others[K]->Folded = false;
+		}
+		P.Now = T;
+		return static_cast<long>(P.Frame().Vertices.size());
+	};
+	const long V0 = At(0, false);
+	const long V3 = At(3, false);
+	const long V7 = At(7, false);
+	const long C3 = At(3, true);
+	const long C7 = At(7, true);
+	std::printf("  stickers: 3 up %ld vertices each, 7 up %ld each; %zu seats' backs %ld quiet, %ld crowded\n", (V3 - V0) / 3, (V7 - V0) / 7, Others.size(), C3 - V3, C7 - V7);
+	SitesExpect(V3 - V0 == 3 * 195 && V7 - V0 == 7 * 130, "stickers: three bursts each (195 vertices); from four up, the crowded felt drops their shadow (130)");
+	SitesExpect(C7 - V7 < C3 - V3 && (C3 - V3 - (C7 - V7)) % static_cast<long>(2 * Others.size()) == 0, "stickers: a crowded felt's small backs draw without their drop shadow too");
+	// A named hand at the showdown takes over from the seat's last action.
+	for (ss::SeatVis* V : Others)
+	{
+		V->LastAction.clear();
+		V->HasCards = false;
+	}
+	ss::SeatVis& One = *Others.front();
+	One.HandLabel = "Two Pair";
+	One.Folded = false;
+	const auto Named = [&](bool Over, bool Acted) {
+		S.CurHand->bComplete = Over;
+		One.LastAction = Acted ? "Check" : std::string();
+		One.LastActionAt = T - 1.0;
+		P.Now = T;
+		return static_cast<long>(P.Frame().Vertices.size());
+	};
+	const long Running = Named(false, true) - Named(false, false);
+	const long Over = Named(true, true) - Named(true, false);
+	S.CurHand->bComplete = false;
+	One.HandLabel.clear();
+	SitesExpect(Running > 0 && Over == 0, "stickers: while the hand runs the CHECK sticker is up; once it's over and the hand is named, the name alone");
+	// Review (review-g2f-tablestyle): the crowd starts at four stickers up, not five.
+	const long V4 = At(4, false);
+	At(0, false);
+	SitesExpect(V4 - V0 == 4 * 130, "stickers: four up is a crowded felt (TblStickerCrowd): no sticker draws its shadow");
+	// Review (review-g2f-tablestyle): a named hand's hidden sticker doesn't crowd the felt (TblStickerUp): at a showdown with four
+	// seats named (their CALLs given way to the names), a fifth seat's sticker still up keeps its shadow (195, not the crowd's 130).
+	{
+		S.CurHand->bComplete = true;
+		for (size_t K = 0; K < 4; ++K)
+		{
+			Others[K]->HandLabel = "Two Pair";
+		}
+		const long Names = At(4, false);
+		const long Fifth = At(5, false);
+		for (size_t K = 0; K < 4; ++K)
+		{
+			Others[K]->HandLabel.clear();
+		}
+		S.CurHand->bComplete = false;
+		At(0, false);
+		std::printf("  stickers: four hands named at the showdown, a fifth seat's sticker %ld vertices\n", Fifth - Names);
+		SitesExpect(Fifth - Names == 195, "stickers: named hands at the showdown don't crowd the felt: a fifth seat's sticker keeps its shadow");
+	}
+	// Review (review-g2f-tablestyle; M5's "cap repeated glows"): at a showdown on Ignite's felt a run of winning board cards side
+	// by side glows once behind the run, and the hero's winning pair once behind the pair (TblRunGlow), where each card lit its
+	// own: the hero's Js Ts with the board's As Ks Qs (2d 3c dimmed) is a royal flush lit by two glows, not five. A glow is one
+	// run of vertices in the skin's Gold at 0.9 (DrawCard's highlight), counted against the same frame with no winner.
+	ss::SeatVis* Hero = nullptr;
+	for (ss::SeatVis& V : S.Seats)
+	{
+		Hero = V.Present && V.IsHero ? &V : Hero;
+	}
+	if (!Hero)
+	{
+		SitesExpect(false, "stickers: the hero is seated at Ignite's table for the showdown's glows");
+		return;
+	}
+	const ss::SeatVis Kept = *Hero;
+	const std::vector<ss::Card> Board = S.Board;
+	const std::vector<double> BoardAt = S.BoardShownAt;
+	S.Board = ss::ParseCards("As Ks Qs 2d 3c");
+	S.BoardShownAt.assign(5, T - 5.0);
+	Hero->Hole = ss::ParseCards("Js Ts");
+	Hero->HasCards = true;
+	Hero->Folded = false;
+	Hero->DealtAt = T - 10.0;
+	Hero->HandLabel = "Royal Flush";
+	const ss::net::SiteDef& D = ss::net::Def(SiteId::Ignite);
+	const ss::ui::Color Gold = ss::ui::Skin::FromHex(D.Palette).Gold;
+	const ss::ui::Color GoldNight = ss::ui::Skin::FromHex(D.NightPalette).Gold;
+	const auto Rgb = [](const ss::ui::Color& A, const ss::ui::Color& B) { return std::fabs(A.R - B.R) < 0.003f && std::fabs(A.G - B.G) < 0.003f && std::fabs(A.B - B.B) < 0.003f; };
+	int Core = 0; // the glows' Gold vertices (their solid cores' outline points), Won's frame less the no-winner one
+	const auto Glows = [&](bool Won) {
+		Hero->Winner = Won;
+		S.CurHand->bComplete = true;
+		P.Now = T;
+		const DrawList L = P.Frame();
+		int Runs = 0;
+		bool In = false;
+		for (const ss::ui::Vertex& Vx : L.Vertices)
+		{
+			const bool Glow = std::fabs(Vx.Col.A - 0.9f) < 0.002f && (Rgb(Vx.Col, Gold) || Rgb(Vx.Col, GoldNight));
+			Runs += Glow && !In ? 1 : 0;
+			Core += Glow ? (Won ? 1 : -1) : 0;
+			In = Glow;
+		}
+		return Runs;
+	};
+	const int Lit = Glows(true) - Glows(false);
+	*Hero = Kept;
+	S.Board = Board;
+	S.BoardShownAt = BoardAt;
+	S.CurHand->bComplete = false;
+	std::printf("  showdown glows: the hero's royal flush (Js Ts, As Ks Qs on the board) lights %d glows (%d core vertices)\n", Lit, Core);
+	SitesExpect(Lit == 2, "showdown: a run of winning board cards glows once and the hero's winning pair once (TblRunGlow), not a glow a card");
+	// Review fix (review-g2f-tablestyle): each glow's core rounds its corners at the canvas's own curve (GlowRoundRect, 7
+	// segments a corner here), never TblLowGlow's two: under the 18 blur that fan of 45-degree steps lit a ray along each corner's
+	// diagonal. Two glows at four segments a corner or more are 40 core points or more (at two, 24).
+	SitesExpect(Lit == 2 && Core >= 40, "showdown: a winner's glow keeps the canvas's round corners (no ray along its diagonals)");
+}
+
+void SitesBetStacks()
+{
+	// G1_AUDIT N12: a rival's stack is one merged column a denomination (a shadow, the shaded side, a seam a chip, the top chip's
+	// face and marks), replayed from the cache, and a busy felt drops to fewer points; RiverLine's stacks are today's.
+	namespace sd = ss::ui::rlsites_detail;
+	static const ss::Chips Amounts[] = {5, 100, 200, 916, 4475, 26475, 895000};
+	bool Exact = true;
+	for (int Set = 1; Set <= 3; ++Set)
+	{
+		for (int D = 0; D < 3; ++D)
+		{
+			for (const ss::Chips A : Amounts)
+			{
+				Exact = Exact && SitesStackVertices(A, Set | D << 4) == static_cast<size_t>(sd::SitesChipVertices(A, Set, D));
+			}
+		}
+	}
+	SitesExpect(Exact, "bet stacks: a rival stack draws exactly the vertices the felt's budget counts (every set, every detail)");
+	// A 916 bet in candy chips took 1,796 vertices chip by chip (G1_AUDIT N12); the widest stack (three columns of 8, 3 and 4).
+	const size_t Candy916 = SitesStackVertices(916, 1);
+	const size_t Widest = SitesStackVertices(895000, 1);
+	const size_t Lacq916 = SitesStackVertices(916, 2);
+	std::printf("  bet stacks: 916 in candy %zu vertices (1,796 chip by chip at G1), lacquer %zu; the widest candy stack %zu, %zu busy, %zu busiest\n", Candy916, Lacq916, Widest,
+		SitesStackVertices(895000, 1 | 1 << 4), SitesStackVertices(895000, 1 | 2 << 4));
+	SitesExpect(Candy916 <= 600 && Lacq916 <= 600 && Widest <= 900, "bet stacks: a 916 bet in under a third of its chip-by-chip vertices, the widest stack under 900");
+	// The floor: nine stacks of three columns (a full felt's bets and its pot) at the busiest detail, in every set.
+	bool Floor = true;
+	for (int Set = 1; Set <= 3; ++Set)
+	{
+		Floor = Floor && 9 * sd::SitesChipVertices(895000, Set, 2) <= 1800;
+	}
+	SitesExpect(Floor, "bet stacks: nine three-column stacks fit a felt's 1,800 vertices at the busiest detail (candy, lacquer, tokens)");
+	// RiverLine's own stacks are today's code path (Set 0): its pages stay byte-identical to day 0 (checked by the gate's diff).
+	SitesFeltDetail(SiteId::Ignite, "ignite");
+	SitesFeltDetail(SiteId::RunItTwice, "runittwice");
+	// Each then stages the busiest frame on its table, and Ignite's stickers (G2 fix, G2_AUDIT M5).
+	SitesMultiway(SiteId::Ignite, "ignite", 22000);
+	SitesMultiway(SiteId::RunItTwice, "runittwice", 19000);
+}
+
+// ------------------------------------------------------------------ G2 (ui-tablestyle): Ignite's looks worn, the flame nudge
+
+/** Every colour a draw list paints, as hex (alpha ignored). */
+std::set<uint32_t> SitesColours(const DrawList& L)
+{
+	std::set<uint32_t> Cols;
+	for (const ss::ui::Vertex& V : L.Vertices)
+	{
+		Cols.insert(SitesRgb(V.Col));
+	}
+	return Cols;
+}
+
+void SitesWorn()
+{
+	// §2.4 L, §2.5: Ignite's table wears the Locker's card back, felt and chip set (the book's worn looks, site::play::LookOf's
+	// designs and Wristband colours); look 0 is Ignite's own exactly; RiverLine and RunItTwice never wear Ignite's.
+	namespace sd = ss::ui::rlsites_detail;
+	namespace sp = ss::site::play;
+	SitesLaptop P("sites-worn");
+	ss::Session& S = P.S;
+	P.At(SitesEvening);
+	S.BankrollCents = 200000;
+	P.Join(SiteId::Ignite, 50000);
+	const sd::SiteLook& Own = sd::SitesLook(SiteId::Ignite);
+	const sd::SiteLook Default = sd::SitesLookFor(S, SiteId::Ignite);
+	SitesExpect(Default.CardBack == Own.CardBack && Default.Felt == Own.Felt && Default.FeltLight == Own.FeltLight && Default.FeltDark == Own.FeltDark && Default.ChipSet == Own.ChipSet &&
+					sd::SitesIgBack(0) == Own.CardBack && sd::SitesIgChipSet(0) == Own.ChipSet,
+		"worn: nothing equipped is Ignite's own look (Sunset, Plum Velvet, candy)");
+	const int Backs = sp::LookCount(0);
+	const int Felts = sp::LookCount(1);
+	const int ChipSets = sp::LookCount(2);
+	std::printf("  worn: the Locker has %d card backs, %d felts, %d chip sets\n", Backs, Felts, ChipSets);
+	if (Backs < 2 || Felts < 2 || ChipSets < 2)
+	{
+		std::printf("  worn: core-siteplay's look catalog isn't in yet; the worn-look checks wait for it\n");
+		return;
+	}
+	// Every look of each slot as SitesLookFor builds it: its design and colours, out of range the default.
+	bool Backed = true;
+	bool Felted = true;
+	bool Chipped = true;
+	for (int K = 0; K < 40; ++K)
+	{
+		S.Life.SitePlay.Ig.L.Back = static_cast<int8_t>(K < Backs ? K : 0);
+		S.Life.SitePlay.Ig.L.Felt = static_cast<int8_t>(K < Felts ? K : 0);
+		S.Life.SitePlay.Ig.L.Chips = static_cast<int8_t>(K < ChipSets ? K : 0);
+		const sd::SiteLook W = sd::SitesLookFor(S, SiteId::Ignite);
+		uint32_t Felt = 0;
+		uint32_t Light = 0;
+		uint32_t Dark = 0;
+		sd::SitesIgFelt(S.Life.SitePlay.Ig.L.Felt, Felt, Light, Dark);
+		Backed = Backed && W.CardBack == sd::SitesIgBack(S.Life.SitePlay.Ig.L.Back) && (S.Life.SitePlay.Ig.L.Back == 0 || W.CardBack == sd::SitesIgBackLooks + S.Life.SitePlay.Ig.L.Back);
+		Felted = Felted && W.Felt == Felt && W.FeltLight == Light && W.FeltDark == Dark && (S.Life.SitePlay.Ig.L.Felt != 0 || (Felt == Own.Felt && Light == Own.FeltLight));
+		const int Set = sd::SitesIgChipSet(S.Life.SitePlay.Ig.L.Chips);
+		Chipped = Chipped && W.ChipSet == Set && ((Set & 15) == (sp::LookOf(2, S.Life.SitePlay.Ig.L.Chips).Base == 1 ? 3 : 1) || S.Life.SitePlay.Ig.L.Chips == 0);
+		Chipped = Chipped && W.Shape == Own.Shape && W.Key == Own.Key && W.Seat8[3].X == Own.Seat8[3].X; // the rest is Ignite's own
+	}
+	S.Life.SitePlay.Ig.L.Back = 120;
+	S.Life.SitePlay.Ig.L.Felt = -3;
+	S.Life.SitePlay.Ig.L.Chips = 99;
+	const sd::SiteLook Odd = sd::SitesLookFor(S, SiteId::Ignite);
+	SitesExpect(Backed && Odd.CardBack == Own.CardBack, "worn: each card back look draws as its own back (a look out of range: Sunset)");
+	SitesExpect(Felted && Odd.Felt == Own.Felt, "worn: each felt look's three tones (Plum Velvet at 0; a look out of range: Plum Velvet)");
+	SitesExpect(Chipped && Odd.ChipSet == Own.ChipSet, "worn: each chip set look draws its design (candy or Neon) and its colours; the rest of the look is Ignite's");
+	// RiverLine's and RunItTwice's looks never wear Ignite's Locker.
+	S.Life.SitePlay.Ig.L.Back = 1;
+	S.Life.SitePlay.Ig.L.Felt = 1;
+	S.Life.SitePlay.Ig.L.Chips = 1;
+	const sd::SiteLook Rl = sd::SitesLookFor(S, SiteId::RiverLine);
+	const sd::SiteLook Rt = sd::SitesLookFor(S, SiteId::RunItTwice);
+	SitesExpect(Rl.CardBack == 0 && Rl.Felt == 0 && Rl.ChipSet == 0 && Rt.CardBack == sd::SitesLook(SiteId::RunItTwice).CardBack && Rt.ChipSet == sd::SitesLook(SiteId::RunItTwice).ChipSet &&
+					Rt.Felt == sd::SitesLook(SiteId::RunItTwice).Felt,
+		"worn: RiverLine's and RunItTwice's tables keep their own backs, felts and chips");
+	// At the table: look 1 of each slot (the second designs: Neon Grid, Midnight Boardwalk, Arcade Tokens), every seat's bet out.
+	ss::net::EventInstance E;
+	if (!SitesOpenEvent(S, SiteId::Ignite, E, 2200))
+	{
+		std::printf("  sites: no Ignite event open at this hour; the worn table's checks are skipped\n");
+		return;
+	}
+	S.Life.SitePlay.Ig.L.Back = 0;
+	S.Life.SitePlay.Ig.L.Felt = 0;
+	S.Life.SitePlay.Ig.L.Chips = 0;
+	S.RegisterEvent(ss::net::Site(SiteId::Ignite).Listing(E, nullptr, S.Unlocks()));
+	S.CurrentPace = ss::Pace::Full;
+	P.Now = Step(S, P.Now, 3.0);
+	for (ss::SeatVis& V : S.Seats)
+	{
+		V.Bet = V.Present ? 4475 : 0;
+	}
+	const DrawList Plain = P.Settled();
+	S.Life.SitePlay.Ig.L.Back = 1;
+	S.Life.SitePlay.Ig.L.Felt = 1;
+	S.Life.SitePlay.Ig.L.Chips = 1;
+	const sd::SiteLook W1 = sd::SitesLookFor(S, SiteId::Ignite);
+	const DrawList L = P.Settled();
+	WriteList("site_table_ignite_worn", L);
+	SitesNoLeak(L, SiteId::Ignite, "Ignite's table in the Locker's looks");
+	const std::set<uint32_t> Was = SitesColours(Plain);
+	const std::set<uint32_t> Now = SitesColours(L);
+	std::printf("  worn: look 1 at the table: back %d, felt %06x/%06x, chips set %d (look %d); %zu vertices (%zu in Ignite's own)\n", W1.CardBack, W1.Felt, W1.FeltLight, W1.ChipSet & 15,
+		(W1.ChipSet >> 8) - 1, L.Vertices.size(), Plain.Vertices.size());
+	SitesExpect(W1.Felt != Own.Felt && Was.count(Own.Felt) && !Was.count(W1.Felt) && Now.count(W1.Felt), "worn: the table's felt is the equipped one");
+	SitesExpect(L.Vertices.size() <= 22000, "worn: Ignite's table in the Locker's looks within its budget (22k)");
+	// The tile wears it too: its mini capsule's felt and its bets' chip (review-ui-tablestyle: with one table open, Tiled draws the
+	// table itself, so a RiverLine table opens beside it first; that tile keeps RiverLine's own).
+	const ss::net::Network& Home = ss::net::Shared();
+	for (const ss::net::EventInstance& X : Home.Window(S.WorldMinutes() - 180.0, S.WorldMinutes() + 60.0))
+	{
+		const ss::LobbyEvent Lx = Home.Listing(X, nullptr, S.Unlocks());
+		const ss::net::LiveState Lv = Home.Live(X, S.WorldMinutes());
+		if (Lx.Joinable && Lx.BuyInCents > 0 && Lx.BuyInCents <= 1100 && Lx.Spec.Entrants <= 3000 && (Lv.St == ss::net::Status::LateReg || (Lv.St == ss::net::Status::Registering && Lv.StartsIn <= 60.0)))
+		{
+			S.RegisterEvent(Lx);
+			break;
+		}
+	}
+	if (S.TableCount() >= 2)
+	{
+		S.Tiled = true;
+		S.ShowTables();
+		S.WithTable(0, [&]() {
+			for (ss::SeatVis& V : S.Seats)
+			{
+				V.Bet = V.Present ? 4475 : 0;
+			}
+		});
+		const DrawList Lt = P.Settled();
+		WriteList("site_tile_ignite_worn", Lt);
+		const float TileW = (ss::ui::RiverLine::Width - 16.0f - 8.0f) / 2.0f;
+		const ss::ui::Rect IgTile{8.0f, 72.0f, TileW, 878.0f};
+		const ss::ui::Rect RlTile{8.0f + TileW + 8.0f, 72.0f, TileW, 878.0f};
+		// The mini capsule's felt is a radial to its edge colour: the equipped felt's edge, never Plum Velvet's.
+		const int Worn = SitesHexIn(Lt, W1.FeltDark, IgTile);
+		const int Plum = SitesHexIn(Lt, Own.FeltDark, IgTile) + SitesHexIn(Lt, Own.Felt, IgTile);
+		std::printf("  worn: the tiles: the Ignite tile's felt edge %d (Plum Velvet %d), brass %d, RiverLine red %d; the RiverLine tile's %d\n", Worn, Plum, SitesHexIn(Lt, 0xd1a646, IgTile),
+			SitesHexIn(Lt, 0xc8323c, IgTile), SitesHexIn(Lt, W1.FeltDark, RlTile));
+		SitesExpect(Worn > 0 && Plum == 0 && SitesHexIn(Lt, W1.FeltDark, RlTile) == 0, "worn: the Ignite table's tile wears the equipped felt, the RiverLine tile beside it its own");
+		SitesExpect(SitesHexIn(Lt, 0xd1a646, IgTile) > 0 && SitesHexIn(Lt, 0xc8323c, IgTile) == 0, "worn: the Ignite tile's bets wear the equipped chips (Arcade Tokens' brass, never RiverLine's red)");
+		S.Tiled = false;
+		S.ShowTables();
+	}
+	else
+	{
+		std::printf("  worn: no RiverLine event open beside it; the tile checks are skipped\n");
+	}
+	// The backs and the chips as drawn: each look's design and its colours.
+	bool Drew = true;
+	for (int K = 0; K < Backs; ++K)
+	{
+		DrawList Lb;
+		TableMeasurer M;
+		ss::ui::Canvas C(Lb, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+		ss::ui::CardOpts O;
+		O.Back = sd::SitesIgBack(K);
+		ss::ui::DrawCard(C, -1, 100.0f, 100.0f, 140.0f, 196.0f, O);
+		const sp::LookView V = sp::LookOf(0, K);
+		const std::set<uint32_t> Cols = SitesColours(Lb);
+		Drew = Drew && Cols.count(0xfff4ec) && (V.ColorA == 0 || Cols.count(V.ColorA)) && (V.ColorB == 0 || Cols.count(V.ColorB)) &&
+			   (V.Base != 1 || Cols.count(0x120c1f)) && (V.Base != 0 || V.ColorA != 0 || Cols.count(0xff6b57));
+	}
+	for (int K = 0; K < ChipSets; ++K)
+	{
+		DrawList Lc;
+		TableMeasurer M;
+		ss::ui::Canvas C(Lc, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+		ss::ui::DrawChipStack(C, 1625, 300.0f, 300.0f, 1.0f, 1.0f, sd::SitesIgChipSet(K));
+		const sp::LookView V = sp::LookOf(2, K);
+		const std::set<uint32_t> Cols = SitesColours(Lc);
+		// 1,625 is a 1k, a 500 and a 100 (and a 25 past the third column): Arcade Tokens strike the 100 in brass.
+		Drew = Drew && (V.ColorB == 0 || Cols.count(V.ColorB)) && (V.Base != 1 || Cols.count(0xd1a646)) && (V.Base != 0 || V.ColorA == 0 || Cols.count(V.ColorA));
+	}
+	SitesExpect(Drew, "worn: every card back and chip set look draws its design and its Wristband colours");
+	// The looks as a sheet for the eye (site_ignite_looks): each back at the table's hero size, each felt's three tones, each
+	// chip set look as a bet and as a pot, at full detail.
+	{
+		DrawList Ls;
+		TableMeasurer M;
+		ss::ui::Canvas C(Ls, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+		C.FillRect({0.0f, 0.0f, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height}, ss::ui::Hex(0x120a18));
+		for (int K = 0; K < Backs && K < 10; ++K)
+		{
+			ss::ui::CardOpts O;
+			O.Back = sd::SitesIgBack(K);
+			ss::ui::DrawCard(C, -1, 40.0f + 150.0f * static_cast<float>(K), 40.0f, 140.0f, 196.0f, O);
+			ss::ui::DrawCard(C, -1, 40.0f + 150.0f * static_cast<float>(K), 250.0f, 50.0f, 70.0f, O);
+		}
+		for (int K = 0; K < Felts && K < 10; ++K)
+		{
+			uint32_t Felt = 0;
+			uint32_t Light = 0;
+			uint32_t Dark = 0;
+			sd::SitesIgFelt(K, Felt, Light, Dark);
+			const ss::ui::Rect F{40.0f + 150.0f * static_cast<float>(K), 360.0f, 140.0f, 120.0f};
+			C.FillRoundRect(F, 30.0f, ss::ui::Hex(Felt));
+			C.GlowRoundRect({F.X + 30.0f, F.Y + 30.0f, 80.0f, 50.0f}, 25.0f, ss::ui::Hex(Light, 0.5f), 30.0f);
+			C.StrokeRoundRect(F, 30.0f, ss::ui::Hex(Dark), 6.0f);
+		}
+		for (int K = 0; K < ChipSets && K < 10; ++K)
+		{
+			const float X = 110.0f + 150.0f * static_cast<float>(K);
+			ss::ui::DrawChipStack(C, 4475, X, 580.0f, 1.0f, 1.0f, sd::SitesIgChipSet(K));
+			ss::ui::DrawChipStack(C, 26475, X, 680.0f, 1.0f, 1.0f, sd::SitesIgChipSet(K));
+			ss::ui::DrawChipStack(C, 4475, X, 780.0f, 0.85f, 1.0f, sd::SitesIgChipSet(K) | 1 << 4);
+			ss::ui::DrawChipStack(C, 4475, X, 860.0f, 0.85f, 1.0f, sd::SitesIgChipSet(K) | 2 << 4);
+		}
+		WriteList("site_ignite_looks", Ls);
+	}
+	S.Life.SitePlay.Ig.L = sp::Looks{};
+}
+
+void SitesFlameNudge()
+{
+	// §2.6 F2 "The nudge": after 6 PM with no flame day yet on Ignite, the taskbar poker button's flame flickers (core's
+	// View.Ig.Nudge); before 6 PM, after the day's entry or with no Ignite account, it doesn't. No push, no Mail.
+	namespace sd = ss::ui::rlsites_detail;
+	namespace sp = ss::site::play;
+	SitesLaptop P("sites-nudge");
+	ss::Session& S = P.S;
+	const ss::ui::Rect Badge{26.0f, ss::ui::RiverLine::Height - 22.0f, 20.0f, 18.0f}; // round the button's mark's bottom right
+	const auto Lit = [&](const DrawList& L) { return SitesHexIn(L, 0xffc94a, Badge) > 0 && SitesHexIn(L, 0x120a18, Badge) > 0; };
+	P.At(SitesEvening - SitesDay); // Tuesday, 7:30 PM
+	DrawList L = P.Settled();
+	SitesExpect(!Lit(L) && !sd::SitesFlameNudge(&P.RL, S, S.WorldMinutes()), "nudge: no Ignite account, no flame on the button");
+	P.Join(SiteId::Ignite, 50000);
+	// A paid $1.10 Flip & Run on Tuesday evening lights Tuesday's flame (the hook RegisterEvent calls).
+	sp::OnPaidEntry(S.Life.SitePlay, S.Life, SiteId::Ignite, 10, 110, 0, "ignite.flip-go@" + std::to_string(static_cast<int>(S.WorldMinutes())), S.WorldMinutes());
+	const int Mail = static_cast<int>(S.Life.Inbox.size());
+	P.At(SitesEvening - 2.5 * 60.0); // Wednesday, 5 PM: no entry yet today, before 6 PM
+	L = P.Settled();
+	const sp::View Early = S.SitePlayView(SiteId::Ignite);
+	SitesExpect(Lit(L) == Early.Ig.Nudge && !Lit(L), "nudge: before 6 PM the button's flame waits");
+	P.At(SitesEvening); // Wednesday, 7:30 PM
+	const sp::View Evening = S.SitePlayView(SiteId::Ignite);
+	L = P.Settled();
+	const bool Up = Lit(L);
+	if (!Evening.Ig.On)
+	{
+		std::printf("  nudge: core-siteplay's view isn't live yet (Ig.On false); the flicker's checks wait for it\n");
+		SitesExpect(!Up, "nudge: no flame on the button while core's view says no");
+		return;
+	}
+	WriteList("poker_button_nudge", L);
+	std::printf("  nudge: Tuesday's flame lit (streak %d), Wednesday 5 PM %s, 7:30 PM %s; the button %s\n", Evening.Ig.Streak, Early.Ig.Nudge ? "nudges" : "quiet",
+		Evening.Ig.Nudge ? "nudges" : "quiet", Up ? "flickers" : "is still");
+	SitesExpect(Evening.Ig.Nudge && Up, "nudge: after 6 PM with no flame day yet, Ignite's flame on the poker button");
+	// It flickers: the flame's light moves on the real clock (two frames 70 ms apart differ inside the badge).
+	P.Now += 0.07;
+	const DrawList L2 = P.Frame();
+	bool Moved = false;
+	for (size_t K = 0; K < std::min(L.Vertices.size(), L2.Vertices.size()) && !Moved; ++K)
+	{
+		const ss::ui::Vertex& A = L.Vertices[K];
+		Moved = A.X >= Badge.X && A.X <= Badge.X + Badge.W && A.Y >= Badge.Y && A.Y <= Badge.Y + Badge.H && (A.Col.A != L2.Vertices[K].Col.A || A.Y != L2.Vertices[K].Y);
+	}
+	SitesExpect(Moved, "nudge: the flame flickers (its light and height move with the clock)");
+	// No push, no Mail: no letter since Tuesday's entry speaks of the flame.
+	bool Quiet = true;
+	for (size_t K = static_cast<size_t>(std::max(0, Mail)); K < S.Life.Inbox.size(); ++K)
+	{
+		std::string Text = S.Life.Inbox[K].Subject + " " + S.Life.Inbox[K].Body;
+		std::transform(Text.begin(), Text.end(), Text.begin(), [](unsigned char Ch) { return static_cast<char>(std::tolower(Ch)); });
+		Quiet = Quiet && Text.find("flame") == std::string::npos;
+	}
+	SitesExpect(Quiet, "nudge: no Mail about it");
+	// Under the Team RiverLine clause nothing nags (§9.1 #7): the flame is on ice, the button still.
+	S.DebugSponsor("offer riverline");
+	for (ss::sponsor::Contract& K : S.Life.Sponsors.Contracts)
+	{
+		K.T.Only = K.Brand == "riverline" ? std::string("riverline") : K.T.Only;
+	}
+	if (!S.Life.Sponsors.Contracts.empty() && S.SignDeal(S.Life.Sponsors.Contracts.back().Id).empty() &&
+		ss::sponsor::WouldStrike(S.Life.Sponsors, static_cast<int>(SiteId::Ignite), false, false))
+	{
+		L = P.Settled();
+		SitesExpect(!S.SitePlayView(SiteId::Ignite).Ig.Nudge && !Lit(L), "nudge: under the clause the flame is on ice and the button still");
+		S.Life.Sponsors.Contracts.clear();
+	}
+	else
+	{
+		std::printf("  nudge: no clause to sign here; its check is skipped\n");
+	}
+	// Wednesday's entry lights today's flame: the nudge goes.
+	sp::OnPaidEntry(S.Life.SitePlay, S.Life, SiteId::Ignite, 10, 110, 0, "ignite.flip-go@" + std::to_string(static_cast<int>(S.WorldMinutes())), S.WorldMinutes());
+	L = P.Settled();
+	SitesExpect(!S.SitePlayView(SiteId::Ignite).Ig.Nudge && !Lit(L), "nudge: the day's entry puts it out");
+	// G2 fix (G2_AUDIT L10): a book started without a paid entry (Sparks from a ticket's FUSE, or ss.Site.Play sparks) nudges at
+	// once, in the same world minute, not up to an hour late.
+	SitesLaptop Q("sites-nudge-ticket");
+	Q.At(SitesEvening);
+	Q.Join(SiteId::Ignite, 50000);
+	const DrawList Quiet0 = Q.Settled();
+	Q.S.Life.SitePlay.Ig.S.Balance = 120;
+	const DrawList Lit0 = Q.Settled();
+	SitesExpect(!Lit(Quiet0) && Q.S.SitePlayView(SiteId::Ignite).Ig.Nudge && Lit(Lit0), "nudge: a book started without a paid entry nudges at once, not a world hour late (L10)");
+}
+
 void SitesClause()
 {
 	// The clause (§5.7): under a deal that plays only on RiverLine, a rival's register button warns and needs a second press.
@@ -2520,6 +3282,47 @@ void SitesBench()
 	}
 }
 
+// ------------------------------------------------------------------ review-core-fuse: a FUSE table's prizes
+
+/**
+ * A x25 FUSE at $1.10 pays the session's 80/12/8 ($22.00 / $3.30 / $2.20, fuse::PrizeAt), not the engine's one place of the
+ * whole $27.50: Ignite's head and PAYOUTS read the split, and the head's prize is to the cent ($27.50, never "$28").
+ */
+void SitesFuseTable()
+{
+	SitesLaptop P("sites-fuse-x25");
+	ss::Session& S = P.S;
+	P.At(SitesEvening);
+	S.BankrollCents = 200000;
+	P.Join(SiteId::Ignite, 50000);
+	ss::fuse::DebugForce(S, 0, 25);
+	const std::string Why = S.LightFuse(0, false);
+	if (!Why.empty())
+	{
+		std::printf("  sites: no FUSE in this build (%s); the FUSE table's prize checks are skipped\n", Why.c_str());
+		return;
+	}
+	S.CurrentPace = ss::Pace::Full;
+	P.Now = Step(S, P.Now, 3.0);
+	const DrawList L = P.Settled();
+	SitesExpect(SitesAnyRunIn(L, "$1.10 \xC2\xB7 GTD $27.50 \xC2\xB7 3 entries", SitesPanelArea) && SitesAnyRunIn(L, "PAID \xC2\xB7 MIN $2.20", SitesPanelArea),
+		"fuse table: Ignite's head reads the prize to the cent and the session's three paid places (min $2.20)");
+	// G2 fix (G2_AUDIT L8): a FUSE has no ante, and the head prints one only while there is one: never "ante 0".
+	bool Ante = false;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		const ss::ui::Rect& A = SitesPanelArea;
+		Ante = Ante || (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.X >= A.X - 400.0f && Cmd.Text.BaselineY >= A.Y && Cmd.Text.BaselineY <= A.Y + A.H && (" " + Cmd.Text.Text).find(" ante ") != std::string::npos);
+	}
+	SitesExpect(!Ante && S.T && S.T->CurrentLevel().Ante == 0, "fuse table: the head's blinds carry no \"ante 0\" (a FUSE has none, L8)");
+	S.Tab = ss::RightTab::Payouts;
+	const DrawList Lp = P.Settled();
+	const ss::ui::Rect Body{1188.0f, 300.0f, 412.0f, 660.0f}; // the tab's body (SitesIgnitePanel's)
+	SitesExpect(SitesAnyRunIn(Lp, "3 PAID \xC2\xB7 MIN CASH $2.20", Body) && SitesAnyRunIn(Lp, "$22.00", Body) && SitesAnyRunIn(Lp, "$3.30", Body) && !SitesAnyRunIn(Lp, "$27.50", Body),
+		"fuse table: PAYOUTS pays $22.00 / $3.30 / $2.20 at a x25 $1.10, never the engine's one place of $27.50");
+	S.Tab = ss::RightTab::Chat;
+}
+
 // ------------------------------------------------------------------ the copy
 
 void SitesCopy()
@@ -2544,8 +3347,11 @@ void SitesCopy()
 			(Shout.count(T) ? Chat : Lines).push_back({"ignite", T});
 		}
 	}
+	// G2: the loops' slots (the Ouch line's article and percentage, the Fine print's figures, FUSE's prize); The Spark is
+	// Spark Jackpot's new name (core-sites-g2). G2 fix: {N}, the Sparks a cracker's look already owned becomes (ui-ignite's
+	// odds drawer, M2; the sample ui_seg_ignite lints it with).
 	const std::map<std::string, std::string> Vars = {{"Site", "RunItTwice"}, {"Date", "Oct 6"}, {"Series", "RunItTwice Open 2026"}, {"Backer", "Lantern Row Staking"}, {"Team", "Team RiverLine"},
-		{"Event", "Spark Jackpot"}, {"Headliner", "LilaVance"}};
+		{"Event", "The Spark"}, {"Headliner", "LilaVance"}, {"An", "an"}, {"Pct", "87"}, {"Promo", "$53.48"}, {"Rake", "$212.40"}, {"Prize", "$27.50"}, {"N", "500"}};
 	int Problems = copylint::Run("sites-ui", Lines, copylint::LetterBody, Vars) + copylint::Run("sites-shouts", Chat, copylint::TableTalk, Vars);
 	Lines.insert(Lines.end(), Chat.begin(), Chat.end());
 	// In-world copy never says "AI", "bot" or "autoplay" (U1), and no real or dead site's name.
@@ -2580,7 +3386,11 @@ void SegSites()
 	SitesMarks();
 	SitesMail();
 	SitesTables();
+	SitesFuseTable();
 	SitesRitTable();
+	SitesBetStacks();
+	SitesWorn();
+	SitesFlameNudge();
 	SitesRitIcm();
 	SitesRiverLineTable();
 	SitesClause();

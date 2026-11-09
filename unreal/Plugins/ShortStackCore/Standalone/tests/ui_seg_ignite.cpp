@@ -14,6 +14,7 @@
 #include "CopyLint.h"
 #include "Trademarks.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Fuse.h"
 #include "ShortStack/Game/Gear.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/SiteShow.h"
@@ -161,6 +162,13 @@ struct IgLaptop
 		RL.OpenPage(P, Now);
 	}
 };
+
+/** What the raised centre button reads: FUSE once core's View lights FUSE (G2), else FLIP (G1's state). */
+const char* IgCentre(IgLaptop& P)
+{
+	const ss::ui::rlignite_detail::IgniteLoops& L = ss::ui::rlignite_detail::IgniteLoopsOf(P.RL, P.Now);
+	return L.Live && L.FuseOn ? "FUSE" : "FLIP";
+}
 
 /** A text run that is exactly Text (baseline in [MinY, MaxY]): where it sits and how wide. */
 struct IgBox
@@ -397,7 +405,7 @@ void IgPages()
 	IgPage(L, "ignite_play_prime");
 	const ss::site::show::Mood Prime = ss::site::show::IgniteMood(S.WorldMinutes());
 	IgExpect(DrewRun(L, "Balance $262.40"), "ignite: the marquee's balance is the wallet (one run)");
-	IgExpect(DrewRun(L, "PLAY") && DrewRun(L, "REWARDS") && DrewRun(L, "FLIP") && DrewRun(L, "BOARDS") && DrewRun(L, "WALLET"), "ignite: the dock's five items (G1: the centre reads FLIP)");
+	IgExpect(DrewRun(L, "PLAY") && DrewRun(L, "REWARDS") && DrewRun(L, IgCentre(P)) && DrewRun(L, "BOARDS") && DrewRun(L, "WALLET"), "ignite: the dock's five items (the centre: FUSE once FUSE lights, else FLIP)");
 	IgExpect(!DrewRun(L, "Career") && !DrewRun(L, "Embercrest") && !DrewRun(L, "Promotions"), "ignite: none of RiverLine's nav");
 	// Listed: Ignite's own events, in shelf-then-tile order, each once.
 	const std::vector<std::string> Listed = P.RL.ListedEvents();
@@ -476,13 +484,26 @@ void IgDock()
 		const DrawList L = P.Settled();
 		IgExpect(P.RL.CurrentPage() == T.Want && IgNoComingSoon(L), (std::string("ignite: the dock and the marquee open their pages: ") + T.What).c_str());
 	}
-	// The raised centre button (G1: FLIP) opens PLAY on Flip & Run; its keep-out holds the pointer from the page under it.
+	// The raised centre button: FUSE once FUSE lights (G2: it opens the Fuse Booth), else FLIP (G1, and if S-J had failed:
+	// PLAY on Flip & Run); its keep-out holds the pointer from the page under it.
 	P.Open(Page::Cashier);
 	P.Settled();
+	const bool Fuse = std::string(IgCentre(P)) == "FUSE";
 	P.Click(800.0f, 850.0f);
 	DrawList L = P.Settled();
 	const ss::ui::rlignite_detail::IgniteUi& U = ss::ui::rlignite_detail::IgniteOf(&P.RL);
-	IgExpect(P.RL.CurrentPage() == Page::Lobby && U.Chip == 2, "ignite: FLIP opens PLAY on Flip & Run");
+	if (Fuse)
+	{
+		IgExpect(P.RL.CurrentPage() == Page::Fuse && DrewRun(L, "THE FUSE WALL"), "ignite: FUSE opens the Fuse Booth (G2)");
+		P.Open(Page::Lobby);
+		P.Settled();
+		ss::ui::rlignite_detail::IgniteOf(&P.RL).Chip = 2;
+		P.Settled();
+	}
+	else
+	{
+		IgExpect(P.RL.CurrentPage() == Page::Lobby && U.Chip == 2, "ignite: FLIP opens PLAY on Flip & Run");
+	}
 	bool AllFlips = !P.RL.ListedEvents().empty();
 	for (const std::string& Id : P.RL.ListedEvents())
 	{
@@ -882,7 +903,7 @@ void IgPreview()
 	WriteList("ignite_kast_studio", B);
 	IgExpect(P.H.Ignite() == Sounds, "preview: the stream preview plays no Ignite sound");
 	IgExpect(S.BankrollCents == Bank && ss::site::AccountOf(S.Life.Sites, SiteId::Ignite)->Cents == Wallet && S.TableCount() == 0, "preview: the stream preview grants and moves nothing");
-	IgExpect(DrewRun(B, "FLIP") && DrewRun(B, "PLAY"), "preview: the stream shows Ignite's own client");
+	IgExpect(DrewRun(B, IgCentre(P)) && DrewRun(B, "PLAY"), "preview: the stream shows Ignite's own client");
 	// A still: two frames 0.7 s apart draw the client the same (every pulse at rest).
 	size_t Same = 0;
 	size_t Total = 0;
@@ -911,7 +932,9 @@ void IgCopy()
 	{
 		(Shout.count(T) ? Chat : Lines).push_back({"ignite", T});
 	}
-	const std::map<std::string, std::string> Vars = {{"Team", "Team RiverLine"}, {"Date", "Dec 4"}, {"Event", "Spark Jackpot"}, {"Headliner", "LilaVance"}};
+	// The samples a slot is filled with (G2 adds the loops' figures: every one a fact where it's drawn).
+	const std::map<std::string, std::string> Vars = {{"Team", "Team RiverLine"}, {"Date", "Dec 4"}, {"Event", "The Spark"}, {"Headliner", "LilaVance"}, {"Pct", "87"},
+		{"Promo", "$4.20"}, {"Rake", "$9.60"}, {"Prize", "$22.00"}, {"Place", "3rd"}, {"An", "an"}, {"N", "500"}};
 	int Problems = copylint::Run("ignite-ui", Lines, copylint::LetterBody, Vars) + copylint::Run("ignite-shouts", Chat, copylint::TableTalk, Vars);
 	std::vector<std::string> All = ig::IgniteInventory();
 	for (const std::string& Label : ig::IgniteLabels())
@@ -2102,9 +2125,1497 @@ void IgStandingsRings()
 }
 } // namespace ignite_seg
 
+// ------------------------------------------------------------------ G2: the loops' pages and overlays (SPEC §2.4, §2.6, house law 3)
+
+namespace ig2
+{
+using namespace ignite_seg;
+namespace ig = ss::ui::rlignite_detail;
+
+/** A stand-in for core's View (until core-siteplay's lands, and for states a fresh career can't reach in a test): a measured
+ * hero's week, its figures from SPEC §2.6 (band A's wheel tables, the Wristband's tier costs, the Level curve). */
+ig::IgniteLoops Fake(bool Fuse)
+{
+	ig::IgniteLoops L;
+	L.Live = true;
+	L.Started = true;
+	L.FuseOn = Fuse;
+	L.Sparks = 12480;
+	L.Streak = 6;
+	L.Best = 12;
+	L.Matches = 1;
+	L.Mult = 1.20;
+	L.LitToday = true;
+	L.Week = {1, 1, 2, 1, 4, 0, 0};
+	const char* const Labels[3] = {"Play a Flip & Run", "Cash once", "Final table"};
+	const int64_t Rewards[3] = {60, 120, 200};
+	for (int I = 0; I < 3; ++I)
+	{
+		ig::IgniteDare& D = L.Dares[static_cast<size_t>(I)];
+		D.Id = I * 8 + 1;
+		D.Tier = I;
+		D.Label = Labels[I];
+		D.Needs = 1;
+		D.Prog = I == 0 ? 1 : 0;
+		D.Done = I == 0;
+		D.Sparks = Rewards[I];
+	}
+	L.DaresReset = 31.0 * IgDay + 6.0 * 60.0;
+	L.WeekClears = 2;
+	L.EntriesToday = 2;
+	L.RingsLit = 2;
+	L.SpinReady = true;
+	L.MoreForNext = 2;
+	const auto Ring = [](std::initializer_list<std::pair<int64_t, double>> Rows, const char* Ticket, ss::Chips Face, double P) {
+		std::vector<ig::IgniteWedge> W;
+		for (const auto& R : Rows)
+		{
+			ig::IgniteWedge Wd;
+			Wd.Sparks = R.first;
+			Wd.P = R.second;
+			Wd.Label = std::to_string(R.first) + " Sparks";
+			W.push_back(Wd);
+		}
+		ig::IgniteWedge T;
+		T.Label = Ticket;
+		T.TicketId = "ignite.flip-go";
+		T.FaceCents = Face;
+		T.P = P;
+		W.push_back(T);
+		return W;
+	};
+	L.Rings[0] = Ring({{20, 0.55}, {40, 0.30}, {80, 0.12}, {200, 0.029}}, "FUSE $1.10 ticket", 110, 0.001);
+	L.Rings[1] = Ring({{40, 0.50}, {80, 0.30}, {150, 0.15}, {400, 0.047}}, "FUSE $1.10 ticket", 110, 0.003);
+	L.Rings[2] = Ring({{80, 0.50}, {150, 0.30}, {300, 0.14}, {800, 0.05}}, "Flip & Run $1.10 ticket", 110, 0.008);
+	for (int I = 0; I < 3; ++I)
+	{
+		ss::site::play::Box B;
+		B.Id = "dares:" + std::to_string(30 + I) + ":0";
+		B.Tier = static_cast<int8_t>(I == 2 ? 1 : 0);
+		L.Crackers.push_back(B);
+	}
+	L.Tier = 7;
+	L.BandSparks = 5240;
+	L.Theme = "Kindling";
+	L.DaysLeft = 26;
+	int64_t Need = 0;
+	for (int T = 1; T <= 30; ++T)
+	{
+		Need += T <= 10 ? 700 : T <= 20 ? 2800 : 7000;
+		ig::IgniteTier& Tr = L.Tiers[static_cast<size_t>(T - 1)];
+		Tr.Tier = T;
+		Tr.Needs = Need;
+		Tr.Reached = Need <= L.BandSparks;
+		Tr.Claimed = Tr.Reached && T != 5;
+		Tr.Kind = T == 10 || T == 20 || T == 30 ? 1 : T == 5 || T == 15 || T == 25 ? 2 : T == 8 || T == 18 ? 3 : T == 12 || T == 22 || T == 27 || T == 29 ? 4 : 0;
+		Tr.Reward = T == 10 ? "Flip & Run $1.10 ticket" : T == 5 ? "Paper Cracker" : T == 8 ? "Spare Match" : T == 12 ? "Kindling card back" : T == 30 ? "The Spark $5.50 ticket" : "";
+	}
+	L.Level = 7;
+	L.Title = "Rookie";
+	L.LevelFrom = static_cast<int64_t>(100.0 * std::pow(6.0, 2.4));
+	L.LevelTo = static_cast<int64_t>(100.0 * std::pow(7.0, 2.4));
+	L.LevelSparks = L.LevelFrom + (L.LevelTo - L.LevelFrom) * 6 / 10;
+	const std::pair<const char*, int64_t> Tickets[6] = {{"Flip & Run $1.10 ticket", 7000}, {"FUSE $1.10 ticket", 7000}, {"Night Glow $2.20 ticket", 14000},
+		{"Plum Turbo $3.30 ticket", 21000}, {"The Spark $5.50 ticket", 35000}, {"Sunday Blaze $11 ticket", 70000}};
+	const ss::Chips Faces[6] = {110, 110, 220, 330, 550, 1100};
+	for (int I = 0; I < 6; ++I)
+	{
+		ig::IgnitePrize Pz;
+		Pz.Item = I;
+		Pz.Label = Tickets[I].first;
+		Pz.Sparks = Tickets[I].second;
+		Pz.TicketId = "ignite.t" + std::to_string(I);
+		Pz.FaceCents = Faces[I];
+		L.Prizes.push_back(Pz);
+	}
+	const char* const LookNames[4] = {"Ember Glow back", "Plum Velvet felt", "Candy chips", "Neon frame"};
+	(void)LookNames;
+	const std::pair<const char*, int> Looks[4] = {{"Sunburst back", 0}, {"Midnight felt", 1}, {"Jelly chips", 2}, {"Spark frame", 3}};
+	for (int I = 0; I < 4; ++I)
+	{
+		ig::IgnitePrize Pz;
+		Pz.Item = 6 + I;
+		Pz.Label = Looks[I].first;
+		Pz.Sparks = 10000 + 5000 * I;
+		Pz.LookSlot = Looks[I].second;
+		Pz.Look = 1;
+		Pz.Tab = 1;
+		Pz.Owned = I == 0;
+		L.Prizes.push_back(Pz);
+	}
+	{
+		ig::IgnitePrize Pz;
+		Pz.Item = 10;
+		Pz.Label = "Spare Match";
+		Pz.Sparks = 3000;
+		Pz.Tab = 2;
+		L.Prizes.push_back(Pz);
+	}
+	const char* const Slots[5][2] = {{"Sunset", "Sunburst"}, {"Plum Velvet", "Midnight"}, {"Candy", "Jelly"}, {"Bubble", "Spark"}, {"Confetti", "Fireworks"}};
+	for (int S = 0; S < 5; ++S)
+	{
+		for (int K = 0; K < 2; ++K)
+		{
+			ig::IgniteLook Lk;
+			Lk.Slot = S;
+			Lk.Look = K;
+			Lk.Name = Slots[S][K];
+			Lk.Owned = K == 0 || S == 0;
+			Lk.Worn = K == 0;
+			Lk.How = K == 1 ? (S == 1 ? "Wristband T22" : "Prize Counter 25,000") : "";
+			L.Locker.push_back(Lk);
+		}
+	}
+	for (int I = 0; I < 30; ++I)
+	{
+		ig::IgniteStickerRow St;
+		St.Id = I;
+		St.Name = I < 24 ? "First " + std::to_string(I + 1) : "";
+		St.Name = I == 0 ? "First cash" : I == 1 ? "Final table" : I == 2 ? "7-day flame" : St.Name;
+		St.How = I < 24 ? "Do it once" : "";
+		St.Got = I < 5;
+		St.Secret = I >= 24;
+		L.Book.push_back(St);
+	}
+	L.Fuse.N = {212, 14, 3};
+	L.Fuse.Played = 229;
+	L.Fuse.Won = 88;
+	L.Fuse.NetCents = 1640;
+	L.Fuse.BestM = 25;
+	L.Fuse.Last10 = {2, 3, 2, 5, 2, 25, 3, 2, 10, 2};
+	ss::site::play::WallRow W1;
+	W1.M = 25;
+	W1.Place = 1;
+	W1.Prize = 2200;
+	W1.Day = 29;
+	ss::site::play::WallRow W2;
+	W2.M = 10;
+	W2.Place = 2;
+	W2.Prize = 0;
+	W2.Day = 27;
+	L.Fuse.Wall = {W1, W2};
+	ss::site::play::HitRow H;
+	H.M = 25;
+	H.Winner = "LilaVance";
+	H.Prize = 2200;
+	H.Day = 28;
+	L.Fuse.Hits = {H};
+	L.FuseTicketIds = {"ignite.fuse0", "ignite.fuse1", "ignite.fuse2"};
+	L.Headliners = {"LilaVance", "KatOnTheRiver"};
+	ss::site::play::Beef B;
+	B.Name = "maxk0";
+	B.TheyKo = 3;
+	B.YouKo = 1;
+	L.Beefs = {B};
+	L.BeefName = "maxk0";
+	L.ScalpLife = 2;
+	L.ThemeNight = 2;
+	L.ThemeName = "FUSE NIGHT";
+	L.ThemeTwist = "FUSE pays 1.5 times the base Sparks";
+	L.Rake30 = 960;
+	L.Promo30 = 420;
+	L.Share = 0.4375;
+	L.Ceiling = 0.75;
+	L.Welcome = true;
+	L.WeekFace = 420;
+	L.WeekCap = 1200;
+	ig::IgniteHold Hd;
+	Hd.What = "Night Glow ticket";
+	Hd.Cents = 220;
+	Hd.Covered = 100;
+	Hd.RakeLeft = 240;
+	L.Holds = {Hd};
+	L.Months = {{"November", 420}};
+	return L;
+}
+
+int Runs(const DrawList& L)
+{
+	int N = 0;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		N += Cmd.Type == ss::ui::DrawCmd::Kind::Text ? 1 : 0;
+	}
+	return N;
+}
+
+/** A G2 page: checked as every page is (it draws, nothing "coming", no leak), and within SPEC §10's caps. */
+void Page2(const DrawList& L, const std::string& Name, size_t MaxVerts = 35000, int MaxRuns = 600)
+{
+	IgPage(L, Name);
+	std::printf("  %s: %zu vertices, %d runs\n", Name.c_str(), L.Vertices.size(), Runs(L));
+	IgExpect(L.Vertices.size() <= MaxVerts && Runs(L) <= MaxRuns, ("ignite g2: within SPEC §10's caps: " + Name).c_str());
+}
+
+/** Whether some run Text (baseline in [MinY, MaxY]) is centred within Tol of X (centred text, or left text whose middle is). */
+bool CentredAt(const DrawList& L, const std::string& Text, const TableMeasurer& M, float X, float Tol, float MinY, float MaxY)
+{
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == Text && Cmd.Text.BaselineY >= MinY && Cmd.Text.BaselineY <= MaxY)
+		{
+			const float W = M.Width(Text, Cmd.Text.Face, Cmd.Text.SizePx);
+			if (std::fabs(Cmd.Text.X - X) < Tol || std::fabs(Cmd.Text.X + W / 2.0f - X) < Tol)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+/** Clicks the run Text (its middle) if it's drawn; false when it isn't. */
+bool ClickRun(IgLaptop& P, const DrawList& L, const std::string& Text)
+{
+	const IgBox B = IgRun(L, Text, P.M);
+	if (!B.Found)
+	{
+		return false;
+	}
+	P.Click(B.X + B.W / 2.0f, B.Base - 6.0f);
+	return true;
+}
+
+void Pages()
+{
+	IgLaptop P("ignite-g2-pages");
+	ss::Session& S = P.S;
+	P.At(IgPrime);
+	S.BankrollCents = 150000;
+	P.Join(21240);
+	const ig::IgniteLoops F = Fake(true);
+	ig::IgniteFakeLoops(&P.RL, &F);
+	P.Open(Page::Lobby);
+	DrawList L = P.Settled();
+	Page2(L, "ignite_g2_play_prime", 34000, 400);
+	IgExpect(DrewRun(L, "12,480") && DrewRun(L, "FUSE") && !DrewRun(L, "FLIP"), "ignite g2: the marquee's Sparks; the raised button reads FUSE once FUSE lights");
+	IgExpect(DrewRun(L, "SHINE LIT \xC2\xB7 2 MORE FOR DAZZLE") && DrewRun(L, "6 DAYS") && DrewRun(L, "Play a Flip & Run") && DrewRun(L, "Final table"),
+		"ignite g2: the wheel's sign, the Flame and three Dare chips on PLAY");
+	IgExpect(DrewRun(L, "+120") && DrewRun(L, "LIGHT A FUSE") && DrewRun(L, "WRISTBAND") && DrewRun(L, "SPIN READY"), "ignite g2: cabinets earn Sparks (+120 at $1.10), the Fuse Booth, the dock's strips");
+	IgExpect(DrewRun(L, "2 more light DAZZLE"), "ignite g2: the near-goal line says 1 more or 2 more");
+	// The Sparks pill: "+610" floats up as Sparks land.
+	{
+		ig::IgniteLoops G = F;
+		G.Sparks += 610;
+		ig::IgniteFakeLoops(&P.RL, &G);
+		P.Now += 0.05;
+		P.Frame();
+		P.Now += 0.3;
+		const DrawList Lf = P.Frame();
+		IgExpect(DrewRun(Lf, "+610") && DrewRun(Lf, "13,090"), "ignite g2: \"+610\" floats up when Sparks land");
+		ig::IgniteFakeLoops(&P.RL, &F);
+	}
+	// The sheet: what an entry earns, WHO'S IN's tags.
+	{
+		const std::vector<std::string> Listed = P.RL.ListedEvents();
+		if (!Listed.empty())
+		{
+			ig::IgniteOpenSheet(P.RL, Listed.front(), P.Now);
+			const DrawList Ls = P.Settled();
+			Page2(Ls, "ignite_g2_sheet");
+			IgExpect(IgStartsWith(Ls, "EARNS "), "ignite g2: the sheet says what an entry earns in Sparks");
+			ig::IgniteOf(&P.RL).Sheet = false;
+		}
+	}
+	// REWARDS: Today, the Wristband, the Prize Counter.
+	P.Open(Page::Promotions);
+	L = P.Settled();
+	Page2(L, "ignite_g2_rewards_today");
+	IgExpect(DrewRun(L, "DARES") && DrewRun(L, "SPARK WHEEL") && DrewRun(L, "CRACKERS") && DrewRun(L, "THEME NIGHTS") && DrewRun(L, "Claim"), "ignite g2: REWARDS' Today (Dares, the wheel, crackers, the week's themes)");
+	IgExpect(ClickRun(P, L, "Wristband"), "ignite g2: REWARDS' sub-pills");
+	L = P.Settled();
+	Page2(L, "ignite_g2_rewards_band");
+	IgExpect(DrewRun(L, "WRISTBAND \xC2\xB7 KINDLING") && DrewRun(L, "CLAIM"), "ignite g2: the Wristband's 30 tiers, a reached one waiting on CLAIM");
+	ClickRun(P, L, "Prize Counter");
+	L = P.Settled();
+	Page2(L, "ignite_g2_rewards_prizes");
+	IgExpect(DrewRun(L, "Flip & Run $1.10 ticket") && DrewRun(L, "7,000") && DrewRun(L, "Buy"), "ignite g2: the Prize Counter's tickets and prices");
+	// FUSE's booth.
+	P.Open(Page::Fuse);
+	L = P.Settled();
+	Page2(L, "ignite_g2_fuse");
+	IgExpect(P.RL.CurrentPage() == Page::Fuse && DrewRun(L, "THE FUSE WALL") && DrewRun(L, "Light it \xC2\xB7 $1.10") && DrewRun(L, "LAST 10"), "ignite g2: FUSE's page (cabinets, LIGHT IT, the last ten, the Wall)");
+	// BOARDS' Fuse Wall, BUZZ's Big hits.
+	P.Open(Page::Leaderboards);
+	L = P.Settled();
+	IgExpect(ClickRun(P, L, "Fuse Wall"), "ignite g2: BOARDS has the Fuse Wall tab once FUSE lights");
+	L = P.Settled();
+	Page2(L, "ignite_g2_boards_wall");
+	P.Open(Page::News);
+	L = P.Settled();
+	Page2(L, "ignite_g2_buzz");
+	IgExpect(ClickRun(P, L, "Big hits"), "ignite g2: BUZZ's Big hits filter appears with the first hit");
+	L = P.Settled();
+	// The title's multiplier is the vector cross (the glyph rule, G2_AUDIT L9): "LilaVance hit ", the cross, "25 at your table".
+	IgExpect(DrewRun(L, "LilaVance hit ") && DrewRun(L, "25 at your table") && !DrewRun(L, "LilaVance hit x25 at your table") && DrewRun(L, "BIG HIT"),
+		"ignite g2: BUZZ's Big hits (the true results of FUSEs you sat in), the multiplier crossed");
+	// The Player Card: the Locker, the Sticker Book, Rivals.
+	P.Open(Page::Profile);
+	L = P.Settled();
+	IgExpect(DrewRun(L, "LEVEL 7 \xC2\xB7 ROOKIE") && DrewRun(L, "LOCKER") && DrewRun(L, "STICKER BOOK") && DrewRun(L, "RIVALS"), "ignite g2: the Player Card's level and tabs");
+	const char* const Tabs[3] = {"LOCKER", "STICKER BOOK", "RIVALS"};
+	const char* const Names[3] = {"ignite_g2_card_locker", "ignite_g2_card_stickers", "ignite_g2_card_rivals"};
+	for (int I = 0; I < 3; ++I)
+	{
+		ClickRun(P, L, Tabs[I]);
+		L = P.Settled();
+		Page2(L, Names[I]);
+	}
+	IgExpect(DrewRun(L, "maxk0") && DrewRun(L, "BEEF"), "ignite g2: Rivals shows your Beef");
+	// Afterburner Hours with the loops on.
+	P.At(IgLate);
+	P.Open(Page::Lobby);
+	L = P.Settled();
+	Page2(L, "ignite_g2_play_afterburner", 34000, 400);
+	// Under the clause: the Today strip is the deal's line, the Flame wears frost.
+	{
+		ig::IgniteLoops G = F;
+		G.OnIce = true;
+		ig::IgniteFakeLoops(&P.RL, &G);
+		IgSignClause(S);
+		ig::IgniteOf(&P.RL).Rewards = 0;
+		P.Open(Page::Promotions);
+		P.Settled();
+		P.Now += 12.0; // the deal's badge toast (RiverLine's own, over every app) has gone
+		L = P.Settled();
+		Page2(L, "ignite_g2_rewards_clause");
+		IgExpect(DrewRun(L, ig::IgniteOnIce) && DrewRun(L, ig::IgniteDaresGrey), "ignite g2: under the clause the Flame waits on ice and the Dares grey");
+	}
+	// The stand-in dropped, the pages read core's own View again (G1's states while it isn't on).
+	ig::IgniteFakeLoops(&P.RL, nullptr);
+	P.Open(Page::Lobby);
+	L = P.Settled();
+	const ig::IgniteLoops Core = ig::IgniteLoopsFrom(S, S.WorldMinutes());
+	IgExpect(!DrewRun(L, "12,480") && DrewRun(L, Core.Live && Core.FuseOn ? "FUSE" : "FLIP") && (!Core.Live || DrewRun(L, ss::Grouped(Core.Sparks))),
+		"ignite g2: without the stand-in the pages read core's View (G1's states while it's off)");
+}
+
+/** House law 3 for each G2 overlay: a one-frame click (pressed and released in one 30 Hz frame) reaches nothing under it. */
+void Overlays()
+{
+	IgLaptop P("ignite-g2-overlays");
+	ss::Session& S = P.S;
+	P.At(IgPrime);
+	S.BankrollCents = 150000;
+	P.Join(21240);
+	ig::IgniteLoops F = Fake(true);
+	F.SpunRing = 2;
+	F.SpunWedge = 3;
+	ig::IgniteFakeLoops(&P.RL, &F);
+	ig::IgniteUi& U = ig::IgniteOf(&P.RL);
+	// The dock's BOARDS sits outside every overlay's own rect: a one-frame click there is a scrim click.
+	const float Bx = 974.0f;
+	const float By = 916.0f;
+	P.Open(Page::Promotions);
+	P.Settled();
+	// The wheel's spin lands on core's wedge (SpunWedge 3 of SHINE: 400 Sparks) under the flapper.
+	ig::IgniteStartSpin(U, F, P.Now);
+	P.Frame();
+	P.OneFrame(800.0f, 300.0f); // a click inside while it turns skips to the landing
+	IgExpect(U.Spin && P.Now - U.SpinAt >= 3.2, "ignite g2: a click on the spinning wheel skips to its landing");
+	DrawList L = P.Frame();
+	IgExpect(CentredAt(L, "400", P.M, 800.0f, 4.0f, 100.0f, 320.0f), "ignite g2: the wheel lands on core's wedge (its label under the flapper)");
+	IgExpect(DrewRun(L, "+400 SPARKS"), "ignite g2: the spin's prize card says what core drew");
+	WriteList("ignite_g2_spin", L);
+	P.OneFrame(Bx, By);
+	P.Settled();
+	IgExpect(!U.Spin && P.RL.CurrentPage() == Page::Promotions, "ignite g2: the spin's scrim closes it and the click reaches nothing (BOARDS stays shut)");
+	// A cracker before its pull: the scrim closes it; PULL goes to core (which refuses until core-siteplay lands: its reason shows).
+	U.Crack = true;
+	U.CrackId = F.Crackers.front().Id;
+	U.CrackAt = -100.0;
+	L = P.Frame();
+	WriteList("ignite_g2_cracker", L);
+	P.OneFrame(Bx, By);
+	P.Settled();
+	IgExpect(!U.Crack && P.RL.CurrentPage() == Page::Promotions, "ignite g2: a cracker's scrim closes it, the click reaches nothing");
+	U.Crack = true;
+	U.CrackId = F.Crackers.front().Id;
+	L = P.Frame();
+	const std::string Why = S.OpenCracker(U.CrackId);
+	ClickRun(P, L, "Pull");
+	if (!Why.empty())
+	{
+		IgExpect(U.CrackAt < -50.0 && U.Note == Why, "ignite g2: PULL asks core; a refusal shows its reason and nothing animates");
+	}
+	U.Crack = false;
+	// The Prize Counter: BUY opens the confirm card; a one-frame click on the card spends nothing and reaches nothing under it.
+	U.Rewards = 2;
+	L = P.Settled();
+	IgExpect(ClickRun(P, L, "Buy") && U.BuyItem >= 0, "ignite g2: BUY opens the confirm card (it spends nothing)");
+	const int64_t Sparks = ig::IgniteLoopsOf(P.RL, P.Now).Sparks;
+	P.OneFrame(700.0f, 420.0f);
+	P.Settled();
+	IgExpect(U.BuyItem >= 0 && ig::IgniteLoopsOf(P.RL, P.Now).Sparks == Sparks, "ignite g2: a one-frame click on the confirm card spends nothing");
+	L = P.Frame();
+	WriteList("ignite_g2_buy", L);
+	P.OneFrame(Bx, By);
+	P.Settled();
+	IgExpect(U.BuyItem < 0 && P.RL.CurrentPage() == Page::Promotions, "ignite g2: the confirm card's scrim cancels it, the click reaches nothing");
+	// The drawers: the wheel's odds and the Fine print.
+	U.Rewards = 0;
+	L = P.Settled();
+	IgExpect(ClickRun(P, L, "FINE PRINT") && U.Drawer == 3, "ignite g2: FINE PRINT opens its drawer");
+	L = P.Settled();
+	Page2(L, "ignite_g2_fineprint");
+	IgExpect(IgStartsWith(L, "Ignite gave back $4.20 of your $9.60 rake") && (IgStartsWith(L, "last 30 days (44%).") || IgStartsWith(L, "30 days (44%).")) && DrewRun(L, "Night Glow ticket"),
+		"ignite g2: the Fine print shows the ring's own figure and the Guest List");
+	P.OneFrame(Bx, By);
+	P.Settled();
+	IgExpect(U.Drawer == 0 && P.RL.CurrentPage() == Page::Promotions, "ignite g2: a drawer's scrim closes it, the click reaches nothing");
+	L = P.Settled();
+	ClickRun(P, L, "ODDS");
+	L = P.Settled();
+	IgExpect(U.Drawer == 1 && DrewRun(L, "THE WHEEL'S ODDS") && DrewRun(L, "55.0%"), "ignite g2: the wheel's odds, one click away");
+	WriteList("ignite_g2_wheelodds", L);
+	P.OneFrame(Bx, By);
+	P.Settled();
+	IgExpect(U.Drawer == 0 && P.RL.CurrentPage() == Page::Promotions, "ignite g2: the odds drawer's scrim swallows the click");
+	// SPIN goes to core: a refusal shows its reason and starts no spin.
+	L = P.Settled();
+	const std::string SpinWhy = S.SpinWheel();
+	ClickRun(P, L, "Spin \xC2\xB7 SHINE");
+	if (!SpinWhy.empty())
+	{
+		IgExpect(!U.Spin && U.Note == SpinWhy, "ignite g2: SPIN asks core; a refusal starts no spin");
+	}
+	// The level-up banner holds its rect: a one-frame click over the wheel under it reaches nothing.
+	P.Open(Page::Lobby);
+	P.Settled();
+	ig::IgniteLoops G = F;
+	G.Level = 8;
+	G.Title = "Rookie";
+	ig::IgniteFakeLoops(&P.RL, &G);
+	P.Frame();
+	IgExpect(ig::IgniteBannerUp(U, P.Now) && U.LevelShown == 8, "ignite g2: a level-up drops the banner");
+	L = P.Frame();
+	WriteList("ignite_g2_levelup", L);
+	IgExpect(DrewRun(L, "LEVEL 8"), "ignite g2: the banner says the level");
+	P.OneFrame(790.0f, 200.0f);
+	P.Frame();
+	IgExpect(P.RL.CurrentPage() == Page::Lobby, "ignite g2: the banner holds the pointer over its rect (the wheel under it stays shut)");
+	P.Now += 4.0;
+	P.Frame();
+	IgExpect(!ig::IgniteBannerUp(U, P.Now), "ignite g2: the banner dismisses itself at 3.5 s");
+	// The FUSE reveal is modal over the whole client: a one-frame click is its own (a skip), never the page's.
+	ss::net::EventInstance E;
+	if (IgOpenEvent(S, E, 2200))
+	{
+		S.RegisterEvent(ss::net::Site(SiteId::Ignite).Listing(E, nullptr, S.Unlocks()));
+		S.ShowLobby();
+		P.Open(Page::Lobby);
+		P.Settled();
+		ig::IgniteStartReveal(U, S, 0, P.Now);
+		P.Frame();
+		P.Now += 0.7;
+		L = P.Frame();
+		WriteList("ignite_g2_reveal", L);
+		const std::string Sel = P.RL.SelectedEvent();
+		P.OneFrame(Bx, By);
+		P.Frame();
+		IgExpect(P.RL.CurrentPage() == Page::Lobby && P.RL.SelectedEvent() == Sel, "ignite g2: the reveal swallows a one-frame click (nothing under it fires)");
+		IgExpect(ig::IgniteRevealTimesFor(2).BoomEnd == 1.5 && ig::IgniteRevealTimesFor(10).BoomEnd == 3.4 && ig::IgniteRevealTimesFor(25).BoomEnd == 6.3,
+			"ignite g2: the reveal's length by multiplier (1.5 s, 3.4 s, 6.3 s)");
+		P.Now += 8.0;
+		P.Frame();
+		P.Frame();
+		IgExpect(U.RevealEvent.empty(), "ignite g2: the reveal ends itself and seats you");
+	}
+	else
+	{
+		std::printf("  ignite g2: no open event at this hour; the reveal's checks are skipped\n");
+	}
+}
+
+/** The table's people (F8, F9): a Headliner's spotlight and star, your Beef's pin, PAYBACK and the Ouch bubble slammed once. */
+void TablePeople()
+{
+	IgLaptop P("ignite-g2-table");
+	ss::Session& S = P.S;
+	P.At(IgPrime - 60.0);
+	S.BankrollCents = 200000;
+	P.Join(50000);
+	ss::net::EventInstance E;
+	if (!IgOpenEvent(S, E, 2200))
+	{
+		std::printf("  ignite g2: no open event at this hour; the table's people checks are skipped\n");
+		return;
+	}
+	S.RegisterEvent(ss::net::Site(SiteId::Ignite).Listing(E, nullptr, S.Unlocks()));
+	S.CurrentPace = ss::Pace::Full;
+	P.Now = Step(S, P.Now, 3.0);
+	std::vector<std::string> Names;
+	for (const ss::SeatVis& Seat : S.Seats)
+	{
+		if (Seat.Present && !Seat.IsHero)
+		{
+			Names.push_back(Seat.Name);
+		}
+	}
+	if (Names.size() < 2)
+	{
+		std::printf("  ignite g2: fewer than two others seated; the table's people checks are skipped\n");
+		return;
+	}
+	ig::IgniteLoops F = Fake(true);
+	F.Headliners = {Names[0]};
+	F.BeefName = Names[1];
+	F.Beefs.front().Name = Names[1];
+	ig::IgniteMoment Pay;
+	Pay.Kind = 0;
+	Pay.Name = Names[1];
+	Pay.HandId = "test-hand-1";
+	Pay.Sparks = 500;
+	Pay.World = S.WorldMinutes();
+	ig::IgniteMoment Ouch;
+	Ouch.Kind = 2;
+	Ouch.HandId = "test-hand-2";
+	Ouch.Sparks = 300;
+	Ouch.Equity = 0.87;
+	Ouch.World = S.WorldMinutes();
+	F.Moments = {Pay, Ouch};
+	ig::IgniteFakeLoops(&P.RL, &F);
+	const int Pops = P.H.Count(ss::SoundId::IgPop);
+	P.Frame();
+	P.Now += 0.4;
+	const DrawList L = P.Frame();
+	WriteList("ignite_g2_table_people", L);
+	IgExpect(DrewRun(L, "BEEF") && DrewRun(L, "PAYBACK") && DrewRun(L, "Ouch. That was an 87% favourite. Have some Sparks."), "ignite g2: the table's BEEF pin, PAYBACK and the Ouch bubble");
+	IgExpect(P.H.Count(ss::SoundId::IgPop) >= Pops + 1, "ignite g2: a slam pops (IgPop), once a moment");
+	std::printf("  ignite g2 table with its people (a spotlight, pins, PAYBACK, Ouch): %zu vertices\n", L.Vertices.size());
+	IgExpect(L.Vertices.size() <= 22000, "ignite g2: the table with its people within 22k vertices");
+	P.Now += 3.0;
+	const DrawList L2 = P.Frame();
+	IgExpect(!DrewRun(L2, "PAYBACK"), "ignite g2: a slam is gone after its moment");
+}
+
+/** W5 for the reveal's reel: it lands on the multiplier core drew, and nothing bigger passes in its slow last stretch. */
+void Reel()
+{
+	bool Lands = true;
+	bool Honest = true;
+	for (int Tier = 0; Tier < 3; ++Tier)
+	{
+		for (const ss::fuse::Row& Row : ss::fuse::Table())
+		{
+			const int M = std::max(2, ss::fuse::MOf(Row, Tier));
+			const int Final = ig::IgniteReelFinal(M, Tier);
+			Lands = Lands && ig::IgniteReelAt(M, Tier, Final) == M;
+			for (int I = Final - 6; I < Final; ++I)
+			{
+				Honest = Honest && ig::IgniteReelAt(M, Tier, I) <= M;
+			}
+		}
+	}
+	IgExpect(Lands, "ignite g2: the reel lands on core's multiplier at every tier");
+	IgExpect(Honest, "ignite g2: the reel never slows past a prize you didn't win (W5: its last six symbols are smaller)");
+}
+
+/** The stream preview with the loops on: a still, no sound, nothing claimed. */
+void Preview()
+{
+	IgLaptop P("ignite-g2-preview");
+	ss::Session& S = P.S;
+	P.At(IgPrime);
+	S.BankrollCents = 150000;
+	P.Join(21240);
+	const ig::IgniteLoops F = Fake(true);
+	ig::IgniteFakeLoops(&P.RL, &F);
+	P.Open(Page::Promotions);
+	P.Settled();
+	ig::IgniteUi& U = ig::IgniteOf(&P.RL);
+	const int Sounds = P.H.Ignite();
+	ig::Access::SetPreviewing(P.RL, true);
+	const DrawList A = P.Frame();
+	P.Now += 0.7;
+	const DrawList B = P.Frame();
+	ig::Access::SetPreviewing(P.RL, false);
+	IgExpect(P.H.Ignite() == Sounds && !U.Spin && !U.Crack && U.Drawer == 0, "ignite g2: previewing plays nothing and opens no overlay");
+	// A still: the client's words (the laptop's taskbar ticker under it scrolls on its own) are the same 0.7 s apart.
+	size_t Same = 0;
+	size_t Total = 0;
+	for (const ss::ui::DrawCmd& Cmd : B.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.BaselineY < 960.0f)
+		{
+			++Total;
+			Same += DrewRun(A, Cmd.Text.Text) ? 1 : 0;
+		}
+	}
+	IgExpect(Total > 40 && Same == Total, "ignite g2: the preview's REWARDS holds still between frames");
+}
+
+/** The pages on core's own View (no stand-in): a paid entry lights the loops, SPIN and PULL go to core and the overlays
+ * land where core drew, LIGHT IT's reveal shows core's multiplier and the 3-max table's marquee its exact pool. */
+void Live()
+{
+	IgLaptop P("ignite-g2-live");
+	ss::Session& S = P.S;
+	P.At(IgPrime - 60.0);
+	S.BankrollCents = 200000;
+	P.Join(50000);
+	P.Open(Page::Lobby);
+	P.Settled();
+	const ig::IgniteLoops L0 = ig::IgniteLoopsFrom(S, S.WorldMinutes());
+	if (!L0.Live)
+	{
+		std::printf("  ignite g2: core's View isn't on in this build; the live checks are skipped\n");
+		return;
+	}
+	ig::IgniteUi& U = ig::IgniteOf(&P.RL);
+	// A paid $1.10 entry.
+	ss::net::EventInstance E;
+	bool Paid = false;
+	const ss::net::Network& Net = ss::net::Site(SiteId::Ignite);
+	for (const ss::net::EventInstance& Ei : Net.Window(S.WorldMinutes() - 120.0, S.WorldMinutes() + 60.0))
+	{
+		const ss::net::LiveState Ls = Net.Live(Ei, S.WorldMinutes());
+		const ss::LobbyEvent Ev = Net.Listing(Ei, nullptr, S.Unlocks());
+		if (!Paid && (Ls.St == ss::net::Status::LateReg || Ls.St == ss::net::Status::Registering) && Ev.Joinable && Ev.BuyInCents == 110)
+		{
+			Paid = S.RegisterEvent(Ev).empty();
+			E = Ei;
+		}
+	}
+	if (!Paid)
+	{
+		std::printf("  ignite g2: no $1.10 entry open at this hour; the live checks are skipped\n");
+		return;
+	}
+	S.ShowLobby();
+	P.Open(Page::Lobby);
+	P.Frame();
+	P.Now += 0.3;
+	DrawList L = P.Frame();
+	const ig::IgniteLoops L1 = ig::IgniteLoopsFrom(S, S.WorldMinutes());
+	std::printf("  ignite g2 live: a paid $1.10 entry: %lld Sparks, %d rings lit, level %d, %zu crackers, spin %s\n", static_cast<long long>(L1.Sparks), L1.RingsLit, L1.Level,
+		L1.Crackers.size(), L1.SpinReady ? "ready" : "not ready");
+	IgExpect(L1.Sparks > L0.Sparks && DrewRun(L, ss::Grouped(L1.Sparks)), "ignite g2 live: a paid entry's Sparks land in the marquee's pill (core's figure)");
+	IgExpect(DrewRun(L, "+" + ss::Grouped(L1.Sparks - L0.Sparks)), "ignite g2 live: \"+N\" floats up as they land");
+	WriteList("ignite_g2_live_play", L);
+	// SPIN goes to core; the wheel lands on core's wedge.
+	U.Rewards = 0;
+	P.Open(Page::Promotions);
+	L = P.Settled();
+	if (L1.SpinReady && ClickRun(P, L, std::string("Spin \xC2\xB7 ") + ss::ui::igniteart::IgniteRingName(L1.RingsLit)))
+	{
+		const ig::IgniteLoops L2 = ig::IgniteLoopsFrom(S, S.WorldMinutes());
+		IgExpect(U.Spin && L2.Spun && L2.SpunWedge >= 0, "ignite g2 live: SPIN asks core, which draws; the spin starts on its draw");
+		P.Now += 3.5;
+		L = P.Frame();
+		WriteList("ignite_g2_live_spin", L);
+		if (L2.SpunRing >= 1 && L2.SpunWedge >= 0 && L2.SpunWedge < static_cast<int>(L2.Rings[static_cast<size_t>(L2.SpunRing - 1)].size()))
+		{
+			const ig::IgniteWedge& W = L2.Rings[static_cast<size_t>(L2.SpunRing - 1)][static_cast<size_t>(L2.SpunWedge)];
+			const std::string Lab = W.TicketId.empty() ? ss::Grouped(W.Sparks) : std::string("TICKET");
+			IgExpect(CentredAt(L, Lab, P.M, 800.0f, 4.0f, 100.0f, 320.0f), "ignite g2 live: the wheel stops on core's wedge, under the flapper");
+		}
+		P.OneFrame(974.0f, 916.0f);
+		P.Settled();
+		L = P.Settled();
+		const std::string Again = S.SpinWheel();
+		IgExpect(!U.Spin && !Again.empty() && DrewRun(L, "Spun today"), "ignite g2 live: a second spin in a day is refused in core (the button says so)");
+	}
+	// A cracker (the first entry is a level-up, F6): PULL asks core; the prize card says what core opened.
+	const ig::IgniteLoops L3 = ig::IgniteLoopsFrom(S, S.WorldMinutes());
+	if (!L3.Crackers.empty())
+	{
+		L = P.Settled();
+		ClickRun(P, L, "OPEN");
+		L = P.Settled();
+		IgExpect(U.Crack && ClickRun(P, L, "Pull"), "ignite g2 live: OPEN puts the cracker up, PULL is there");
+		const ig::IgniteLoops L4 = ig::IgniteLoopsFrom(S, S.WorldMinutes());
+		IgExpect(L4.Crackers.size() + 1 == L3.Crackers.size() && !U.Cracked.empty(), "ignite g2 live: PULL opens it in core (the shelf is one shorter)");
+		P.Now += 1.0;
+		L = P.Frame();
+		WriteList("ignite_g2_live_cracker", L);
+		IgExpect(!U.Cracked.empty() && DrewRun(L, U.Cracked.front().Prize), "ignite g2 live: the prize card says what core opened");
+		U.Crack = false;
+	}
+	// LIGHT IT: the reveal plays core's multiplier, then the 3-max table's marquee reads its exact pool.
+	if (L3.FuseOn)
+	{
+		P.Open(Page::Fuse);
+		L = P.Settled();
+		const int Tables = S.TableCount();
+		IgExpect(ClickRun(P, L, "Light it \xC2\xB7 $1.10"), "ignite g2 live: LIGHT IT on the $1.10 cabinet");
+		if (S.TableCount() > Tables && !U.RevealEvent.empty())
+		{
+			const ss::fuse::Reveal Rv = S.FuseReveal(U.RevealTable);
+			IgExpect(ss::fuse::IsFuse(U.RevealEvent) && Rv.M >= 2, "ignite g2 live: the reveal is core's FUSE (its table, its multiplier)");
+			P.Now += ig::IgniteRevealTimesFor(Rv.M).ReelEnd + 0.5;
+			L = P.Frame();
+			WriteList("ignite_g2_live_reveal", L);
+			IgExpect(DrewRun(L, ss::Grouped(Rv.M)), "ignite g2 live: the reel lands on core's multiplier");
+			P.Now += 3.0;
+			P.Frame();
+			L = P.Frame();
+			IgExpect(U.RevealEvent.empty() && S.CurrentScreen == ss::Screen::Table, "ignite g2 live: the table opens itself after the boom");
+			L = P.Frame();
+			WriteList("ignite_g2_live_fusetable", L);
+			IgExpect(DrewRun(L, "PRIZE") && DrewRun(L, ss::Money(static_cast<ss::Chips>(Rv.M) * 110)), "ignite g2 live: the FUSE table's marquee reads exactly M x the buy-in");
+			IgPage(L, "ignite_g2_live_fusetable");
+			std::printf("  ignite g2 live: the FUSE table (marquee, fuse clock): %zu vertices, %d runs (the table's budget is 22k)\n", L.Vertices.size(), Runs(L));
+			IgExpect(L.Vertices.size() <= 22000, "ignite g2 live: the FUSE table within the table's 22k vertices");
+			// A level later the fuse is out: BLINDS UP! slams once on the new level.
+			if (S.T)
+			{
+				U.BlindsLevel = S.T->LevelIndex - 1;
+				U.BlindsTable = S.T->Spec.Id;
+				P.Frame();
+				P.Now += 0.3;
+				L = P.Frame();
+				IgExpect(IgStartsWith(L, "BLINDS UP!"), "ignite g2 live: BLINDS UP! slams on a new level");
+			}
+		}
+		else
+		{
+			std::printf("  ignite g2 live: LIGHT IT said \"%s\"\n", U.Note.c_str());
+		}
+	}
+}
+
+/** How many text runs are exactly Text. */
+int CountRuns(const DrawList& L, const std::string& Text)
+{
+	int N = 0;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		N += Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == Text ? 1 : 0;
+	}
+	return N;
+}
+
+/**
+ * The G2 review's checks (each fails on the hand-in): a Wristband tier with nothing on it never wears CLAIM (core refuses that
+ * claim and never marks it claimed, so the Today preview mustn't stick at T1); a Dare met but short of today's paid entries
+ * says so; a ticket entry's sheet promises no Sparks; "Your run" shows a rewards ticker only for the entry it closed; the
+ * Spare Match at its cap isn't "in your Locker".
+ */
+void Review()
+{
+	// The Wristband on core's own book: base Sparks to T8 (T5's cracker and T8's Spare Match wait; T1-T4, T6, T7 hold nothing).
+	{
+		IgLaptop P("ignite-g2-review-band");
+		ss::Session& S = P.S;
+		P.At(IgPrime - 60.0);
+		S.BankrollCents = 200000;
+		P.Join(50000);
+		ss::net::EventInstance E;
+		if (ig::IgniteLoopsFrom(S, S.WorldMinutes()).Live && IgOpenEvent(S, E, 2200))
+		{
+			ss::site::play::OnPaidEntry(S.Life.SitePlay, S.Life, SiteId::Ignite, 590, 5500, 0, E.Id, S.WorldMinutes());
+			const ig::IgniteLoops Lv = ig::IgniteLoopsFrom(S, S.WorldMinutes());
+			// Counted here from core's own fields (not through the pages' helper): reached, unclaimed, with something on it.
+			int Waiting = 0;
+			int Reached = 0;
+			for (const ig::IgniteTier& T : Lv.Tiers)
+			{
+				Waiting += T.Reached && !T.Claimed && T.Kind != 0 ? 1 : 0;
+				Reached += T.Reached ? 1 : 0;
+			}
+			std::printf("  ignite g2 review: core's book at T%d (%lld base Sparks this month), %d tiers reached, %d wait on a claim\n", Lv.Tier, static_cast<long long>(Lv.BandSparks), Reached,
+				Waiting);
+			IgExpect(Lv.Tier >= 5 && Waiting > 0 && Waiting < Reached && !Lv.Tiers[0].Claimed && !S.ClaimTier(1).empty(),
+				"ignite g2 review: core refuses a claim on a tier with nothing and never marks it claimed");
+			P.Open(Page::Promotions);
+			P.Settled(); // the laptop's first frame starts its side state afresh: the sub-page is picked after it
+			ig::IgniteOf(&P.RL).Rewards = 1;
+			DrawList L = P.Settled();
+			IgExpect(DrewRun(L, "WRISTBAND \xC2\xB7 KINDLING") || IgStartsWith(L, "WRISTBAND \xC2\xB7 "), "ignite g2 review: REWARDS' Wristband sub-page is up");
+			IgExpect(CountRuns(L, "CLAIM") == Waiting, "ignite g2 review: REWARDS' Wristband: CLAIM only on tiers with something on them");
+			WriteList("ignite_g2_live_band", L);
+			ig::IgniteOf(&P.RL).Rewards = 0;
+			L = P.Settled();
+			IgExpect(CountRuns(L, "CLAIM") == Waiting, "ignite g2 review: REWARDS' Today: the Wristband preview starts at the first tier with a claim (not stuck at T1)");
+			WriteList("ignite_g2_live_rewards", L);
+			// Core's near-goal words end a sentence; the wheel's line puts ", or spin now" before the full stop.
+			bool Stop = false;
+			bool Spin = false;
+			for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+			{
+				if (Cmd.Type == ss::ui::DrawCmd::Kind::Text)
+				{
+					Stop = Stop || Cmd.Text.Text.find("., or spin now") != std::string::npos;
+					Spin = Spin || Cmd.Text.Text.find(", or spin now") != std::string::npos;
+				}
+			}
+			IgExpect(Spin && !Stop, "ignite g2 review: the wheel's line reads \"1 more entry lights SHINE, or spin now\" (no stop mid-sentence)");
+		}
+		else
+		{
+			std::printf("  ignite g2 review: core's View isn't on or no event is open; the Wristband's live checks are skipped\n");
+		}
+	}
+	IgLaptop P("ignite-g2-review");
+	ss::Session& S = P.S;
+	P.At(IgPrime - 60.0);
+	S.BankrollCents = 200000;
+	P.Join(50000);
+	ig::IgniteUi& U = ig::IgniteOf(&P.RL);
+	// A Dare whose own target is met waits on today's paid entries (core's floor: 2 for a Medium): it says how many more.
+	{
+		ig::IgniteLoops F = Fake(true);
+		F.EntriesToday = 1;
+		F.RingsLit = 1;
+		F.Dares[1].Prog = 1;
+		F.Dares[1].Needs = 1;
+		F.Dares[1].Entries = 2;
+		F.Dares[1].Done = false;
+		ig::IgniteFakeLoops(&P.RL, &F);
+		P.Open(Page::Lobby);
+		DrawList L = P.Settled();
+		IgExpect(DrewRun(L, "MEDIUM DARE \xC2\xB7 1 MORE ENTRY"), "ignite g2 review: the Today strip's Dare chip says a met Dare needs 1 more paid entry");
+		U.Rewards = 0;
+		P.Open(Page::Promotions);
+		L = P.Settled();
+		IgExpect(DrewRun(L, "1 MORE ENTRY") && CountRuns(L, "Claim") == 1, "ignite g2 review: REWARDS' Dare card says 1 more entry where its CLAIM would be (no Claim)");
+		WriteList("ignite_g2_dare_short", L);
+	}
+	// The Spare Match at its cap of two.
+	{
+		ig::IgniteLoops F = Fake(true);
+		F.Prizes.back().Owned = true;
+		ig::IgniteFakeLoops(&P.RL, &F);
+		U.Rewards = 2;
+		U.PrizeTab = 2;
+		P.Open(Page::Promotions);
+		const DrawList L = P.Settled();
+		IgExpect(DrewRun(L, "2 held \xC2\xB7 the most") && !DrewRun(L, "In your Locker"), "ignite g2 review: the Spare Match at two held isn't \"in your Locker\"");
+		U.PrizeTab = 0;
+	}
+	// "Your run": the ticker belongs to the entry the result closed, never a later ticket entry of the same event.
+	{
+		const ss::net::Network& Net = ss::net::Site(SiteId::Ignite);
+		ss::net::EventInstance E;
+		if (IgOpenEvent(S, E, 2200))
+		{
+			const std::string Name = Net.TemplateOf(E).Name;
+			ig::IgniteLoops F = Fake(true);
+			F.Last.EventId = E.Id;
+			F.Last.Base = 120;
+			F.Last.Sparks = 120;
+			F.Last.Flame = 1.0;
+			ig::IgniteFakeLoops(&P.RL, &F);
+			ss::HistoryEntry H;
+			H.Name = Name;
+			H.Place = 40;
+			H.Entrants = 200;
+			H.BuyInCents = 110;
+			H.EventId = E.Id;
+			S.History.insert(S.History.begin(), H);
+			S.LastResults = ss::Results();
+			S.LastResults.EventName = Name;
+			S.LastResults.Place = 40;
+			S.LastResults.Entrants = 200;
+			S.LastResults.BuyInCents = 110;
+			S.HasResults = true;
+			S.LastSiteResult = SiteId::Ignite;
+			S.CurrentScreen = ss::Screen::Results;
+			P.RL.SiteShown = SiteId::Ignite;
+			DrawList L = P.Settled();
+			const bool Paid = IgStartsWith(L, "(120");
+			// The same event's next start, played on a ticket: History's newest line is that one.
+			S.History.front().EventId = E.Id + "0";
+			S.ResultsAt += 1.0;
+			L = P.Settled();
+			const bool Ticket = IgStartsWith(L, "(120");
+			// A ticket FUSE at the stake after the paid one (the ordinal moved on) and the paid one itself.
+			F.Last.EventId = "ignite.fuse0@44400#5";
+			F.Fuse.N = {6, 0, 0};
+			ig::IgniteFakeLoops(&P.RL, &F);
+			S.LastResults.EventName = ss::fuse::NameOf(0);
+			S.ResultsAt += 1.0;
+			L = P.Settled();
+			const bool FuseTicket = IgStartsWith(L, "(120");
+			F.Fuse.N = {5, 0, 0};
+			ig::IgniteFakeLoops(&P.RL, &F);
+			S.ResultsAt += 1.0;
+			L = P.Settled();
+			const bool FusePaid = IgStartsWith(L, "(120");
+			std::printf("  ignite g2 review: the rewards ticker: paid %d, a ticket entry %d, a ticket FUSE %d, the paid FUSE %d\n", Paid, Ticket, FuseTicket, FusePaid);
+			IgExpect(Paid && !Ticket && FusePaid && !FuseTicket, "ignite g2 review: \"Your run\" shows the Sparks only of the entry it closed (a ticket entry earns nothing, W4)");
+			S.HasResults = false;
+			S.History.erase(S.History.begin());
+			S.CurrentScreen = ss::Screen::Lobby;
+		}
+		else
+		{
+			std::printf("  ignite g2 review: no open event at this hour; the ticker's checks are skipped\n");
+		}
+	}
+	// The sheet of an event a held ticket will play: no Sparks promised.
+	{
+		ig::IgniteFakeLoops(&P.RL, nullptr);
+		ss::net::EventInstance E;
+		if (ig::IgniteLoopsFrom(S, S.WorldMinutes()).Live && IgOpenEvent(S, E, 2200))
+		{
+			const ss::net::Network& Net = ss::net::Site(SiteId::Ignite);
+			P.Open(Page::Lobby);
+			P.Settled();
+			ig::IgniteOpenSheet(P.RL, E.Id, P.Now);
+			DrawList L = P.Settled();
+			const bool Earns = IgStartsWith(L, "EARNS ");
+			const size_t At = E.Id.find('@');
+			S.Life.Tickets[Net.TicketOf(E.Id.substr(0, At))] = 1;
+			L = P.Settled();
+			IgExpect(Earns && !IgStartsWith(L, "EARNS ") && DrewRun(L, "TICKET ENTRY \xC2\xB7 NO SPARKS"), "ignite g2 review: a ticket entry's sheet promises no Sparks (W4)");
+			WriteList("ignite_g2_sheet_ticket", L);
+			S.Life.Tickets.erase(Net.TicketOf(E.Id.substr(0, At)));
+			U.Sheet = false;
+		}
+		else
+		{
+			std::printf("  ignite g2 review: core's View isn't on or no event is open; the ticket sheet's check is skipped\n");
+		}
+	}
+	// LIGHT IT at $5.50 (forced to x5): the 3-max table's marquee reads exactly 5 x $5.50, the table's own stake.
+	{
+		IgLaptop Pf("ignite-g2-review-fuse55");
+		ss::Session& Sf = Pf.S;
+		Pf.At(IgPrime - 60.0);
+		Sf.BankrollCents = 200000;
+		Pf.Join(50000);
+		if (ig::IgniteLoopsFrom(Sf, Sf.WorldMinutes()).FuseOn)
+		{
+			ss::fuse::DebugForce(Sf, 2, 5);
+			Pf.Open(Page::Fuse);
+			DrawList L = Pf.Settled();
+			ig::IgniteUi& Uf = ig::IgniteOf(&Pf.RL);
+			const bool Lit = ClickRun(Pf, L, "Light it \xC2\xB7 $5.50");
+			const ss::fuse::Reveal Rv = Uf.RevealTable >= 0 ? Sf.FuseReveal(Uf.RevealTable) : ss::fuse::Reveal();
+			Pf.Now += 6.0;
+			Pf.Frame();
+			Pf.Frame();
+			L = Pf.Frame();
+			std::printf("  ignite g2 review: LIGHT IT at $5.50: x%d at tier %d, screen %d\n", Rv.M, Rv.Tier, static_cast<int>(Sf.CurrentScreen));
+			IgExpect(Lit && Rv.M == 5 && Rv.Tier == 2 && Sf.CurrentScreen == ss::Screen::Table && DrewRun(L, ss::Money(5 * 550)) && !DrewRun(L, ss::Money(5 * 110)),
+				"ignite g2 review: the FUSE table's marquee reads exactly M x its own buy-in ($27.50 at x5, $5.50)");
+		}
+		else
+		{
+			std::printf("  ignite g2 review: FUSE isn't lit in this build; the $5.50 marquee check is skipped\n");
+		}
+	}
+	// Under the clause the adapter carries core's on-ice (derived from the deal while the book is empty, S10): frost, ON ICE.
+	{
+		IgLaptop Pc("ignite-g2-review-ice");
+		ss::Session& Sc = Pc.S;
+		Pc.At(IgPrime - 60.0);
+		Sc.BankrollCents = 200000;
+		Pc.Join(50000);
+		if (ig::IgniteLoopsFrom(Sc, Sc.WorldMinutes()).Live && IgSignClause(Sc))
+		{
+			const ig::IgniteLoops Li = ig::IgniteLoopsFrom(Sc, Sc.WorldMinutes());
+			ig::IgniteOf(&Pc.RL).Rewards = 0;
+			Pc.Open(Page::Promotions);
+			Pc.Settled();
+			Pc.Now += 12.0; // the deal's badge toast has gone
+			const DrawList L = Pc.Settled();
+			IgExpect(Li.OnIce && DrewRun(L, ig::IgniteOnIce) && DrewRun(L, "ON ICE"), "ignite g2 review: under the clause the live pages show core's on-ice (the Flame waits, the dock says so)");
+		}
+		else
+		{
+			std::printf("  ignite g2 review: the clause wouldn't bind or the View isn't on; the live on-ice check is skipped\n");
+		}
+	}
+}
+
+/** review-core-fuse: a FUSE never enters History, so "Your run"'s Play again is the next FUSE at the same stake (§2.4 G):
+ *  enabled, it names the stake and opens FUSE's page (where LIGHT IT is the strike gate); it lights nothing itself. */
+void FuseAgain()
+{
+	IgLaptop P("ignite-g2-review-fuse-again");
+	ss::Session& S = P.S;
+	P.At(IgPrime);
+	S.BankrollCents = 123400;
+	P.Join(21240);
+	S.LastResults = ss::Results();
+	S.LastResults.EventName = ss::fuse::NameOf(1);
+	S.LastResults.Place = 2;
+	S.LastResults.Entrants = 3;
+	S.LastResults.PrizeCents = 0;
+	S.LastResults.BuyInCents = 330;
+	S.HasResults = true;
+	S.LastSiteResult = SiteId::Ignite;
+	S.CurrentScreen = ss::Screen::Results;
+	// The lobby's site is left at RiverLine (tiled, the last tab the player opened was RiverLine's): Play again still lands on
+	// Ignite's FUSE page, never RiverLine's lobby (SitesPageHome sends FUSE home on any other site).
+	const size_t Tables = static_cast<size_t>(S.TableCount());
+	const ss::Chips Wallet = ss::site::AccountOf(S.Life.Sites, SiteId::Ignite)->Cents;
+	DrawList L = P.Settled();
+	const bool Named = DrewRun(L, "Play again") && DrewRun(L, "FUSE $3.30") && !DrewRun(L, "Nothing like it on the floor right now");
+	const bool Clicked = ClickRun(P, L, "Play again");
+	L = P.Settled();
+	IgExpect(Named && Clicked && P.RL.CurrentPage() == Page::Fuse && S.CurrentScreen != ss::Screen::Results && static_cast<size_t>(S.TableCount()) == Tables &&
+			ss::site::AccountOf(S.Life.Sites, SiteId::Ignite)->Cents == Wallet,
+		"ignite g2 review: after a FUSE, Play again names its stake and opens FUSE's page (nothing lit, nothing paid)");
+}
+
+void Bench()
+{
+	// PLAY with the loops on, timed like IgPlayBench (printed; SS_UI_BENCH=1 for the timing).
+	if (!std::getenv("SS_UI_BENCH"))
+	{
+		return;
+	}
+	IgLaptop P("ignite-g2-bench");
+	P.At(IgPrime);
+	P.S.BankrollCents = 150000;
+	P.Join(21240);
+	const ig::IgniteLoops F = Fake(true);
+	ig::IgniteFakeLoops(&P.RL, &F);
+	for (const Page Pg : {Page::Lobby, Page::Promotions, Page::Fuse})
+	{
+		P.Open(Pg);
+		P.Settled();
+		std::vector<double> Ms;
+		for (int I = 0; I < 120; ++I)
+		{
+			P.Now += 1.0 / 30.0;
+			const auto T0 = std::chrono::steady_clock::now();
+			P.Frame();
+			Ms.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count());
+		}
+		std::sort(Ms.begin(), Ms.end());
+		std::printf("  SS_UI_BENCH ignite g2 page %d: median %.3f ms, p90 %.3f ms\n", static_cast<int>(Pg), Ms[Ms.size() / 2], Ms[Ms.size() * 9 / 10]);
+	}
+}
+
+/** Whether every BlackItalic run among Labels drawn inside a wheel's rim (centre Cx, Cy, radius R) keeps off its rings: its
+ *  glyph box wholly in the band between SHINE (0.7 R, stroked 2 either side) and GLOW's rim (R + 6). Found counts them. */
+bool OffRings(const DrawList& L, const TableMeasurer& M, float Cx, float Cy, float R, const std::set<std::string>& Labels, int& Found)
+{
+	bool Ok = true;
+	Found = 0;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type != ss::ui::DrawCmd::Kind::Text || Cmd.Text.Face != ss::ui::Font::BlackItalic || Labels.count(Cmd.Text.Text) == 0)
+		{
+			continue;
+		}
+		const ss::ui::TextItem& T = Cmd.Text;
+		const float X0 = T.X;
+		const float X1 = T.X + M.Width(T.Text, T.Face, T.SizePx);
+		const float Y0 = T.BaselineY - 0.72f * T.SizePx;
+		const float Y1 = T.BaselineY;
+		if (std::hypot((X0 + X1) / 2.0f - Cx, (Y0 + Y1) / 2.0f - Cy) > R + 6.0f)
+		{
+			continue;
+		}
+		++Found;
+		const float Near = std::hypot(std::min(std::max(Cx, X0), X1) - Cx, std::min(std::max(Cy, Y0), Y1) - Cy);
+		const float Far = std::max(std::hypot(std::max(std::fabs(X0 - Cx), std::fabs(X1 - Cx)), std::max(std::fabs(Y0 - Cy), std::fabs(Y1 - Cy))), 0.0f);
+		if (Near < R * 0.7f + 2.0f || Far > R + 4.0f)
+		{
+			std::printf("  ignite fix: \"%s\" at %.1f-%.1f from the wheel's centre (band %.1f-%.1f)\n", T.Text.c_str(), Near, Far, R * 0.7f + 2.0f, R + 4.0f);
+			Ok = false;
+		}
+	}
+	return Ok;
+}
+
+/** A paid $1.10 Ignite entry open at this minute (a live career's first), registered; false when none is open. */
+bool PayOneTen(ss::Session& S)
+{
+	const ss::net::Network& Net = ss::net::Site(SiteId::Ignite);
+	for (const ss::net::EventInstance& Ei : Net.Window(S.WorldMinutes() - 120.0, S.WorldMinutes() + 60.0))
+	{
+		const ss::net::LiveState Ls = Net.Live(Ei, S.WorldMinutes());
+		const ss::LobbyEvent Ev = Net.Listing(Ei, nullptr, S.Unlocks());
+		if ((Ls.St == ss::net::Status::LateReg || Ls.St == ss::net::Status::Registering) && Ev.Joinable && Ev.BuyInCents == 110 && S.RegisterEvent(Ev).empty())
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * The G2 fix round (G2_AUDIT M2, M5, L9): the Crackers' odds one click away (core's own tables), a split pot's lighter
+ * fountains, the Flame's week before the book, the wheel's prizes off its rings, the reveal's "1 in 250" and its ODDS pill,
+ * and the vector cross wherever copy says "x25".
+ */
+void FixRound()
+{
+	// L9: the glyph rule. Copy writes "x25"; a drawn label draws the vector cross in its place.
+	IgExpect(ig::IgniteHasTimes("x25") && ig::IgniteHasTimes("80 / 12 / 8 from x25") && ig::IgniteHasTimes("(610 x 1.20 FLAME)") && ig::IgniteHasTimes("FUSE x25: 1st") &&
+			!ig::IgniteHasTimes("max5") && !ig::IgniteHasTimes("6x the Sparks") && !ig::IgniteHasTimes("Flip & Run") && !ig::IgniteHasTimes("box 5") && !ig::IgniteHasTimes("x-ray"),
+		"ignite fix: a multiplier in copy is an 'x' that starts a word before a digit");
+	// L9: the reveal's line under BIG FUSE, from the multiplier's own row of core's table at its stake: a whole one-in where the
+	// chance is one to within 0.5%, else the percentage (every digit a fact; review-g2f-ignite).
+	{
+		const auto PctAt = [](int M, int Tier) {
+			for (const ss::fuse::Row& Row : ss::fuse::Table())
+			{
+				if (ss::fuse::MOf(Row, Tier) == M)
+				{
+					return ss::Fixed(ss::fuse::POf(Row, Tier) * 100.0, 1) + "% at " + ss::Money(ss::fuse::BuyInOf(Tier));
+				}
+			}
+			return std::string("?");
+		};
+		IgExpect(ig::IgniteRevealOdds(25, 0) == "1 in 250 at $1.10" && ig::IgniteRevealOdds(10, 1) == "1 in 50 at $3.30" && ig::IgniteRevealOdds(100, 0) == "1 in 2,000 at $1.10" &&
+				ig::IgniteRevealOdds(100, 1) == "1 in 1,667 at $3.30" && ig::IgniteRevealOdds(1000, 0) == "1 in 20,000 at $1.10" && ig::IgniteRevealOdds(250, 2) == "1 in 20,000 at $5.50" &&
+				ig::IgniteRevealOdds(5, 0) == "6.5% at $1.10" && ig::IgniteRevealOdds(2, 0) == PctAt(2, 0) && ig::IgniteRevealOdds(3, 2) == PctAt(3, 2) && ig::IgniteRevealOdds(1000, 1).empty(),
+			"ignite fix: the reveal's odds line reads each multiplier's own chance at its stake (1 in 250, 6.5%, none off the table)");
+	}
+	IgLaptop P("ignite-fix");
+	{
+		DrawList A;
+		DrawList B;
+		DrawList Plain;
+		ss::ui::Canvas Ca(A, P.M, 1600.0f, 1000.0f, 1.0f);
+		ss::ui::Canvas Cb(B, P.M, 1600.0f, 1000.0f, 1.0f);
+		ss::ui::Canvas Cp(Plain, P.M, 1600.0f, 1000.0f, 1.0f);
+		const ss::ui::TextStyle St = ss::ui::igniteart::IgniteTx(11.5f, 700, ss::ui::Hex(0xfff4ec), ss::ui::Align::Center);
+		const float Wa = ig::IgniteLineTimes(Ca, "80 / 12 / 8 from x25", 300.0f, 100.0f, St);
+		ig::IgniteLineTimes(Cb, "Three players, one fuse", 300.0f, 100.0f, St);
+		Cp.Text("Three players, one fuse", 300.0f, 100.0f, St);
+		const float Want = P.M.Width("80 / 12 / 8 from ", ss::ui::Font::Bold, 11.5f) + 11.5f * 0.54f + P.M.Width("25", ss::ui::Font::Bold, 11.5f);
+		IgExpect(DrewRun(A, "80 / 12 / 8 from ") && DrewRun(A, "25") && !DrewRun(A, "80 / 12 / 8 from x25") && A.Vertices.size() > 0 && std::fabs(Wa - Want) < 0.01f,
+			"ignite fix: a drawn multiplier is the vector cross between its runs (centred as one)");
+		IgExpect(B.ToJson() == Plain.ToJson(), "ignite fix: a line with no multiplier draws exactly as it did");
+	}
+	ss::Session& S = P.S;
+	P.At(IgPrime);
+	S.BankrollCents = 150000;
+	P.Join(21240);
+	ig::IgniteLoops F = Fake(true);
+	ig::IgniteFakeLoops(&P.RL, &F);
+	ig::IgniteUi& U = ig::IgniteOf(&P.RL);
+	const float Bx = 974.0f; // the dock's BOARDS: outside every overlay's own rect
+	const float By = 916.0f;
+	// PLAY's Today strip: the Flame's multiplier is the cross and "1.20" in BlackItalic, never "x1.20".
+	P.Open(Page::Lobby);
+	DrawList L = P.Settled();
+	const IgBox Mult = IgRun(L, "1.20", P.M, 380.0f, 400.0f);
+	IgExpect(Mult.Found && Mult.Face == ss::ui::Font::BlackItalic && !DrewRun(L, "x1.20"), "ignite fix: the Today strip's multiplier carries the vector cross");
+	// FUSE's booth: "80 / 12 / 8 from" and the how-it-works line cross their multipliers.
+	P.Open(Page::Fuse);
+	L = P.Settled();
+	const auto Lettered = [](const DrawList& Lx) {
+		int N = 0;
+		for (const ss::ui::DrawCmd& Cmd : Lx.Cmds)
+		{
+			if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && ig::IgniteHasTimes(Cmd.Text.Text))
+			{
+				std::printf("  ignite fix: a lettered multiplier is drawn: \"%s\"\n", Cmd.Text.Text.c_str());
+				++N;
+			}
+		}
+		return N;
+	};
+	IgExpect(DrewRun(L, "80 / 12 / 8 from ") && !DrewRun(L, "80 / 12 / 8 from x25") && Lettered(L) == 0, "ignite fix: FUSE's booth crosses every multiplier (the cabinets, how it works)");
+	P.Open(Page::News);
+	L = P.Settled();
+	ClickRun(P, L, "Big hits");
+	L = P.Settled();
+	IgExpect(DrewRun(L, "25 at your table") && Lettered(L) == 0, "ignite fix: BUZZ's Big hits cross their multipliers");
+	// REWARDS: the wheel's prizes ride the band between SHINE and GLOW's rim, off the lit rings, at every band's widths.
+	U.Rewards = 0;
+	P.Open(Page::Promotions);
+	L = P.Settled();
+	int Found = 0;
+	bool Off = OffRings(L, P.M, 1356.0f, 336.0f, 128.0f, {"40", "80", "150", "400", "TICKET"}, Found);
+	IgExpect(Off && Found == 5 && Lettered(L) == 0, "ignite fix: REWARDS' wheel labels sit between its rings (SHINE's five, none on a ring)");
+	WriteList("ignite_fix_rewards_wheel", L);
+	ig::IgniteLoops G = F;
+	G.RingsLit = 3;
+	G.Rings[2].clear();
+	for (const int64_t Sp : {560, 1050, 2100, 5600})
+	{
+		ig::IgniteWedge W;
+		W.Sparks = Sp;
+		W.P = 0.2;
+		W.Label = ss::Grouped(Sp) + " Sparks";
+		G.Rings[2].push_back(W);
+	}
+	for (const char* Tk : {"Mystery Pinata $7.70 ticket", "The Big Wave $11 ticket"})
+	{
+		ig::IgniteWedge W;
+		W.Label = Tk;
+		W.TicketId = "ignite.fix-ticket";
+		W.FaceCents = 770;
+		W.P = 0.004;
+		G.Rings[2].push_back(W);
+	}
+	G.SpunRing = 3;
+	G.SpunWedge = 3;
+	ig::IgniteFakeLoops(&P.RL, &G);
+	L = P.Settled();
+	const std::set<std::string> Wide = {"560", "1,050", "2,100", "5,600", "TICKET"};
+	Off = OffRings(L, P.M, 1356.0f, 336.0f, 128.0f, Wide, Found);
+	IgExpect(Off && Found == 6, "ignite fix: band C's DAZZLE labels (5,600 across the wheel) still clear both rings");
+	WriteList("ignite_fix_rewards_wheel_c", L);
+	ig::IgniteStartSpin(U, G, P.Now);
+	bool SpinOff = true;
+	int SpinFound = 0;
+	for (const double At : {0.4, 1.1, 2.0, 3.6})
+	{
+		P.Now = U.SpinAt + At;
+		L = P.Frame();
+		SpinOff = SpinOff && OffRings(L, P.M, 800.0f, 480.0f, 300.0f, Wide, Found);
+		SpinFound += Found;
+	}
+	IgExpect(SpinOff && SpinFound >= 18, "ignite fix: the spin's labels ride between its rings while it turns and where it lands");
+	U.Spin = false;
+	ig::IgniteFakeLoops(&P.RL, &F);
+	// M2 (W5): the Crackers' odds, one click away on the shelf: core's own tables (site::play::CrackerOdds), the ones an open
+	// draws from.
+	L = P.Settled();
+	const IgBox Odds = IgRun(L, "ODDS", P.M, 470.0f, 520.0f);
+	if (Odds.Found)
+	{
+		P.Click(Odds.X + Odds.W / 2.0f, Odds.Base - 6.0f);
+	}
+	L = P.Settled();
+	IgExpect(Odds.Found && U.Drawer == 4 && DrewRun(L, "CRACKERS' ODDS"), "ignite fix: the cracker shelf's ODDS opens the Crackers' odds");
+	Page2(L, "ignite_fix_crackerodds");
+	bool Rows = true;
+	for (int T = 0; T < 3; ++T)
+	{
+		const ss::site::play::CrackerOddsView V = ss::site::play::CrackerOdds(T);
+		double Sum = 0.0;
+		for (const ss::site::play::CrackerOddsRow& Rw : V.Rows)
+		{
+			const std::string Pct = ss::Fixed(Rw.P * 100.0, Rw.P > 0.0 && Rw.P < 0.01 ? 2 : 1) + "%";
+			if (Rw.Part == 0)
+			{
+				Sum += Rw.P;
+				Rows = Rows && DrewRun(L, Rw.Label) && DrewRun(L, Pct);
+			}
+			else if (Rw.Part == 1)
+			{
+				Rows = Rows && DrewRun(L, "+ " + Rw.Label) && DrewRun(L, Pct);
+			}
+			else
+			{
+				Rows = Rows && DrewRun(L, "+ a look piece (one of 6, " + Pct + " each)");
+			}
+		}
+		Rows = Rows && DrewRun(L, V.Name) && std::fabs(Sum - 1.0) < 1e-9;
+		if (!Rows)
+		{
+			std::printf("  ignite fix: the %s's rows aren't all drawn as core has them\n", V.Name.c_str());
+		}
+	}
+	IgExpect(Rows, "ignite fix: every Cracker's chances are core's own rows (the Sparks summing to 100%, the ticket and the looks on top)");
+	IgExpect(IgStartsWith(L, "A look you already own comes as " + ss::Grouped(ss::site::play::CrackerOdds(1).DuplicateSparks)), "ignite fix: the drawer says what a look already owned becomes");
+	// House law 3: a one-frame click inside the drawer (over the wheel's SPIN under it) fires nothing; its scrim closes it.
+	P.OneFrame(1356.0f, 578.0f);
+	P.Settled();
+	IgExpect(U.Drawer == 4 && !U.Spin, "ignite fix: a one-frame click on the Crackers' odds reaches nothing under it");
+	P.OneFrame(Bx, By);
+	P.Settled();
+	IgExpect(U.Drawer == 0 && P.RL.CurrentPage() == Page::Promotions, "ignite fix: the Crackers' odds' scrim closes it, the click reaches nothing");
+	// M5: a split pot's fountains fly lighter past one (6, then 5 each for two, 4 each for three or more), one trail.
+	IgExpect(ig::IgniteFountainFor(0) == 6 && ig::IgniteFountainFor(1) == 6 && ig::IgniteFountainFor(2) == 5 && ig::IgniteFountainFor(3) == 4 && ig::IgniteFountainFor(8) == 4,
+		"ignite fix: the fountain's chips by how many fly at once");
+	ig::IgniteFakeLoops(&P.RL, nullptr);
+	{
+		IgLaptop Pt("ignite-fix-split");
+		if (IgTableAt(Pt, IgPrime - 60.0))
+		{
+			ss::Session& St = Pt.S;
+			std::vector<int> Seats;
+			for (const ss::SeatVis& Seat : St.Seats)
+			{
+				if (Seat.Present && Seats.size() < 3)
+				{
+					Seats.push_back(Seat.Seat);
+				}
+			}
+			const auto Fly = [&](size_t N) {
+				ig::IgniteOf(&Pt.RL).Pots.clear();
+				St.Flights.clear();
+				const DrawList Plain = Pt.Frame();
+				const double T0 = Pt.Now;
+				for (size_t K = 0; K < N; ++K)
+				{
+					ss::Flight Fl;
+					Fl.IsChips = true;
+					Fl.From = ss::FlightEnd::AtPot();
+					Fl.To = ss::FlightEnd::AtSeat(Seats[K]);
+					Fl.Amount = 1400;
+					Fl.Start = T0;
+					Fl.Dur = 0.6;
+					St.Flights.push_back(Fl);
+				}
+				Pt.Now = T0 + 0.25;
+				const DrawList Mid = Pt.Frame();
+				if (N == 3)
+				{
+					WriteList("ignite_fix_split3", Mid);
+				}
+				ig::IgniteOf(&Pt.RL).Pots.clear();
+				St.Flights.clear();
+				Pt.Now += 3.0;
+				return Mid.Vertices.size() > Plain.Vertices.size() ? Mid.Vertices.size() - Plain.Vertices.size() : 0;
+			};
+			if (Seats.size() == 3)
+			{
+				const size_t One = Fly(1);
+				const size_t Three = Fly(3);
+				std::printf("  ignite fix: the fountain mid-flight: one pot %zu vertices, a 3-way split %zu (was 3 x one)\n", One, Three);
+				IgExpect(One > 300 && Three < 3 * One && Three <= 12 * 79 + 6 * 17 + 60, "ignite fix: a 3-way split's fountains cost 12 chips and one trail, not 18 and three");
+				// Side pots 0.3 s apart (a fast pace: the hero out of the hand, a watched plan): the side pot launching under a
+				// fountain already in the air flies lighter and without a trail; the one in the air keeps all six chips and its
+				// trail, so nothing blinks out mid-flight (a fountain's weight is fixed at its launch; review-g2f-ignite).
+				ig::IgniteOf(&Pt.RL).Pots.clear();
+				St.Flights.clear();
+				const double T0 = Pt.Now;
+				const auto Pot = [&](int Seat, double At) {
+					ss::Flight Fl;
+					Fl.IsChips = true;
+					Fl.From = ss::FlightEnd::AtPot();
+					Fl.To = ss::FlightEnd::AtSeat(Seat);
+					Fl.Amount = 1400;
+					Fl.Start = At;
+					Fl.Dur = 0.6;
+					St.Flights.push_back(Fl);
+				};
+				Pot(Seats[0], T0);
+				Pt.Now = T0 + 0.3;
+				const size_t Alone = Pt.Frame().Vertices.size();
+				Pot(Seats[1], T0 + 0.3);
+				const size_t Both = Pt.Frame().Vertices.size();
+				std::printf("  ignite fix: a side pot launching under a flying fountain adds %zu vertices (its first chip; one chip is %zu)\n", Both > Alone ? Both - Alone : 0,
+					(One - 6 * 17) / 6);
+				IgExpect(Both > Alone && Both - Alone <= One / 6, "ignite fix: a fountain in the air keeps its chips and trail when a side pot launches under it");
+				ig::IgniteOf(&Pt.RL).Pots.clear();
+				St.Flights.clear();
+				Pt.Now += 3.0;
+			}
+		}
+	}
+	// L9: the Flame's week before the book. A career whose first paid entry is this Wednesday: Monday and Tuesday were no
+	// flame days to miss (core's view marks them missed; the pages read them as plain days).
+	{
+		IgLaptop Pw("ignite-fix-week");
+		ss::Session& Sw = Pw.S;
+		Pw.At(IgPrime - 60.0);
+		Sw.BankrollCents = 200000;
+		Pw.Join(50000);
+		// M2, live (on the same career, before its first entry): the adapter carries core's Crackers' odds whole.
+		{
+			const ig::IgniteLoops Ll = ig::IgniteLoopsFrom(Sw, Sw.WorldMinutes());
+			bool Same = Ll.Live;
+			for (int T = 0; T < 3 && Same; ++T)
+			{
+				const ss::site::play::CrackerOddsView V = ss::site::play::CrackerOdds(T);
+				const ig::IgniteCrackerOdds& O = Ll.CrackerOdds[static_cast<size_t>(T)];
+				Same = O.Rows.size() == V.Rows.size() && O.Name == V.Name && O.LookP == V.LookP && O.TicketP == V.TicketP;
+				for (size_t K = 0; K < V.Rows.size() && Same; ++K)
+				{
+					Same = O.Rows[K].P == V.Rows[K].P && O.Rows[K].Label == V.Rows[K].Label && O.Rows[K].Part == V.Rows[K].Part;
+				}
+			}
+			IgExpect(Same, "ignite fix live: the pages' Crackers' odds are core's, row for row");
+		}
+		if (ig::IgniteLoopsFrom(Sw, Sw.WorldMinutes()).Live && PayOneTen(Sw))
+		{
+			const ig::IgniteLoops Lw = ig::IgniteLoopsFrom(Sw, Sw.WorldMinutes());
+			const ss::site::play::View V = Sw.SitePlayView(SiteId::Ignite);
+			const int Wd = ss::net::Weekday(ss::site::play::PlayDay(Sw.WorldMinutes()));
+			bool Plain = Wd >= 2;
+			for (int D = 0; D < Wd && D < 7; ++D)
+			{
+				Plain = Plain && Lw.Week[static_cast<size_t>(D)] == 0;
+			}
+			std::printf("  ignite fix: the week (weekday %d): core %d%d%d%d%d%d%d, the pages %d%d%d%d%d%d%d\n", Wd, V.Ig.Week[0], V.Ig.Week[1], V.Ig.Week[2], V.Ig.Week[3], V.Ig.Week[4],
+				V.Ig.Week[5], V.Ig.Week[6], Lw.Week[0], Lw.Week[1], Lw.Week[2], Lw.Week[3], Lw.Week[4], Lw.Week[5], Lw.Week[6]);
+			IgExpect(Plain && Lw.Week[static_cast<size_t>(Wd)] == 1, "ignite fix: the Flame's week marks no day before the first paid entry as missed (today lit)");
+			ig::IgniteOf(&Pw.RL).Rewards = 0;
+			Pw.Open(Page::Promotions);
+			WriteList("ignite_fix_week", Pw.Settled());
+			// Only the days before the first paid entry read plain: four days on (Sunday), a day core marks missed after it stays
+			// missed, every other day as core has it (review-g2f-ignite).
+			Pw.At(Sw.WorldMinutes() + 4.0 * 1440.0);
+			const bool Paid = PayOneTen(Sw);
+			const ig::IgniteLoops Ls = ig::IgniteLoopsFrom(Sw, Sw.WorldMinutes());
+			const ss::site::play::View Vs = Sw.SitePlayView(SiteId::Ignite);
+			const int Ws = ss::net::Weekday(ss::site::play::PlayDay(Sw.WorldMinutes()));
+			bool Kept = Paid && Ws == Wd + 4;
+			int Missed = 0;
+			for (int D = 0; D < Ws && D < 7; ++D)
+			{
+				Kept = Kept && Ls.Week[static_cast<size_t>(D)] == (D < Wd ? 0 : Vs.Ig.Week[static_cast<size_t>(D)]);
+				Missed += D >= Wd && Vs.Ig.Week[static_cast<size_t>(D)] == 3 ? 1 : 0;
+			}
+			std::printf("  ignite fix: the week four days on (weekday %d, paid %d): core %d%d%d%d%d%d%d, the pages %d%d%d%d%d%d%d\n", Ws, Paid ? 1 : 0, Vs.Ig.Week[0], Vs.Ig.Week[1],
+				Vs.Ig.Week[2], Vs.Ig.Week[3], Vs.Ig.Week[4], Vs.Ig.Week[5], Vs.Ig.Week[6], Ls.Week[0], Ls.Week[1], Ls.Week[2], Ls.Week[3], Ls.Week[4], Ls.Week[5], Ls.Week[6]);
+			IgExpect(Kept && Missed >= 1, "ignite fix: a day missed after the first paid entry stays missed; only the days before it read plain");
+		}
+		else
+		{
+			std::printf("  ignite fix: no View or no $1.10 entry open; the week's check is skipped\n");
+		}
+	}
+	// L9: the reveal's odds line and ODDS pill (the mockup's): a x25 at $1.10 says "1 in 250 at $1.10"; ODDS opens FUSE's odds
+	// over the reveal, which waits while it's up; a click outside closes it (swallowed) and the table opens itself after.
+	{
+		IgLaptop Pr("ignite-fix-reveal");
+		ss::Session& Sr = Pr.S;
+		Pr.At(IgPrime - 60.0);
+		Sr.BankrollCents = 200000;
+		Pr.Join(50000);
+		if (ig::IgniteLoopsFrom(Sr, Sr.WorldMinutes()).FuseOn)
+		{
+			ss::fuse::DebugForce(Sr, 0, 25);
+			Pr.Open(Page::Fuse);
+			L = Pr.Settled();
+			ig::IgniteUi& Ur = ig::IgniteOf(&Pr.RL);
+			const bool Lit = ClickRun(Pr, L, "Light it \xC2\xB7 $1.10");
+			const ss::fuse::Reveal Rv = Ur.RevealTable >= 0 ? Sr.FuseReveal(Ur.RevealTable) : ss::fuse::Reveal();
+			Pr.Now = Ur.RevealAt + ig::IgniteRevealTimesFor(25).BoomEnd;
+			L = Pr.Frame();
+			WriteList("ignite_fix_reveal25", L);
+			const IgBox Pill = IgRun(L, "ODDS", Pr.M, 520.0f, 545.0f);
+			IgExpect(Lit && Rv.M == 25 && DrewRun(L, "BIG FUSE") && DrewRun(L, "1 in 250 at $1.10") && DrewRun(L, "pays 80 / 12 / 8") && DrewRun(L, "$22.00 \xC2\xB7 $3.30 \xC2\xB7 $2.20") &&
+					Pill.Found && std::fabs(Pill.X + Pill.W / 2.0f - 1106.0f) < 1.0f && Lettered(L) == 0,
+				"ignite fix: the x25 reveal reads as the mockup (BIG FUSE, 1 in 250 at $1.10, 80 / 12 / 8, the places, ODDS)");
+			if (Pill.Found)
+			{
+				Pr.Click(Pill.X + Pill.W / 2.0f, Pill.Base - 6.0f);
+			}
+			L = Pr.Frame();
+			IgExpect(Ur.Drawer == 2 && !Ur.RevealEvent.empty() && DrewRun(L, "FUSE ODDS") && DrewRun(L, "1 in 250 at $1.10"), "ignite fix: the reveal's ODDS opens FUSE's odds over it");
+			// The table sits under the reveal from LIGHT IT on (the session's screen is already its); the reveal is what waits.
+			const int Tb = Ur.RevealTable;
+			Pr.Now += 4.0;
+			L = Pr.Frame();
+			WriteList("ignite_fix_reveal_odds", L);
+			IgExpect(!Ur.RevealEvent.empty() && Ur.Drawer == 2 && DrewRun(L, "FUSE ODDS"), "ignite fix: the reveal waits while its odds are up (it doesn't seat you by itself)");
+			// M3's laptop half (g2f-fuse's patch): the reveal drawn under the odds isn't seen, so core holds the first deal. The
+			// session's own clock is run past the reveal's run and its second (core's clock alone would call it seen there); the
+			// laptop drawing it every frame (RevealShown) is what keeps it unseen (review-g2f-ignite).
+			Pr.Now = Step(Sr, Pr.Now, 0.2);
+			Pr.Frame();
+			const ss::fuse::Reveal Held = Tb >= 0 ? Sr.FuseReveal(Tb) : ss::fuse::Reveal();
+			IgExpect(Tb >= 0 && Sr.Now >= Held.PaidAt + ss::fuse::RevealSeconds(25) + 1.0 && !Held.Seen && Ur.Drawer == 2,
+				"ignite fix: core counts the reveal unseen while the laptop draws it under its odds, past its run and a second");
+			Pr.OneFrame(800.0f, 836.0f); // TAKE YOUR SEAT, under the drawer's scrim
+			Pr.Frame();
+			IgExpect(Ur.Drawer == 0 && !Ur.RevealEvent.empty(), "ignite fix: a click outside the odds closes them, swallowed (TAKE YOUR SEAT doesn't fire)");
+			Pr.Now += 1.2;
+			Pr.Frame();
+			Pr.Frame();
+			IgExpect(Ur.RevealEvent.empty() && Sr.CurrentScreen == ss::Screen::Table, "ignite fix: a second after the odds close the reveal seats you");
+			IgExpect(Tb >= 0 && Sr.FuseReveal(Tb).Seen, "ignite fix: the table opening itself takes the seat (core's TakeSeat: the first hand deals on the beat)");
+		}
+		else
+		{
+			std::printf("  ignite fix: FUSE isn't lit in this build; the reveal's checks are skipped\n");
+		}
+	}
+}
+} // namespace ig2
+
 void SegIgnite()
 {
 	using namespace ignite_seg;
+	const auto Seg0 = std::chrono::steady_clock::now();
 	IgPages();
 	IgDock();
 	IgFloor();
@@ -2128,6 +3639,20 @@ void SegIgnite()
 	IgChatCap();
 	IgPotPulseCheck();
 	IgStandingsRings();
-	std::printf("  ui-ignite: %d checks\n", IgChecks);
+	// G2: the loops' pages and overlays (on a stand-in View until core-siteplay's lands).
+	ig2::Pages();
+	ig2::Overlays();
+	ig2::Preview();
+	ig2::Reel();
+	ig2::TablePeople();
+	ig2::Live();
+	ig2::Review();
+	ig2::FuseAgain();
+	ig2::Bench();
+	// The G2 fix round (G2_AUDIT M2, M5, L9), timed apart (rivals_ui's 60 s budget).
+	const auto Fix0 = std::chrono::steady_clock::now();
+	ig2::FixRound();
+	const auto Fix1 = std::chrono::steady_clock::now();
+	std::printf("  ui-ignite: %d checks in %.1f s (the G2 fix round's %.1f s)\n", IgChecks, std::chrono::duration<double>(Fix1 - Seg0).count(), std::chrono::duration<double>(Fix1 - Fix0).count());
 }
 } // namespace ui_test

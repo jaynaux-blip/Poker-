@@ -58,13 +58,13 @@ const SiteCopyLine SiteCopyTable[] = {
 	// Invitations (LetterInvite: Accept and Decline in Mail, §5.4).
 	{"invite:ignite:subject", "Poker that's actually fun", false},
 	{"invite:ignite",
-		"Hi, it's Bree from Ignite Poker. We hear you play a lot of tournaments, so here's ours: Flip & Run every hour, the Spark Jackpot every night at 8 PM, and "
+		"Hi, it's Bree from Ignite Poker. We hear you play a lot of tournaments, so here's ours: Flip & Run every hour, The Spark every night at 8 PM, and "
 		"tables a lot friendlier than the ones you're used to. Open an account and we'll match your first deposit 100%, up to $100. The match comes off as you play, "
 		"$5 for every $20 of rake inside 60 days. Accept below and your Cashier's ready.",
 		true},
 	{"invite2:ignite:subject", "Still a seat for you at Ignite", false},
 	{"invite2:ignite",
-		"Bree again. No pressure. The offer's still open: 100% of your first deposit, up to $100, released as you play. The Spark Jackpot runs every night at "
+		"Bree again. No pressure. The offer's still open: 100% of your first deposit, up to $100, released as you play. The Spark runs every night at "
 		"8 PM. Whenever you're ready, the button's below.",
 		true},
 	{"invite:runittwice:subject", "An invitation from RunItTwice", false},
@@ -76,7 +76,10 @@ const SiteCopyLine SiteCopyTable[] = {
 	{"why:0", "Three hundred tournaments and counting, at eleven dollars or more on average, is a serious schedule, and we noticed.", true},
 	{"why:1", "A series title gets noticed around here.", true},
 	{"why:2", "We watch the streams, and yours is worth watching.", true},
-	{"why:3", "We like to say hello early.", true}, // ss.Site.Invite past every gate: no reason the record can't back up
+	// Update 3 G2 (§11 Q4, as the user answered it on 2026-10-27): the two easier doors, GateMet's Why 3 and 4.
+	{"why:3", "A hundred and fifty tournaments and counting, at five-fifty or more on average, is a real schedule, and we noticed.", true},
+	{"why:4", "We keep an eye on the regulars over at Ignite, and you've become one of them.", true},
+	{"why:hello", "We like to say hello early.", true}, // ss.Site.Invite past every gate: no reason the record can't back up
 	{"invite2:runittwice:subject", "The door's still open at RunItTwice", false},
 	{"invite2:runittwice",
 		"Ingrid again. The tickets are still on the table: $33 for a first deposit of $50 or more. The Sunday Grind goes off every Sunday at 5 PM. Accept "
@@ -141,8 +144,8 @@ const SiteCopyLine SiteCopyTable[] = {
 	// The rivals' News (§5.10).
 	{"news:launch:ignite:title", "Ignite Poker is live", false},
 	{"news:launch:ignite",
-		"Flip & Run every hour, the Spark Jackpot every night at 8 PM, and a {Gtd} Sunday Blaze to close a launch week of guarantees half again as big.", true},
-	{"news:launch:ignite:late", "Flip & Run every hour, the Spark Jackpot every night at 8 PM and the Sunday Blaze at 7 PM on Sundays.", true},
+		"Flip & Run every hour, The Spark every night at 8 PM, and a {Gtd} Sunday Blaze to close a launch week of guarantees half again as big.", true},
+	{"news:launch:ignite:late", "Flip & Run every hour, The Spark every night at 8 PM and the Sunday Blaze at 7 PM on Sundays.", true},
 	{"news:launch:runittwice:title", "RunItTwice opens its new lobby", false},
 	{"news:launch:runittwice", "Tournaments for grown-ups: lower rake at the top, the Sunday 100K every week, and a points season that starts tonight.", true},
 	{"news:promo:ignite:title", "Ignite doubles your first deposit", false},
@@ -286,6 +289,18 @@ bool SiteNewDay(double From, double To)
 	return net::DayOf(From) != net::DayOf(To);
 }
 
+/** The site loops' day (update 3 §1.1): world days from 6 AM, the Night Shift's close, so a night's grind is one day. */
+int SiteSixAmDay(double World)
+{
+	return static_cast<int>(std::floor((World - 6.0 * SiteHour) / SiteDay));
+}
+
+/** Ignite's welcome rule (§5.6): what Rake has earned of a match of Total, $5 for every whole $20. */
+Chips SiteWelcomeEarned(Chips Total, Chips Rake)
+{
+	return std::min(Total, (std::max<Chips>(0, Rake) / SiteBonusRake) * SiteBonusPiece);
+}
+
 /** A routine letter from a site, held to one a week a company (§1.7). Returns whether it went. */
 bool SiteRoutine(life::State& L, net::SiteId S, double World, const std::string& Subject, const std::string& Body)
 {
@@ -364,6 +379,14 @@ void SiteCloseMonth(Book& B, life::State& L, Chips& Bankroll, double Payday)
 				SiteLineTo(A, Payday, 4, Pay, FillCopy(SiteText("label:wallet:secondrun"), Vars));
 				SitePaid(L, A.Site, Payday, FillCopy(SiteText("secondrun:subject"), Vars), FillCopy(SiteText("secondrun"), Vars));
 				B.Done.insert(SiteDated(Key, Payday));
+				// Update 3 G2 (§1.3, §1.4): the Value Governor counts the Second Run Club, never holds it (its cents are pinned),
+				// booked to the month that earned it: the key names the month, the day is that month's last 6 AM day. Only once the
+				// play book exists (U3SitePlay: a line was read, a paid entry or a claim started it, or a new career): an untouched
+				// save's 1st writes nothing new (S10).
+				if ((L.Update3LinesRead & life::U3SitePlay) != 0)
+				{
+					(void)play::Grant(L.SitePlay, L, A.Site, play::Kind::SecondRun, FillCopy(SiteText("label:wallet:secondrun"), Vars), Pay, Key, SiteSixAmDay(Payday), Payday);
+				}
 			}
 			A.Vip = Tier;
 		}
@@ -503,7 +526,8 @@ bool GateMet(net::SiteId S, const rep::Public& P, int RentsPaid, double World, i
 	const bool Volume = D.Gate.MinEvents > 0 && std::max(P.OnlineEvents, P.Paid100) >= D.Gate.MinEvents && P.Abi100 >= D.Gate.MinAbi100;
 	const bool Title = D.Gate.SeriesTitle && P.OnlineSeriesTitles > 0;
 	const bool Partner = D.Gate.KastPartner && P.Partner;
-	// Update 3 (§11 Q4; the values are core-sites-g2's at G2, zero until then): a second volume path and an Ignite Level path.
+	// Update 3 (§11 Q4, answered 2026-10-27; the values in Sites.cpp): a second volume path (RunItTwice: 150 paid online events
+	// at a $5.50 last-100 average) and an Ignite Level path (RunItTwice: Level 20), on top of every Update 2 path; zero is none.
 	const bool Volume2 = D.Gate.MinEvents2 > 0 && std::max(P.OnlineEvents, P.Paid100) >= D.Gate.MinEvents2 && P.Abi100 >= D.Gate.MinAbi100_2;
 	const bool LevelPath = D.Gate.IgniteLevel > 0 && IgniteLevel >= D.Gate.IgniteLevel;
 	if (Why)
@@ -511,6 +535,36 @@ bool GateMet(net::SiteId S, const rep::Public& P, int RentsPaid, double World, i
 		*Why = Volume ? 0 : Title ? 1 : Partner ? 2 : Volume2 ? 3 : LevelPath ? 4 : 2;
 	}
 	return Volume || Title || Partner || Volume2 || LevelPath;
+}
+
+int IgniteLevelOf(const life::State& L)
+{
+	// Update 3 G2 (§2.6 F6, §11 Q4): Ignite Level is lifetime base Sparks against site::play::LevelNeeds (100 x (n - 1)^2.4),
+	// read from the play book, never written: an empty book (an old save, a new career, no paid Ignite entry yet) is Level 1.
+	// G2 fix L11: the one rule, play::IgniteLevel (play::LevelOf, capped at Level 99), never a copy of it here.
+	return play::IgniteLevel(L.SitePlay);
+}
+
+bool WelcomeWindow(const Account& A, double World)
+{
+	// Update 3 G2 (§1.4, §2.6 F11): Ignite's welcome window runs from the first deposit to the 60th day after it, whether the
+	// match has all come off yet or not; inside it the Value Governor's ceiling is 75% (the release counts in Promo30).
+	return A.Site == net::SiteId::Ignite && A.BonusExpires > 0.0 && World >= A.BonusExpires - site_money_detail::SiteBonusDays * site_money_detail::SiteDay &&
+		World <= A.BonusExpires;
+}
+
+Chips WelcomeReleasedBy(const Account& A, Chips Fee, double World)
+{
+	// Update 3 G2 (§1.3): the cents of welcome bonus one paid entry's rake released, read after OnBuyIn counted that rake (the
+	// Governor books them on that day, never holds them). OnBuyIn releases up to what the account's lifetime rake has earned, so
+	// this entry's part is what RakeLife earns less what RakeLife - Fee had: $5 each time the rake crosses a $20 line, never
+	// past the match, and nothing once the 60 days are over.
+	if (A.Site != net::SiteId::Ignite || A.BonusExpires <= 0.0 || World > A.BonusExpires || Fee <= 0)
+	{
+		return 0;
+	}
+	const Chips Total = std::max<Chips>(0, A.BonusPending) + std::max<Chips>(0, A.BonusReleased);
+	return std::max<Chips>(0, site_money_detail::SiteWelcomeEarned(Total, A.RakeLife) - site_money_detail::SiteWelcomeEarned(Total, A.RakeLife - Fee));
 }
 
 void PostLetter(life::State& L, net::SiteId S, double World, int Kind, const std::string& Subject, const std::string& Body)
@@ -586,7 +640,9 @@ void Invite(Book& B, life::State& L, net::SiteId S, double World, int Why, bool 
 	Found->At = World;
 	Found->State = Second ? 3 : 0;
 	const std::string Key = std::string(Second ? "invite2:" : "invite:") + net::KeyOf(S);
-	const std::vector<std::pair<std::string, std::string>> Vars = {{"Why", SiteText("why:" + std::to_string(std::max(0, std::min(3, Why))))}};
+	// The reason is GateMet's (0 to 4); anything else (ss.Site.Invite past every gate passes -1) says hello and claims nothing.
+	const std::string Reason = Why >= 0 && Why <= 4 ? "why:" + std::to_string(Why) : std::string("why:hello");
+	const std::vector<std::pair<std::string, std::string>> Vars = {{"Why", SiteText(Reason)}};
 	PostLetter(L, S, World, LetterInvite, FillCopy(SiteText(Key + ":subject"), Vars), FillCopy(SiteText(Key), Vars));
 	L.Update2LinesRead |= life::U2Sites;
 }
@@ -826,7 +882,7 @@ void OnBuyIn(Book& B, net::SiteId S, Chips BuyIn, Chips Fee, const std::string& 
 	if (A->BonusPending > 0 && World <= A->BonusExpires)
 	{
 		const Chips Total = A->BonusPending + A->BonusReleased;
-		const Chips Earned = std::min(Total, (A->RakeLife / SiteBonusRake) * SiteBonusPiece);
+		const Chips Earned = SiteWelcomeEarned(Total, A->RakeLife);
 		const Chips Due = Earned - A->BonusReleased;
 		if (Due > 0)
 		{
@@ -937,7 +993,8 @@ void Step(Book& B, life::State& L, Chips& Bankroll, const rep::Public& P, int Sp
 			}
 			int Why = 0;
 			const std::string Again = std::string("resent:") + D.Key;
-			if (!Sent && GateMet(D.Id, P, L.RentsPaid, To, &Why))
+			// (Update 3 G2, §11 Q4: RunItTwice's Ignite Level door reads the play book's level.)
+			if (!Sent && GateMet(D.Id, P, L.RentsPaid, To, &Why, IgniteLevelOf(L)))
 			{
 				Invite(B, L, D.Id, To, Why, false);
 			}

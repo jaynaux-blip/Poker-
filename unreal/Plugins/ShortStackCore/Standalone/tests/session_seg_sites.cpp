@@ -125,10 +125,20 @@ void RivalEvent()
 	Expect(S.T && S.T->Spec.Id == Ev.Spec.Id && A->Cents == 4000 - Ev.BuyInCents && S.BankrollCents == Bank && S.Life.Ledger.size() == Ledger &&
 			A->Lines.back().Cents == -Ev.BuyInCents && A->RakeMonth == net::Def(net::SiteId::RunItTwice).Rake.Fee(Ev.BuyInCents),
 		"sites: the buy-in comes off the RunItTwice wallet with its own line; the bank and its ledger don't move");
+	// (Review, update 3 G2.) The play book's mark of this paid entry (core-siteplay's OnPaidEntry), which only OnResult takes:
+	// SiteSettle hands every rival result over, not only a FUSE's, so the mark is gone once the results are in.
+	auto PaidMark = [&S, &Ev]() {
+		const std::string Prefix = "play:in:" + Ev.Spec.Id + "@";
+		const auto It = S.Life.Sites.Done.lower_bound(Prefix);
+		return It != S.Life.Sites.Done.end() && It->compare(0, Prefix.size(), Prefix) == 0;
+	};
+	const bool Marked = PaidMark();
 	ss::Rng Choice("sites-rival-choices");
 	int Decisions = 0;
 	Now = PlayOut(S, Choice, Now, Decisions);
 	const ss::Results& R = S.LastResults;
+	Expect(!Marked || !PaidMark(),
+		Marked ? "sites: SiteSettle hands the RunItTwice result to the play book, which takes its paid entry's mark" : "sites: (no paid entry's mark: the play book is still Phase A's stub)");
 	std::printf("  sites: RunItTwice %s, %s of %d, %s\n", Ev.Spec.Name.c_str(), ss::Ordinal(R.Place).c_str(), R.Entrants, ss::Money(R.PrizeCents + R.BountyCents).c_str());
 	Expect(S.CurrentScreen == ss::Screen::Results && A->Cents == 4000 - Ev.BuyInCents + R.PrizeCents + R.BountyCents && A->Cents == WalletLines(*A) &&
 			S.BankrollCents == Bank && S.Life.Ledger.size() == Ledger,

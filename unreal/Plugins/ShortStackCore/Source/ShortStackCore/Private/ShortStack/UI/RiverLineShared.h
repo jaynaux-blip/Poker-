@@ -1103,6 +1103,9 @@ struct SitesUi
 	bool HudFlipped = false;
 	// G1 fix (g1-audit M2): a rival look's raise slider held by the pointer (Ui::Slider keeps its own drag private).
 	bool RaiseDrag = false;
+	// G2 (§2.6 F2): the flame nudge as core's view last said, and the hour, flame and clause it was asked at (SitesFlameNudge).
+	uint64_t NudgeKey = ~0ull;
+	bool Nudge = false;
 	// G1 fix (g1-audit M1; §3.5 INFO, §10): the hero's ICM value by event, computed when the stacks change, never per frame.
 	// fix2 (N2): walked in steps (Walk, Busy) once a hand has ended; the last value stands until the walk is done.
 	struct IcmMemo
@@ -1240,9 +1243,38 @@ struct SiteLook
  * §3.5, §13); the address is stable for the program's life.
  */
 const SiteLook& SitesLook(net::SiteId S);
-/** The look with what the player wears there (Ignite's equipped back, felt and chips: G2). */
+/**
+ * The look with what the player wears there (G2, §2.4 L's Locker): Ignite's equipped card back, felt and chip set (the play
+ * book's worn looks, site::play::LookOf's designs and Wristband colours) over its own; every other site's own look.
+ */
 SiteLook SitesLookFor(const Session& S, net::SiteId Site);
-/** The look of the table in front (its site's: SitesOfTable), for the shared table's drawing. */
+/**
+ * Ignite's looks as drawn (G2; the table through SitesLookFor, and the Locker's previews): card back look n as CardOpts::Back
+ * (look 0 is Sunset, 1; any other SitesIgBackLooks + n, its design (Sunset or Neon Grid) and colours read from
+ * site::play::LookOf in Ui.cpp), chip set look n as DrawChipStack's Set (1 candy or 3 Arcade Tokens, the look + 1 in bits
+ * 8-15), felt look n as the felt's three colours (Plum Velvet, Midnight Boardwalk, or Plum Velvet in a Wristband month's two
+ * colours). An index outside the slot's looks is the default.
+ */
+const int SitesIgBackLooks = 64;
+int SitesIgBack(int Look);
+int SitesIgChipSet(int Look);
+void SitesIgFelt(int Look, uint32_t& Felt, uint32_t& Light, uint32_t& Dark);
+/**
+ * G2 (§2.6 F2 "The nudge"): after 6 PM with no flame day yet on Ignite, the taskbar poker button's flame flickers; the
+ * Today strip's line and this read core's site::play::View (Ig.Nudge), asked again only when the world hour, the flame or
+ * the clause moves (SitesUi).
+ */
+bool SitesFlameNudge(const RiverLine* RL, const Session& S, double World);
+/**
+ * G1_AUDIT N12 (ui-tablestyle, G2): a rival stack's vertices at a detail (0 full, 1 a busy felt, 2 the busiest; Ui.cpp), so
+ * the shared table picks the finest detail at which every stack on its felt (bets, the pot, chips in flight) stays inside
+ * its chip budget. DrawChipStack takes the detail in Set's bits 4-5: Set | Detail << 4.
+ */
+int SitesChipVertices(Chips Amount, int Set, int Detail);
+/**
+ * The look of the table in front (its site's: SitesOfTable, as the player wears it there: SitesLookFor, G2), for the shared
+ * table's drawing and the tiles; the address is stable for the program's life (on this thread).
+ */
 const SiteLook& SitesTableLook(const Session& S);
 /** The look of the site the client wears (SitesClient), for the lobby's shared helpers. */
 const SiteLook& SitesClientLook(const RiverLine& RL, const Session& S);
@@ -1393,6 +1425,57 @@ void SitesDealerButton(Canvas& C, float X, float Y, float R, int Dealer);
 void SitesSpark(Canvas& C, float Cx, float Cy, float R, const Color& Col, float Thin = 0.28f);
 /** The turnstone's two cards (the second run dealt over the first), S tall, its top-left at (X, Y). */
 void SitesTurnstone(Canvas& C, float X, float Y, float S, const Color& First, const Color& Second, const Color& Edge);
+/**
+ * G2 fix (M5; §10: Ignite's table within 22k vertices at its busiest): a small round rect (Radius up to 12: the table's pills
+ * and tags) at no more than four segments a corner, a 0.2-unit sag under the fringe's pixel; anything rounder at the canvas's
+ * own curve.
+ */
+inline void SitesSmallRoundRect(Canvas& C, const Rect& R, float Radius, const Paint& P)
+{
+	if (Radius > 12.0f || C.SegmentsFor(Radius, Pi * 0.5f) <= 4)
+	{
+		C.FillRoundRect(R, Radius, P);
+		return;
+	}
+	C.FillPolygon(Canvas::RoundRectPath(R, Radius, 4), P);
+}
+/**
+ * G2 fix (M5): an outlined round rect as two fills, the outline's colour out to Width / 2 past R, then the body inside it,
+ * where a fill and a stroke of Width centred on R's edge took twice the vertices (a stroke takes four a point, a fill two).
+ * The body's edge sits a pixel further in than the stroke's inner edge, since a fill fades outward and a stroke both ways, so
+ * the line reads as wide as it did. Body must be opaque (SitesOver), or the outline shows through it.
+ * Review fix (review-g2f-tablestyle): so must the canvas. Under a canvas alpha (a folded seat's 0.55 dims its bounty tag, a
+ * parent's fade) the outline's fill showed through the body, a quarter of Orange in a dimmed tag's dark body under its Orange
+ * figure: there the body and a stroke over its edge, as before the fix, at SitesSmallRoundRect's segments.
+ */
+inline void SitesOutlined(Canvas& C, const Rect& R, float Radius, const Paint& Body, const Color& Edge, float Width)
+{
+	if (C.GetAlpha() < 0.999f)
+	{
+		SitesSmallRoundRect(C, R, Radius, Body);
+		const int Segs = C.SegmentsFor(Radius, Pi * 0.5f);
+		C.StrokePolyline(Canvas::RoundRectPath(R, Radius, Radius > 12.0f || Segs <= 4 ? Segs : 4), true, Edge, Width);
+		return;
+	}
+	const float H = Width / 2.0f;
+	const float In = H + 1.0f / (C.PixelScale() * C.Transform().UniformScale());
+	SitesSmallRoundRect(C, {R.X - H, R.Y - H, R.W + Width, R.H + Width}, Radius + H, Edge);
+	SitesSmallRoundRect(C, {R.X + In, R.Y + In, R.W - 2.0f * In, R.H - 2.0f * In}, Radius > In ? Radius - In : 0.0f, Body);
+}
+/** Top laid over Under at Top's alpha, as one opaque colour (a translucent pill's body for SitesOutlined). */
+inline Color SitesOver(const Color& Top, const Color& Under)
+{
+	return {Under.R + (Top.R - Under.R) * Top.A, Under.G + (Top.G - Under.G) * Top.A, Under.B + (Top.B - Under.B) * Top.A, 1.0f};
+}
+/**
+ * G2 fix (M5): the drop shadow of an opaque disc R at (X, Y), a disc R at (X, Y + Dy) under it: only its bottom shows, so
+ * only the arc from just above its equator round the bottom is drawn (its chord stays inside the disc over it while R is at
+ * least 5 Dy), about half a full disc's vertices.
+ */
+inline void SitesDropDisc(Canvas& C, float X, float Y, float R, float Dy, const Color& Col)
+{
+	C.FillPolygon(Canvas::EllipsePath(X, Y + Dy, R, R, -0.1f, Pi + 0.1f, C.SegmentsFor(R, Pi + 0.2f), true), Col);
+}
 // The table looks' own colours (§2.3, §3.3: constants, never pal::, none a RiverLine hex). Ui.cpp keeps its own for the
 // chips and the backs it draws.
 inline constexpr uint32_t SitesIgNight = 0x120a18, SitesIgCoral = 0xff6b57, SitesIgPink = 0xff3d8b, SitesIgViolet = 0x8b5cff, SitesIgSky = 0x4fc3f7, SitesIgLime = 0xc8ff4a,
@@ -1400,6 +1483,14 @@ inline constexpr uint32_t SitesIgNight = 0x120a18, SitesIgCoral = 0xff6b57, Site
 inline constexpr uint32_t SitesRitCarbon = 0x16161a, SitesRitRed = 0xd2141a, SitesRitChrome = 0xb6bbc5, SitesRitWhite = 0xffffff, SitesRitTape = 0x060607, SitesRitGloss = 0x202026,
 						  SitesRitLed = 0xff2633, SitesRitOnyx = 0x0c0c0f, SitesRitMuted = 0xa0a0aa, SitesRitInk = 0xececef, SitesRitHair = 0x2c2c33, SitesRitPool = 0x26262d;
 } // namespace rlsites_detail
+
+namespace ui_detail
+{
+/** G2 fix (M5, Ui.cpp): a soft glow round a round rect at two segments a corner (the rival decks' shadows: small blurs only). */
+void TblLowGlow(Canvas& C, const Rect& R, float Radius, const Color& Col, float Blur);
+/** G2 fix (M5, Ui.cpp): a rival back (Back > 0) at (X, Y) with no shadow, turned Rotate about its centre as DrawCard does. */
+void TblBackBare(Canvas& C, float X, float Y, float W, float H, float Rotate, int Back);
+} // namespace ui_detail
 
 namespace rlnet_detail
 {

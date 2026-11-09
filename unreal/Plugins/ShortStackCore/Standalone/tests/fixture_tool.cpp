@@ -90,6 +90,13 @@
 //   fixture_tool write-u3g3 <dir> [show] [days]  writes C3's creator fixture, update3_creator (update 3 SPEC §7.4-§7.5; Creator3:
 //                              a NewCareer on Rerun 2.0 for 420 days, every upload packaged in Studio from the library; "show"
 //                              prints the channel every thirty days and the tally; days builds a shorter one, for a dry run)
+//   fixture_tool write-u3g2 <dir> [show]  writes C2's site-play fixture, update3_siteplay (update 3 SPEC §7.5; SitePlay3: a
+//                              NewCareer with both rivals joined from the console's letters, twelve days of paid entries from
+//                              the 2nd of a month: a 9-day Flame with a Spare Match, the Wristband past T10, the Dares, the wheel
+//                              and the crackers claimed (two left on the shelf), a FUSE at x25 and more on $1.10, a Beef (its
+//                              second bust by ss.Site.Play beef when play made none), the
+//                              League's Placement month half played with its world line, a Callout, two Team scalps and the
+//                              Guest List; saved WITH its world, which holds the League's line; "show" prints each day)
 //   fixture_tool transcript    prints every save as the careers are built and as each fixture is loaded and played on
 //                              (texts, ledgers, the whole save but the world, whose size and hash are printed), the
 //                              c09bc31 careers first, then update 2's; a build whose transcript matches the code the
@@ -153,6 +160,16 @@
 #include "ShortStack/Game/VideoContent.h"
 #else
 #define SS_FIXTURE_U3G3 0
+#endif
+
+// C2's site-play fixture (update 3 SPEC §7.5, update3_siteplay: the rival sites' loops, FUSE and the League's world line).
+#if SS_FIXTURE_U3G3 && __has_include("ShortStack/Game/Fuse.h") && __has_include("ShortStack/Game/SitePlay.h")
+#define SS_FIXTURE_U3G2 1
+#include "ShortStack/Game/Fuse.h"
+#include "ShortStack/Game/SitePlay.h"
+#include <set>
+#else
+#define SS_FIXTURE_U3G2 0
 #endif
 
 #include <algorithm>
@@ -2605,6 +2622,327 @@ ss::SaveData Creator3(int Days, Creator3Tally& T)
 }
 #endif
 
+#if SS_FIXTURE_U3G2
+// ---------------------------------------------------------------- C2's site-play fixture (write-u3g2)
+
+namespace play = ss::site::play;
+
+/** What the site-play career did (printed with "show"; MigrationAll3 reads the facts back from the save itself). */
+struct SitePlay3Tally
+{
+	int Ignite = 0, Rit = 0, Fuses = 0, Claims = 0, Spins = 0, Opened = 0, Refused = 0;
+	std::string Notes;
+};
+
+/** The table in front played to its result: the plan skips it (Tag), the player's turns the grader's best, then the lobby. */
+double SitePlay3Table(ss::Session& S, double Now)
+{
+	S.SprintBudgetMs = 1.0e9;
+	if (S.TableCount() > 0)
+	{
+		S.SetAutoplay(0, PlanOf(style::Style::Tag, autoplay::Mode::Skip, autoplay::Target::Result, 0));
+	}
+	for (int Frames = 0; S.CurrentScreen == ss::Screen::Table && Frames < 4000000; ++Frames)
+	{
+		Now += 1.0 / 30.0;
+		S.Update(Now);
+		if (S.TableCount() == 0 || S.Finishing())
+		{
+			continue;
+		}
+		ActBest(S, Now);
+		if (!S.HasPrompt && !S.Glance(0).Busted && !S.AutoPanel(0).Skipping)
+		{
+			S.SkipAhead(0, autoplay::Target::Result);
+		}
+	}
+	S.LeaveResults();
+	return Wait(S, Now, 0.1);
+}
+
+/**
+ * The site's dearest paid event at or under Cap starting in the next Ahead minutes (or in its late registration now), not one
+ * already played: registered at its start (the wallet pays), played to its result. False when nothing opened.
+ */
+bool SitePlay3Event(ss::Session& S, double& Now, ss::net::SiteId Site, ss::Chips Cap, double Ahead, std::set<std::string>& Played)
+{
+	const ss::net::Network& Net = ss::net::Site(Site);
+	const double World = S.WorldMinutes();
+	ss::net::EventInstance Pick;
+	ss::Chips Best = -1;
+	for (const ss::net::EventInstance& I : Net.Window(World - 60.0, World + Ahead))
+	{
+		const ss::LobbyEvent L = Net.Listing(I, nullptr, S.Unlocks());
+		if (Played.count(I.Id) == 0 && L.Joinable && L.BuyInCents > 0 && L.BuyInCents <= Cap && L.Spec.Entrants <= 3000 && I.Start <= World + Ahead &&
+			!ss::fuse::IsFuse(I.Id) && (L.BuyInCents > Best || (L.BuyInCents == Best && I.Start < Pick.Start)))
+		{
+			Pick = I;
+			Best = L.BuyInCents;
+		}
+	}
+	if (Best < 0)
+	{
+		return false;
+	}
+	Played.insert(Pick.Id);
+	Fed(S);
+	const std::string Why = S.RegisterEvent(Net.Listing(Pick, nullptr, S.Unlocks()));
+	if (!Why.empty())
+	{
+		if (Transcript)
+		{
+			std::printf("  [siteplay] %s refused: %s\n", Pick.Id.c_str(), Why.c_str());
+		}
+		return false;
+	}
+	// Registered before its start: the table opens when it starts.
+	if (S.CurrentScreen != ss::Screen::Table && S.WorldMinutes() < Pick.Start)
+	{
+		Now = At(S, Now, Pick.Start);
+	}
+	for (int Guard = 0; S.CurrentScreen != ss::Screen::Table && Guard < 60; ++Guard)
+	{
+		Now = Wait(S, Now, 0.1);
+	}
+	if (S.CurrentScreen != ss::Screen::Table)
+	{
+		return false;
+	}
+	Now = SitePlay3Table(S, Now);
+	return true;
+}
+
+/** Every claim the pages would offer now: today's done Dares, the wheel's lit ring, the Wristband's tiers that pay. */
+void SitePlay3Claims(ss::Session& S, SitePlay3Tally& T)
+{
+	const play::View V = S.SitePlayView(ss::net::SiteId::Ignite);
+	for (int K = 0; K < 3; ++K)
+	{
+		const play::DareView& D = V.Ig.Dares[static_cast<size_t>(K)];
+		if (D.Done && !D.Claimed)
+		{
+			const std::string Why = S.ClaimDare(K);
+			T.Claims += Why.empty() ? 1 : 0;
+			T.Refused += Why.empty() ? 0 : 1;
+		}
+	}
+	for (const play::TierView& Tv : V.Ig.Tiers)
+	{
+		if (Tv.Reached && !Tv.Claimed && Tv.Kind != 0)
+		{
+			const std::string Why = S.ClaimTier(Tv.Tier);
+			T.Claims += Why.empty() ? 1 : 0;
+			T.Refused += Why.empty() ? 0 : 1;
+		}
+	}
+	if (V.Ig.SpinReady && !V.Ig.Spun)
+	{
+		T.Spins += S.SpinWheel().empty() ? 1 : 0;
+	}
+}
+
+/** One line on the career (the "show" mode's progress). */
+void SitePlay3Line(ss::Session& S, int K, const SitePlay3Tally& T)
+{
+	const play::Book& B = S.Life.SitePlay;
+	const play::View I = S.SitePlayView(ss::net::SiteId::Ignite);
+	const play::View R = S.SitePlayView(ss::net::SiteId::RunItTwice);
+	std::printf("  [siteplay] day %2d %s: Ignite %d (flame %d, matches %d, T%d, L%d, %lld Sparks, %zu crackers, %zu beefs), FUSE %d, RunItTwice %d (%s %d of %d, %.1f "
+				"pts), claims %d, spins %d, holds %zu; Ignite %.0f%% of %s, RunItTwice %.0f%% of %s\n",
+		K, ss::net::DateLabel(ss::net::DayOf(S.WorldMinutes())).c_str(), T.Ignite, B.Ig.F.Streak, B.Ig.F.Matches, I.Ig.Tier, I.Ig.Level, static_cast<long long>(B.Ig.S.Balance),
+		B.Ig.Boxes.size(), B.Ig.Beefs.size(), T.Fuses, T.Rit, R.Rt.DivName.c_str(), R.Rt.Rank, R.Rt.Of, R.Rt.Points, T.Claims, T.Spins, B.Holds.size(), I.Gov.Share * 100.0,
+		ss::Money(I.Gov.Rake30).c_str(), R.Gov.Share * 100.0, ss::Money(R.Gov.Rake30).c_str());
+}
+
+/**
+ * update3_siteplay (see the top): a new career with both rivals joined from the console's letters on Night One's lobby, the
+ * days passing to the 2nd of the next month; then twelve days on both sites: a RunItTwice event every evening (the first
+ * draws the League's Placement group and the world records it), Ignite's two dearest at or under $11 every evening from the
+ * fourth day (nine flame days, a Spare Match at five), the claims taken each night, a FUSE forced to x25 at $1.10 on the fifth
+ * day and three $1.10 FUSEs a night after it (at 4 AM) while no Beef stands, two Team scalps (ss.Site.Play scalp) on the
+ * seventh and eighth, a Callout on the last (open when saved); the Beef's second bust from ss.Site.Play beef if play made
+ * none; the crackers opened down to two; saved the next afternoon, with the world.
+ */
+ss::SaveData SitePlay3(SitePlay3Tally& T)
+{
+	namespace net = ss::net;
+	const char* Seed = "fixture-u3g2-siteplay";
+	Hooks H;
+	ss::Session S(H, Seed);
+	S.NewCareer(Someone());
+	S.CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(S, 0.0, 0.2);
+	S.BankrollCents += 400000;
+	std::string Why = S.DebugSite("invite ignite").find("invitation is in Mail") != std::string::npos ? std::string() : std::string("no Ignite letter. ");
+	Why += S.AnswerInvite(net::SiteId::Ignite, true);
+	Why += S.Deposit(net::SiteId::Ignite, 25000, "card");
+	Why += S.DebugSite("invite runittwice").find("invitation is in Mail") != std::string::npos ? std::string() : std::string("no RunItTwice letter. ");
+	Why += S.AnswerInvite(net::SiteId::RunItTwice, true);
+	Why += S.Deposit(net::SiteId::RunItTwice, 25000, "card");
+	if (!Why.empty())
+	{
+		std::printf("  [siteplay] joining: %s\n", Why.c_str());
+	}
+	// To the 2nd of the next month (the 1st: the first play day whose month isn't the day before's), at noon: twelve days to
+	// the 13th, saved on the 14th, inside the Callout's Matchweek.
+	int First = play::PlayDay(S.WorldMinutes()) + 1;
+	while (play::PlayMonth(First) == play::PlayMonth(First - 1))
+	{
+		++First;
+	}
+	const int Start = First + 1;
+	std::set<std::string> Played;
+	bool Called = false;
+	int Scalped = 0;
+	for (int K = 0; K < 12; ++K)
+	{
+		const int DayNo = Start + K;
+		Now = CreatorUntil(S, Now, static_cast<double>(DayNo) * Day + 12.0 * 60.0);
+		S.BankrollCents = std::max<ss::Chips>(S.BankrollCents, 150000);
+		for (const net::SiteId Site : {net::SiteId::Ignite, net::SiteId::RunItTwice})
+		{
+			if (*ss::site::WalletOf(S.Life.Sites, Site) < 8000)
+			{
+				S.Deposit(Site, 10000, "card");
+			}
+		}
+		// 5 PM: Ignite's two dearest at or under $11 starting by 11 PM (from the fourth day: the Flame's nine days).
+		Now = CreatorUntil(S, Now, static_cast<double>(DayNo) * Day + 17.0 * 60.0);
+		for (int N = 0, Tries = 0; N < 2 && K >= 3 && Tries < 8; ++Tries)
+		{
+			const double Left = static_cast<double>(DayNo) * Day + 23.0 * 60.0 - S.WorldMinutes();
+			const bool Sat = Left > 0.0 && SitePlay3Event(S, Now, net::SiteId::Ignite, 1100, Left, Played);
+			N += Sat ? 1 : 0;
+			T.Ignite += Sat ? 1 : 0;
+		}
+		// 8:30 PM: RunItTwice's dearest at or under $5.50 (the first paid entry draws the Placement group).
+		Now = CreatorUntil(S, Now, static_cast<double>(DayNo) * Day + 20.5 * 60.0);
+		for (int Tries = 0; Tries < 4; ++Tries)
+		{
+			if (SitePlay3Event(S, Now, net::SiteId::RunItTwice, 550, 180.0, Played))
+			{
+				++T.Rit;
+				break;
+			}
+		}
+		// FUSE, at 4 AM (the same play day): x25 forced at $1.10 on the fifth day (ss.Site.Play fuse 0 25), then three a night at
+		// $1.10 while no Beef stands (the seats are the hour's online members; repeats are rare).
+		Now = CreatorUntil(S, Now, static_cast<double>(DayNo + 1) * Day + 4.0 * 60.0);
+		auto Beef = [&S]() {
+			for (const play::Beef& Bf : S.Life.SitePlay.Ig.Beefs)
+			{
+				if (Bf.TheyKo >= 2)
+				{
+					return true;
+				}
+			}
+			return false;
+		};
+		const int Fuses = K == 4 ? 1 : K > 4 ? 3 : 0;
+		for (int N = 0; N < Fuses && (K == 4 || !Beef()); ++N)
+		{
+			if (K == 4 && N == 0)
+			{
+				const std::string Forced = S.DebugSitePlay("fuse 0 25");
+				if (Transcript)
+				{
+					std::printf("  [siteplay] %s\n", Forced.c_str());
+				}
+			}
+			Fed(S);
+			const std::string Lit = S.LightFuse(0, false);
+			if (Lit.empty() && S.CurrentScreen == ss::Screen::Table)
+			{
+				++T.Fuses;
+				Now = SitePlay3Table(S, Now);
+			}
+			else if (!Lit.empty())
+			{
+				std::printf("  [siteplay] LIGHT IT: %s\n", Lit.c_str());
+			}
+		}
+		// The Callout (the last day: a week-long duel, so it's open when the save is taken) and two Team scalps (seventh and
+		// eighth).
+		const play::League& Lg = S.Life.SitePlay.Rt.L;
+		if (K >= 11 && !Called && Lg.Month >= 0)
+		{
+			for (const int Npc : Lg.Npcs)
+			{
+				if (!Called && Npc >= 0)
+				{
+					const std::string Said = S.CallOut(Npc);
+					Called = Said.empty();
+					if (!Said.empty())
+					{
+						std::printf("  [siteplay] Callout %d: %s\n", Npc, Said.c_str());
+					}
+				}
+			}
+		}
+		if ((K == 6 || K == 7) && Scalped < 2)
+		{
+			const std::vector<int> Pros = play::TeamPros(&S.Living());
+			if (static_cast<int>(Pros.size()) > Scalped)
+			{
+				const std::string Said = S.DebugSitePlay("scalp " + std::to_string(Pros[static_cast<size_t>(Scalped)]));
+				++Scalped;
+				if (Transcript)
+				{
+					std::printf("  [siteplay] %s\n", Said.c_str());
+				}
+			}
+		}
+		SitePlay3Claims(S, T);
+		if (Transcript)
+		{
+			SitePlay3Line(S, K, T);
+		}
+	}
+	// The Beef: in play the list keeps five names and the fields are large, so a second bust by one member is rare; the latest
+	// to bust the player busts them once more, as ss.Site.Play beef notes it (the per-hand hook's path), for PIE §9.3 #3.
+	{
+		const play::Beef* Last = nullptr;
+		bool Stands = false;
+		for (const play::Beef& Bf : S.Life.SitePlay.Ig.Beefs)
+		{
+			Stands = Stands || Bf.TheyKo >= 2;
+			Last = Bf.TheyKo > 0 && (!Last || Bf.LastDay >= Last->LastDay) ? &Bf : Last;
+		}
+		if (!Stands && Last)
+		{
+			const std::string Said = S.DebugSitePlay("beef " + Last->Name);
+			if (Transcript)
+			{
+				std::printf("  [siteplay] %s\n", Said.c_str());
+			}
+		}
+	}
+	// The crackers opened down to two on the shelf.
+	while (S.Life.SitePlay.Ig.Boxes.size() > 2)
+	{
+		const std::string Id = S.Life.SitePlay.Ig.Boxes.front().Id;
+		if (!S.OpenCracker(Id).empty())
+		{
+			break;
+		}
+		++T.Opened;
+	}
+	// The next afternoon, fed: saved, with the world (its League line).
+	Now = CreatorUntil(S, Now, static_cast<double>(Start + 12) * Day + 15.0 * 60.0);
+	Fed(S);
+	Now = Wait(S, Now, 0.2);
+	S.Save();
+	if (Transcript)
+	{
+		SitePlay3Line(S, 12, T);
+		std::printf("%s", S.DebugSitePlay("describe").c_str());
+		std::printf("  [siteplay] %d Ignite entries, %d FUSEs, %d RunItTwice, %d claims, %d spins, %d crackers opened, %d refused\n", T.Ignite, T.Fuses, T.Rit, T.Claims, T.Spins,
+			T.Opened, T.Refused);
+	}
+	return H.Last;
+}
+#endif
+
 bool WriteFile(const std::string& Path, const std::string& Text)
 {
 	FILE* F = std::fopen(Path.c_str(), "wb");
@@ -2646,12 +2984,32 @@ int main(int Argc, char** Argv)
 	using namespace fixture_tool;
 	const std::string Mode = Argc > 1 ? Argv[1] : "";
 	if (Mode != "write" && Mode != "write2" && Mode != "write-g1" && Mode != "write-g2" && Mode != "write-g3" && Mode != "write-g3k" && Mode != "g3k-dry" && Mode != "kast-worst" &&
-		Mode != "write-u3g3" && Mode != "transcript")
+		Mode != "write-u3g3" && Mode != "write-u3g2" && Mode != "transcript")
 	{
 		std::printf("usage: fixture_tool write <dir> | fixture_tool write2 <dir> | fixture_tool write-g1 <dir> [show] | fixture_tool write-g2 <dir> [show] | fixture_tool write-g3 <dir> "
 					"[show] | fixture_tool write-g3k <dir> [show] | fixture_tool g3k-dry <days> | fixture_tool kast-worst | fixture_tool write-u3g3 <dir> [show] [days] | "
-					"fixture_tool transcript\n");
+					"fixture_tool write-u3g2 <dir> [show] | fixture_tool transcript\n");
 		return 2;
+	}
+	if (Mode == "write-u3g2")
+	{
+#if SS_FIXTURE_U3G2
+		// C2's site-play fixture (update 3 SPEC §7.5): "show" prints each day and the book at the end. Written WITH its world
+		// (the League's world line lives there; update2_blank_world's precedent).
+		if (Argc < 3)
+		{
+			std::printf("usage: fixture_tool write-u3g2 <dir> [show]\n");
+			return 2;
+		}
+		Transcript = Argc > 3 && std::string(Argv[3]) == "show";
+		const std::string Dir = std::string(Argv[2]) + "/";
+		SitePlay3Tally T;
+		const ss::SaveData D = SitePlay3(T);
+		return WriteFile(Dir + "update3_siteplay.ssave", D.Serialize()) ? 0 : 1;
+#else
+		std::printf("fixture_tool write-u3g2: this tree has no site play (Game/SitePlay.h, Game/Fuse.h)\n");
+		return 2;
+#endif
 	}
 	Transcript = Mode == "transcript";
 	if (Mode == "write-g3k" || Mode == "g3k-dry" || Mode == "kast-worst")

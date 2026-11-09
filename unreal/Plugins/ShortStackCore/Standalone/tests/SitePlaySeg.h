@@ -10,10 +10,15 @@ namespace siteplay_test
 {
 extern int Failures;
 extern int Checks;
+/** "siteplay_test long": the slow modes (more seeds; the League's group-pace case). */
+extern bool Long;
 void Expect(bool Condition, const char* What);
 void Expect(bool Condition, const std::string& What);
 
 // The per-track files' entry points, called from main() in this order.
+void SegCore();    // core-siteplay: tests/siteplay_main.cpp (the book: catalogs, the Governor, the loops, the model harness)
 void SegSession(); // core-siteplay: tests/siteplay_session.cpp (the Session's site play, the strike gate's refusals)
 void SegFuse();    // core-fuse: tests/siteplay_fuse.cpp (FUSE's tables, draws, pool and Session glue)
+/** "siteplay_test beef [days] [fuses]" (G2 fix M1): update3_siteplay's career run long, how often a Beef forms in play. */
+void SegBeef(int Days, int Fuses);
 } // namespace siteplay_test

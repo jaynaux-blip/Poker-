@@ -31,6 +31,7 @@
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Game/Sites.h"
+#include "ShortStack/Game/SitePlay.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/Video.h"
@@ -39,6 +40,7 @@
 #include "ShortStack/UI/ShopScreen.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -382,7 +384,14 @@ struct SegSites
 	int Arrivals = 0, LandedXfers = 0;
 	std::set<std::string> Months;
 
-	static bool Same(const ss::site::Line& A, const ss::site::Line& B) { return A.At == B.At && A.Kind == B.Kind && A.Cents == B.Cents && A.Label == B.Label; }
+	/** Update 3 (§1.3): a loop's 0-cent "Rewards: " and "Prize Counter: " lines are one a day, relabelled in place as the day's
+	 *  tickets add up ("Rewards: 2 tickets"), so they match by their prefix. */
+	static bool Daily(const std::string& L) { return L.rfind("Rewards: ", 0) == 0 || L.rfind("Prize Counter: ", 0) == 0; }
+	static bool Same(const ss::site::Line& A, const ss::site::Line& B)
+	{
+		return A.At == B.At && A.Kind == B.Kind && A.Cents == B.Cents &&
+			(A.Label == B.Label || (A.Cents == 0 && Daily(A.Label) && Daily(B.Label) && A.Label.compare(0, 8, B.Label, 0, 8) == 0));
+	}
 	void Audit(const ss::Session& S, const std::vector<ss::life::LedgerEntry>& NewLines, int Seed, int Step, const std::string& Where)
 	{
 		namespace net = ss::net;
@@ -475,6 +484,91 @@ struct SegSites
 				std::none_of(S.Life.Inbox.begin(), S.Life.Inbox.end(), [&Thread](const ss::life::Letter& L) { return L.Source == "site" && L.Thread == Thread && L.Kind == ss::site::LetterInvite; }))
 			{
 				Fail("sites: an unanswered invitation dropped from Mail (" + Thread + ", " + Where + ")", Seed, Step);
+			}
+		}
+	}
+};
+
+/**
+ * The rival sites' loops (update 3 SPEC §1.3, §1.4, §7.7; C2), audited after every step beside SegSites:
+ *   - Sparks conserve: the balance and the Monday bank never go below zero, and credits less spends only grow (balance,
+ *     Monday bank and spent together never fall; base and spent never fall);
+ *   - every key pays once: the Guest List's keys are unique, at most 15 lines, each Covered within its value; a League month
+ *     closes once; FUSE's ordinals never go back;
+ *   - at most one loop "Rewards: " line and one "Prize Counter: " line a play day on each wallet;
+ *   - the Governor's rings never book a negative slot.
+ */
+struct SegPlay
+{
+	int64_t Credits = 0, Base = 0, Spent = 0;
+	std::array<int, 3> Ordinals{};
+	void Audit(const ss::Session& S, int Seed, int Step, const std::string& Where)
+	{
+		namespace play = ss::site::play;
+		const play::Book& B = S.Life.SitePlay;
+		const play::Spark& Sp = B.Ig.S;
+		if (Sp.Balance < 0 || Sp.Deferred < 0)
+		{
+			Fail("play: Sparks below zero (" + std::to_string(Sp.Balance) + ", banked " + std::to_string(Sp.Deferred) + ", " + Where + ")", Seed, Step);
+		}
+		const int64_t Now = Sp.Balance + Sp.Deferred + Sp.SpentLife;
+		if (Now < Credits || Sp.BaseLife < Base || Sp.SpentLife < Spent)
+		{
+			Fail("play: Sparks credited less spent went down (" + std::to_string(Credits) + " -> " + std::to_string(Now) + ", " + Where + ")", Seed, Step);
+		}
+		Credits = Now;
+		Base = Sp.BaseLife;
+		Spent = Sp.SpentLife;
+		std::set<std::string> Keys;
+		for (const play::Hold& H : B.Holds)
+		{
+			if (!Keys.insert(H.Key).second || H.Covered < 0 || H.Covered > H.Cents)
+			{
+				Fail("play: a Guest List line twice or covered past its value (" + H.Key + ", " + Where + ")", Seed, Step);
+			}
+		}
+		if (B.Holds.size() > 15)
+		{
+			Fail("play: the Guest List past 15 lines (" + std::to_string(B.Holds.size()) + ", " + Where + ")", Seed, Step);
+		}
+		std::set<int> Months;
+		for (const play::LeagueHist& Hs : B.Rt.Hist)
+		{
+			if (!Months.insert(Hs.Month).second)
+			{
+				Fail("play: a League month closed twice (" + std::to_string(Hs.Month) + ", " + Where + ")", Seed, Step);
+			}
+		}
+		for (size_t T = 0; T < 3; ++T)
+		{
+			if (B.Ig.Fuse.N[T] < Ordinals[T])
+			{
+				Fail("play: a FUSE ordinal went back (" + Where + ")", Seed, Step);
+			}
+			Ordinals[T] = B.Ig.Fuse.N[T];
+		}
+		for (const play::GovRing& G : B.Gov)
+		{
+			for (size_t K = 0; K < G.Promo.size(); ++K)
+			{
+				if (G.Promo[K] < 0 || G.Rake[K] < 0)
+				{
+					Fail("play: a ring slot below zero (" + Where + ")", Seed, Step);
+				}
+			}
+		}
+		for (const ss::site::Account& A : S.Life.Sites.Accounts)
+		{
+			std::map<std::pair<int, std::string>, int> PerDay;
+			for (const ss::site::Line& L : A.Lines)
+			{
+				for (const char* Prefix : {"Rewards: ", "Prize Counter: "})
+				{
+					if (L.Cents == 0 && L.Label.rfind(Prefix, 0) == 0 && ++PerDay[{play::PlayDay(L.At), Prefix}] > 1)
+					{
+						Fail("play: two \"" + std::string(Prefix) + "\" lines on one play day (" + std::string(ss::net::KeyOf(A.Site)) + ", " + Where + ")", Seed, Step);
+					}
+				}
 			}
 		}
 	}
@@ -697,6 +791,97 @@ int SegmentCareer(int Seed, int Days, std::map<std::string, int>& Reached)
 			Reached[Why.empty() ? "sites:upload" : "sites:upload refused"]++;
 		}
 		return "an upload";
+	};
+	// Update 3 C2 (SPEC §7.7): the rival sites' loops at random, on their own draws: claims, spins, cracker opens, Prize Counter
+	// buys, stars, callouts, a look worn, FUSE lights (paid or on a ticket, the second press or not: a refusal leaves nothing).
+	SegPlay Plays;
+	ss::Rng Pl("monkey-play-" + std::to_string(Seed));
+	auto PlayAction = [&](int At) -> std::string {
+		namespace play = ss::site::play;
+		namespace net = ss::net;
+		switch (Pl.Int(9))
+		{
+		case 0:
+			Reached[S->SpinWheel().empty() ? "play:spun" : "play:spin refused"]++;
+			return "a spin";
+		case 1:
+			Reached[S->ClaimDare(Pl.Int(3)).empty() ? "play:dare claimed" : "play:dare refused"]++;
+			return "a Dare claimed";
+		case 2:
+		{
+			const std::vector<play::Box>& Bx = S->Life.SitePlay.Ig.Boxes;
+			const std::string Id = Bx.empty() || Pl.Chance(0.2) ? std::string("*") : Bx[static_cast<size_t>(Pl.Int(static_cast<int>(Bx.size())))].Id;
+			Reached[S->OpenCracker(Id).empty() ? "play:cracker opened" : "play:cracker refused"]++;
+			return "a cracker";
+		}
+		case 3:
+			Reached[S->BuyPrize(Pl.Int(static_cast<int>(play::PrizeCounter().size()) + 1)).empty() ? "play:prize bought" : "play:prize refused"]++;
+			return "the Prize Counter";
+		case 4:
+			Reached[S->ClaimTier(1 + Pl.Int(30)).empty() ? "play:tier claimed" : "play:tier refused"]++;
+			return "a Wristband tier";
+		case 5:
+		{
+			const double World = S->WorldMinutes();
+			const std::vector<net::EventInstance> Next = net::Site(net::SiteId::RunItTwice).Window(World, World + 720.0);
+			if (!Next.empty())
+			{
+				const std::string& Id = Next[static_cast<size_t>(Pl.Int(static_cast<int>(Next.size())))].Id;
+				Reached[S->StarEvent(Id.substr(0, Id.find('@')), Pl.Chance(0.7)).empty() ? "play:starred" : "play:star refused"]++;
+			}
+			return "a star";
+		}
+		case 6:
+			Reached[S->CallOut(S->Life.SitePlay.Rt.L.Npcs[static_cast<size_t>(Pl.Int(19))]).empty() ? "play:called out" : "play:callout refused"]++;
+			return "a Callout";
+		case 7:
+			Reached[S->Equip(Pl.Int(5), Pl.Int(4)).empty() ? "play:worn" : "play:wear refused"]++;
+			return "a look";
+		default:
+		{
+			const ss::Chips* W = ss::site::WalletOf(S->Life.Sites, net::SiteId::Ignite);
+			const ss::Chips Wallet = W ? *W : -1;
+			const std::array<int, 3> Was = S->Life.SitePlay.Ig.Fuse.N;
+			const ss::Chips Bank = S->BankrollCents;
+			const std::string Why = S->LightFuse(Pl.Int(3), Pl.Chance(0.3), ss::StrikeConfirm{Pl.Chance(0.5)});
+			if (!Why.empty())
+			{
+				const ss::Chips* W2 = ss::site::WalletOf(S->Life.Sites, net::SiteId::Ignite);
+				if ((W2 ? *W2 : -1) != Wallet || S->Life.SitePlay.Ig.Fuse.N != Was || S->BankrollCents != Bank || S->CurrentScreen == ss::Screen::Table)
+				{
+					Fail("play: a refused LIGHT IT changed something (" + Why + ")", Seed, At);
+				}
+				Reached["play:fuse refused"]++;
+				return "a FUSE refused";
+			}
+			const bool Plan = Pl.Chance(0.7);
+			if (Plan && S->TableCount() > 0)
+			{
+				S->SetAutoplay(0, RandomPlan(Pl, true));
+			}
+			S->SprintBudgetMs = 1.0e9;
+			for (int F = 0; F < 400000 && S->CurrentScreen == ss::Screen::Table; ++F)
+			{
+				if (!Plan || (S->TableCount() > 0 && !S->Glance(0).Busted && !S->AutoPanel(0).On))
+				{
+					S->CurrentPace = ss::Pace::Sprint;
+				}
+				else if (S->TableCount() > 0 && !S->Glance(0).Busted && !S->AutoPanel(0).Skipping && !S->HasPrompt)
+				{
+					S->SkipAhead(0, autoplay::Target::Result);
+				}
+				Now += 1.0 / 30.0;
+				S->Update(Now);
+				if (S->HasPrompt && Now - S->Prompt.OpenedAt > 0.3)
+				{
+					S->HeroAct(Pl.Chance(0.5) ? ss::PlayerAction::Fold() : S->Prompt.CanCheck ? ss::PlayerAction::Check() : ss::PlayerAction::Call());
+				}
+			}
+			S->LeaveResults();
+			Reached[Plan ? "play:fuse by the plan" : "play:fuse sprinted"]++;
+			return "a FUSE";
+		}
+		}
 	};
 	static const char* const Backers[] = {"lou", "dee", "mei", "rick", "lanternrow", "sam"};
 	for (; S->WorldMinutes() < End && Step < 4000; ++Step)
@@ -965,6 +1150,15 @@ int SegmentCareer(int Seed, int Days, std::map<std::string, int>& Reached)
 			B.Audit(*S, Seed, Step, Did);
 			Books.Audit(*S, B.NewLines, Seed, Step, Did);
 		}
+		// Update 3 C2: the loops beside it, on their own draws, every book audited again; the play book after every step.
+		if (Pl.Chance(0.30))
+		{
+			Fed();
+			const std::string Did = PlayAction(Step);
+			B.Audit(*S, Seed, Step, Did);
+			Books.Audit(*S, B.NewLines, Seed, Step, Did);
+		}
+		Plays.Audit(*S, Seed, Step, Where);
 	}
 	Reached["sites:landed"] += Books.LandedXfers;
 	S->Save();
@@ -981,6 +1175,15 @@ int SegmentCareer(int Seed, int Days, std::map<std::string, int>& Reached)
 	{
 		Fail("segment: the save's lines grew too big (" + std::to_string(Segment) + " segment, " + std::to_string(Update2) + " update 2)", Seed, Step);
 	}
+	// Update 3 (§1.8): the sites' play lines within 4.4 KB.
+	const size_t Play = LineBytes(Text, {"site\tspark\t", "site\tflame\t", "site\tdare\t", "site\tbox\t", "site\tband\t", "site\tlevel\t", "site\tlook\t", "site\tfuse\t",
+										"site\tbeef\t", "site\tstick\t", "site\tstar\t", "site\tleague\t", "site\tlhist\t", "site\tcallout\t", "site\th2h\t", "site\tscalp\t",
+										"site\tluck\t", "site\tcred\t", "site\tgov\t", "site\thold\t"});
+	if (Play > 4506)
+	{
+		Fail("play: the sites' play lines past 4.4 KB (" + std::to_string(Play) + ")", Seed, Step);
+	}
+	Reached["play:line bytes max"] = std::max(Reached["play:line bytes max"], static_cast<int>(Play));
 	std::printf("segment career %d: %d days, %d steps, bankroll %s, %zu results online, %d live, %zu stakes, %zu contracts, %zu letters, at most %d ledger lines a step, segment "
 				"lines %zu bytes, update 2's %zu\n",
 		Seed, Days, Step, ss::Money(S->BankrollCents).c_str(), S->History.size(), S->Life.LiveEvents, S->Life.Stakes.Deals.size(), S->Life.Sponsors.Contracts.size(),

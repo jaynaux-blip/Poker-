@@ -18,6 +18,9 @@
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/Video.h"
 #include "ShortStack/Game/World.h"
+#include "ShortStack/Game/Fuse.h"
+#include "ShortStack/Game/SitePlay.h"
+#include "ShortStack/Game/WorldLeague.h"
 #include "ShortStack/UI/Canvas.h"
 #include "ShortStack/UI/RiverLine.h"
 #include "SessionSeg.h"
@@ -35,6 +38,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <map>
 #include <set>
 #include <vector>
@@ -3546,6 +3550,17 @@ namespace life = ss::life;
 namespace live = ss::live;
 const double Day = 1440.0;
 
+/** The careers' player (Run's and the update 3 careers'). */
+ss::hero::Character Player()
+{
+	ss::hero::Character Who;
+	Who.FirstName = "Jesse";
+	Who.LastName = "Cole";
+	Who.Story = ss::hero::Background::DealersKid;
+	Who.Created = true;
+	return Who;
+}
+
 /** A career that goes out and keeps quiet: the phone counts, the bus always comes. */
 struct PaceHooks : Hooks
 {
@@ -3657,6 +3672,18 @@ struct Career
 	int JoinedSites = 0;                           // rivals joined with money on them
 	int EventsEnd = 0;                             // the record at the end: tracked events,
 	ss::Chips Abi100End = 0;                       // and the last hundred's average buy-in
+	// Update 3 C2 (update 3 SPEC §1.13): IncomeU3, a day at a time. The sites' promotion and rake read from the Governor's own
+	// rings (every grant booked on either rival, tickets at face, Sparks at Prize Counter face), never from the 40-line wallets.
+	std::array<ss::site::play::GovRing, 3> Ring{}; // the rings at the last tally
+	size_t LedgerSeen = 0;                         // Ledger.All's lines already in IncomeU3
+	std::vector<int64_t> SitePromoDay;             // both rivals' promotion booked that day (thousandths of a cent)
+	std::vector<ss::Chips> IncomeU3Day;            // IncomeU3 that day: Income()'s kinds, Rerun's (13) and the sites' promotion
+	std::array<int64_t, 3> PromoBy{}, RakeBy{};    // by site, over the career (thousandths of a cent)
+	std::set<std::string> SecondRunLines;          // RunItTwice's "Second Run Club" wallet lines seen (At and label)
+	ss::Chips SecondRun = 0;                       // their cents
+	std::map<std::string, int> HoldSince;          // the Guest List: a hold's key and the day it was first seen
+	int HoldsSeen = 0, HoldsCleared = 0, LongestHold = 0;
+	std::set<std::string> ResultsSeen;             // History's rival results already in IncomeU3 (their prizes land on the site, not the bank)
 };
 
 /** Income as check 1 reads it: poker, the job, hustles, prizes, streaming and the sponsors' lines. */
@@ -4404,6 +4431,156 @@ double CreatorUpload(ss::Session& S, Career& C, double Now, int DayNo)
  * (live-only, mixed), and every deal on the table taken when Deals is on. (The suite's budget sets the pace: about 25 s a
  * career.)
  */
+/**
+ * What one of the Governor's rings booked between two looks at it (thousandths of a cent): the ring now, less what it held
+ * before that is still in it (the slots a roll emptied left with their days). A grant spread over earlier slots is booked
+ * once, whichever slots it went to (core-siteplay's note: summing PromoCentsOn over days would miss those).
+ */
+int64_t RingBooked(const ss::site::play::GovRing& Old, const ss::site::play::GovRing& New, bool Rake)
+{
+	auto Sum = [Rake](const ss::site::play::GovRing& G) {
+		int64_t Out = 0;
+		for (size_t K = 0; K < G.Rake.size(); ++K)
+		{
+			Out += Rake ? G.Rake[K] : G.Promo[K];
+		}
+		return Out;
+	};
+	if (New.Day0 < 0)
+	{
+		return 0;
+	}
+	if (Old.Day0 < 0)
+	{
+		return Sum(New);
+	}
+	int64_t Kept = Sum(Old);
+	const int Steps = std::min(std::max(New.Day0 - Old.Day0, 0), 30);
+	for (int K = 1; K <= Steps; ++K)
+	{
+		const size_t Slot = static_cast<size_t>(((Old.Day0 + K) % 30 + 30) % 30);
+		Kept -= Rake ? Old.Rake[Slot] : Old.Promo[Slot];
+	}
+	return Sum(New) - Kept;
+}
+
+/**
+ * IncomeU3 (update 3 SPEC §1.13), the day's: Income()'s kinds and Rerun's payouts (kind 13) from the ledger, the rivals' prizes
+ * (History's results on Ignite and RunItTwice: a site's prizes go to its wallet, which Income() never reads), and the sites'
+ * promotion booked in the Governor's rings since the last tally; the rake beside it, Second Run's wallet lines, and the Guest
+ * List's waits. Called once a world day by the careers that play the rivals.
+ */
+void TallyU3(const ss::Session& S, Career& C, int K)
+{
+	namespace play = ss::site::play;
+	C.Ledger.Take(S.Life);
+	ss::Chips Income = 0;
+	for (size_t I = C.LedgerSeen; I < C.Ledger.All.size(); ++I)
+	{
+		const life::LedgerEntry& E = C.Ledger.All[I];
+		Income += pacing::Income(E) || (E.Kind == life::LedgerVideo && E.Amount > 0) ? E.Amount : 0;
+	}
+	C.LedgerSeen = C.Ledger.All.size();
+	// A rival's prizes are paid into its wallet, never the bank's ledger: History's new rival results (FUSE never enters it).
+	for (const ss::HistoryEntry& E : S.History)
+	{
+		if (!E.EventId.empty() && ss::net::SiteOf(E.EventId) != ss::net::SiteId::RiverLine && C.ResultsSeen.insert(E.EventId).second)
+		{
+			Income += std::max<ss::Chips>(0, E.Prize);
+		}
+	}
+	int64_t Promo = 0;
+	for (size_t G = 0; G < 3; ++G)
+	{
+		const play::GovRing& Now = S.Life.SitePlay.Gov[G];
+		const int64_t P = RingBooked(C.Ring[G], Now, false);
+		const int64_t R = RingBooked(C.Ring[G], Now, true);
+		C.PromoBy[G] += P;
+		C.RakeBy[G] += R;
+		Promo += P;
+		C.Ring[G] = Now;
+	}
+	C.SitePromoDay.push_back(Promo);
+	C.IncomeU3Day.push_back(Income + Promo / play::ValuePerCent);
+	if (const ss::site::Account* A = ss::site::AccountOf(S.Life.Sites, ss::net::SiteId::RunItTwice))
+	{
+		for (const ss::site::Line& L : A->Lines)
+		{
+			if (L.Kind == 4 && L.Label.rfind("Second Run Club", 0) == 0 && C.SecondRunLines.insert(ss::Fixed(L.At, 1) + L.Label).second)
+			{
+				C.SecondRun += L.Cents;
+			}
+		}
+	}
+	std::set<std::string> Now;
+	for (const play::Hold& Hd : S.Life.SitePlay.Holds)
+	{
+		Now.insert(Hd.Key);
+		C.HoldsSeen += C.HoldSince.emplace(Hd.Key, K).second ? 1 : 0;
+		C.LongestHold = std::max(C.LongestHold, K - C.HoldSince[Hd.Key]);
+	}
+	for (auto It = C.HoldSince.begin(); It != C.HoldSince.end();)
+	{
+		const bool Gone = Now.count(It->first) == 0;
+		C.HoldsCleared += Gone ? 1 : 0;
+		It = Gone ? C.HoldSince.erase(It) : std::next(It);
+	}
+}
+
+/** Days [From, To)'s sums of a daily tally. */
+template <typename T>
+T DaysSum(const std::vector<T>& V, int From, int To)
+{
+	T Out = 0;
+	for (int K = std::max(0, From); K < To && K < static_cast<int>(V.size()); ++K)
+	{
+		Out += V[static_cast<size_t>(K)];
+	}
+	return Out;
+}
+
+/** The sites' tally against IncomeU3 (§1.13): site promotions within 10% of it at days 120, 150 and 180, and no 30-day window
+ *  of them at a quarter of a rent; printed with the Guest List's waits and each site's given-back share. */
+void U3Checks(const Career& C, const char* Name)
+{
+	namespace play = ss::site::play;
+	const int Days = static_cast<int>(C.IncomeU3Day.size());
+	std::string Shares;
+	bool Within = true;
+	for (const int At : {120, 150, 180})
+	{
+		if (At > Days)
+		{
+			continue;
+		}
+		const int64_t Promo = DaysSum(C.SitePromoDay, 0, At) / play::ValuePerCent;
+		const ss::Chips Income = DaysSum(C.IncomeU3Day, 0, At);
+		const double Share = Income > 0 ? static_cast<double>(Promo) / static_cast<double>(Income) : 0.0;
+		Within = Within && Share <= 0.10;
+		Shares += " day " + std::to_string(At) + " " + ss::Money(static_cast<ss::Chips>(Promo)) + " of " + ss::Money(Income) + " (" + ss::Fixed(Share * 100.0, 1) + "%)";
+	}
+	int64_t Worst = 0;
+	int WorstAt = 0;
+	for (int K = 0; K + 30 <= Days || (K == 0 && Days > 0); ++K)
+	{
+		const int64_t W = DaysSum(C.SitePromoDay, K, K + 30) / play::ValuePerCent;
+		WorstAt = W > Worst ? K : WorstAt;
+		Worst = std::max(Worst, W);
+	}
+	const double RentQuarter = 0.25 * static_cast<double>(life::MonthlyRentCents);
+	std::printf("  pacing %s (update 3): site promotions against IncomeU3:%s; the worst 30 days of them %s (from day %d; a quarter of a rent %s); Ignite gave back %s of "
+				"%s rake (%.1f%%), RunItTwice %s of %s (%.1f%%; Second Run's lines %s); the Guest List: %d holds, %d cleared, the longest %d days\n",
+		Name, Shares.empty() ? " (fewer than 120 days)" : Shares.c_str(), ss::Money(static_cast<ss::Chips>(Worst)).c_str(), WorstAt, ss::Money(static_cast<ss::Chips>(RentQuarter)).c_str(),
+		ss::Money(static_cast<ss::Chips>(C.PromoBy[1] / play::ValuePerCent)).c_str(), ss::Money(static_cast<ss::Chips>(C.RakeBy[1] / play::ValuePerCent)).c_str(),
+		C.RakeBy[1] > 0 ? 100.0 * static_cast<double>(C.PromoBy[1]) / static_cast<double>(C.RakeBy[1]) : 0.0,
+		ss::Money(static_cast<ss::Chips>(C.PromoBy[2] / play::ValuePerCent)).c_str(), ss::Money(static_cast<ss::Chips>(C.RakeBy[2] / play::ValuePerCent)).c_str(),
+		C.RakeBy[2] > 0 ? 100.0 * static_cast<double>(C.PromoBy[2]) / static_cast<double>(C.RakeBy[2]) : 0.0, ss::Money(C.SecondRun).c_str(), C.HoldsSeen, C.HoldsCleared,
+		C.LongestHold);
+	Expect(Within, (std::string("pacing (") + Name + "): site promotions within 10% of IncomeU3 at days 120, 150 and 180 (update 3 §1.13)").c_str());
+	Expect(static_cast<double>(Worst) < RentQuarter, (std::string("pacing (") + Name + "): no 30-day window of site promotions at a quarter of a rent or more (update 3 §1.13)").c_str());
+	Expect(C.LongestHold <= 60, (std::string("pacing (") + Name + "): every Guest List hold clears within 60 days (W6)").c_str());
+}
+
 void Run(Career& C)
 {
 	PaceHooks H;
@@ -4481,6 +4658,10 @@ void Run(Career& C)
 			Now = CreatorUpload(*S, C, Now, DayNo);
 		}
 		C.TierByDay.push_back(S->SponsorTier());
+		if (C.Sites)
+		{
+			TallyU3(*S, C, K); // update 3 C2: IncomeU3 and the Governor's rings
+		}
 		const int Done = K + 1;
 		if (Done == 30 || Done == 60 || Done == 90 || Done == C.Days)
 		{
@@ -4856,7 +5037,18 @@ void CreatorChecks(const Career& C)
  *   - no site invites before Act I is over (the second rent paid), and each rival's letter came at its own gate;
  *   - both rivals joined from their letters, with money moving both ways (transfers on).
  * Rewards under 3% of the rent in Act I is every career's (Checks).
+ * Update 3 G2 (SPEC §11 Q4, answered 2026-10-27; core-sites-g2's deliberate rewrite): "its own gate" is any of the site's
+ * volume doors (InviteDoor: Ignite's 60, RunItTwice's 300 at $11 or 150 at $5.50), and RunItTwice now asks this grinder by
+ * day 180 (C2's bound; measured on day 150).
  */
+/** A site's volume doors against the record read with its letter: Update 2's, or Update 3's second one (§11 Q4). */
+bool InviteDoor(const ss::net::SiteDef& D, int Events, ss::Chips Abi)
+{
+	const bool First = Events >= D.Gate.MinEvents && (D.Gate.MinAbi100 == 0 || Abi >= D.Gate.MinAbi100);
+	const bool Second = D.Gate.MinEvents2 > 0 && Events >= D.Gate.MinEvents2 && Abi >= D.Gate.MinAbi100_2;
+	return First || Second;
+}
+
 void SitesChecks(const Career& C)
 {
 	const double Act1 = ActIEndOf(C.Ledger);
@@ -4864,6 +5056,7 @@ void SitesChecks(const Career& C)
 	std::string Letters;
 	bool Early = false;
 	bool Ignite = false, Rit = false;
+	int RitDay = -1;
 	bool Gates = true;
 	for (size_t I = 0; I < C.Invited.size(); ++I)
 	{
@@ -4876,8 +5069,9 @@ void SitesChecks(const Career& C)
 		Early = Early || C.Invited[I].second < Act1;
 		Ignite = Ignite || Site == ss::net::SiteId::Ignite;
 		Rit = Rit || Site == ss::net::SiteId::RunItTwice;
+		RitDay = Site == ss::net::SiteId::RunItTwice ? DayOf(C.Invited[I].second) : RitDay;
 		// (The record is read the moment the letter is seen, a step at most after the gate passed.)
-		Gates = Gates && Events >= D.Gate.MinEvents && (D.Gate.MinAbi100 == 0 || Abi >= D.Gate.MinAbi100);
+		Gates = Gates && InviteDoor(D, Events, Abi);
 	}
 	const int Joined = C.JoinedSites;
 	ss::Chips Fees = 0;
@@ -4897,12 +5091,13 @@ void SitesChecks(const Career& C)
 	Expect(C.SiteRentBreaks == 0, "pacing (multi-site): site money never pays rent (wallets move by their own lines, transfers land on their minute, the bank by its ledger)");
 	Expect(C.WarnMissed == 0, "pacing (multi-site): whenever the bank alone can't cover a rent deadline but the bank and the sites could, the rent card's warning shows, from 72 hours out");
 	Expect(!Early && Act1 < 1.0e17, "pacing (multi-site): no site invites before Act I is over (U11)");
-	// (RunItTwice's door, an $11 average over the last hundred, takes this grinder past day 180: printed, not asserted. The
-	// journey and the monkey walk through it.)
+	// (Update 2's RunItTwice door, an $11 average over the last hundred, took this grinder past day 180. Update 3's §11 Q4 door,
+	// 150 events at a $5.50 average, brings it by about day 150: asserted by day 180.)
 	std::printf("  pacing multi-site: at the end, %d tracked events, the last hundred's average %s; RunItTwice %s\n", C.EventsEnd, ss::Money(C.Abi100End).c_str(),
 		Rit ? "joined from its letter" : "hasn't asked yet");
 	Expect(Ignite && Gates && Joined == static_cast<int>(C.Invited.size()),
 		"pacing (multi-site): each rival invites at its own gate (Ignite once Act I is over), and the career joins each the morning it asks");
+	Expect(Rit && RitDay >= 0 && RitDay <= 180, "pacing (multi-site): RunItTwice invites by day 180 (update 3 §11 Q4: 150 paid online events at a $5.50 average)");
 	Expect(C.Deposits >= 2 && C.Withdrawals >= 1, "pacing (multi-site): money moves both ways (deposits by card, withdrawals to the bank)");
 }
 
@@ -4916,6 +5111,292 @@ ss::Chips Median(const std::vector<Career>& Runs, size_t K)
 	}
 	std::sort(V.begin(), V.end());
 	return V.empty() ? 0 : V[V.size() / 2];
+}
+
+// ---- Update 3 C2's careers (update 3 SPEC §1.13): the RunItTwice grinder and the FUSE grinder, both in "long".
+
+/** The table in front played to its result: the plan skips it (Style), the player's turns the grader's best. */
+double SkipToResult(ss::Session& S, double Now, ss::style::Style St)
+{
+	S.SprintBudgetMs = 1.0e9;
+	if (S.TableCount() > 0)
+	{
+		ss::autoplay::TableAuto A;
+		A.S = St;
+		A.M = ss::autoplay::Mode::Skip;
+		A.Speed = 1;
+		A.To = ss::autoplay::Target::Result;
+		S.SetAutoplay(0, A);
+	}
+	for (int F = 0; S.CurrentScreen == ss::Screen::Table && F < 4000000; ++F)
+	{
+		Now += 1.0 / 30.0;
+		S.Update(Now);
+		if (S.TableCount() == 0 || S.Finishing())
+		{
+			continue;
+		}
+		if (S.HasPrompt && Now - S.Prompt.OpenedAt > 0.3)
+		{
+			const std::vector<ss::OptionEV>& Opts = S.Prompt.Analysis.Options;
+			size_t Best = 0;
+			for (size_t K = 1; K < Opts.size(); ++K)
+			{
+				Best = Opts[K].Ev > Opts[Best].Ev ? K : Best;
+			}
+			S.HeroAct(Opts.empty() ? ss::PlayerAction::Fold() : Opts[Best].Action);
+		}
+		else if (!S.HasPrompt && !S.Glance(0).Busted && !S.AutoPanel(0).Skipping)
+		{
+			S.SkipAhead(0, ss::autoplay::Target::Result);
+		}
+	}
+	S.LeaveResults();
+	return Wait(S, Now, 0.05);
+}
+
+/** A rival's joinable paid event from Min to Max starting within Ahead minutes (the dearest, then the soonest), registered and
+ *  skipped to its result. False when nothing opened. */
+bool SiteEventSkipped(ss::Session& S, double& Now, ss::net::SiteId Site, ss::Chips Min, ss::Chips Max, double Ahead, std::set<std::string>& Played)
+{
+	const ss::net::Network& Net = ss::net::Site(Site);
+	const double World = S.WorldMinutes();
+	ss::net::EventInstance Pick;
+	ss::Chips Best = -1;
+	for (const ss::net::EventInstance& I : Net.Window(World - 60.0, World + Ahead))
+	{
+		const ss::LobbyEvent L = Net.Listing(I, nullptr, S.Unlocks());
+		if (Played.count(I.Id) == 0 && L.Joinable && L.BuyInCents >= Min && L.BuyInCents <= Max && L.Spec.Entrants <= 3000 && I.Start <= World + Ahead &&
+			(L.BuyInCents > Best || (L.BuyInCents == Best && I.Start < Pick.Start)))
+		{
+			Pick = I;
+			Best = L.BuyInCents;
+		}
+	}
+	if (Best < 0)
+	{
+		return false;
+	}
+	Played.insert(Pick.Id);
+	Fed(S);
+	if (!S.RegisterEvent(Net.Listing(Pick, nullptr, S.Unlocks())).empty())
+	{
+		return false;
+	}
+	if (S.CurrentScreen != ss::Screen::Table && S.WorldMinutes() < Pick.Start)
+	{
+		S.LobbyMinutes += Pick.Start - S.WorldMinutes();
+		Now = Wait(S, Now, 0.1);
+	}
+	for (int Guard = 0; S.CurrentScreen != ss::Screen::Table && Guard < 60; ++Guard)
+	{
+		Now = Wait(S, Now, 0.1);
+	}
+	if (S.CurrentScreen != ss::Screen::Table)
+	{
+		return false;
+	}
+	Now = SkipToResult(S, Now, ss::style::Style::Tag);
+	return true;
+}
+
+/** The clock to World (the calendar runs over the gap: rent, the 1st's closes, SiteStep and SitePlayStep), fed. */
+double Until(ss::Session& S, double Now, double World)
+{
+	if (World > S.WorldMinutes() + 0.01)
+	{
+		S.LobbyMinutes += World - S.WorldMinutes();
+	}
+	Fed(S);
+	return Wait(S, Now, 0.05);
+}
+
+/** The bank kept at a rent and a cushion (these careers measure the sites, not the rent), and a rival's wallet topped up. */
+void Cushion(ss::Session& S, ss::net::SiteId Site, ss::Chips Wallet)
+{
+	if (S.BankrollCents < life::MonthlyRentCents + 60000)
+	{
+		S.BankrollCents = life::MonthlyRentCents + 120000;
+	}
+	const ss::Chips* W = ss::site::WalletOf(S.Life.Sites, Site);
+	if (W && *W < Wallet)
+	{
+		S.Deposit(Site, Wallet, "card");
+	}
+}
+
+/**
+ * The RunItTwice career (update 3 SPEC §1.13, C2): a new career on Night One's schedule of RiverLine hypers for 60 days
+ * (the bank kept at a rent), then RunItTwice's invitation (ss.Site.Invite: the console's letter), accepted, and 120 days
+ * grinding three RunItTwice events a day at $11 to $22, skipped by the plan. Site promotions within 10% of IncomeU3; League
+ * tickets and Team scalps within 20% of its RunItTwice rake (the Governor's promotion there less Second Run's lines, which the
+ * 1st books whole into the month that just closed); every hold within 60 days.
+ */
+void RitCareer(Career& C)
+{
+	PaceHooks H;
+	ss::Session S(H, C.Seed);
+	S.NewCareer(Player());
+	S.CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(S, 0.0, 0.1);
+	C.Ledger.Take(S.Life);
+	C.Start = S.WorldMinutes();
+	const int FirstDay = ss::net::DayOf(C.Start);
+	std::set<std::string> Played;
+	int Rit = 0;
+	for (int K = 0; K < C.Days; ++K)
+	{
+		const int DayNo = FirstDay + K;
+		Now = Until(S, Now, static_cast<double>(DayNo) * Day + 14.0 * 60.0);
+		Cushion(S, ss::net::SiteId::RunItTwice, 8000);
+		if (K < 60)
+		{
+			// RiverLine's evening: two hypers (the career's record before the invitation).
+			for (int N = 0; N < 2; ++N)
+			{
+				SiteEventSkipped(S, Now, ss::net::SiteId::RiverLine, 100, 550, 240.0, Played);
+			}
+		}
+		else
+		{
+			if (K == 60)
+			{
+				std::string Why = S.DebugSite("invite runittwice").find("invitation is in Mail") != std::string::npos ? std::string() : std::string("no letter. ");
+				Why += S.AnswerInvite(ss::net::SiteId::RunItTwice, true);
+				Why += S.Deposit(ss::net::SiteId::RunItTwice, 20000, "card");
+				if (!Why.empty())
+				{
+					std::printf("  pacing RunItTwice: joining: %s\n", Why.c_str());
+				}
+			}
+			// Three RunItTwice events, $11 to $22, from 2 PM.
+			for (int N = 0, Tries = 0; N < 3 && Tries < 6; ++Tries)
+			{
+				Cushion(S, ss::net::SiteId::RunItTwice, 8000);
+				const bool Sat = SiteEventSkipped(S, Now, ss::net::SiteId::RunItTwice, 1100, 2200, 300.0, Played);
+				N += Sat ? 1 : 0;
+				Rit += Sat ? 1 : 0;
+			}
+		}
+		C.BySite[2] = Rit;
+		TallyU3(S, C, K);
+	}
+	const ss::site::play::View V = S.SitePlayView(ss::net::SiteId::RunItTwice);
+	std::printf("  pacing RunItTwice: %d RunItTwice events over %d days, League %s (%zu months closed), %d scalps, gave back %.0f%% now\n", Rit, C.Days - 60, V.Rt.DivName.c_str(),
+		V.Rt.Hist.size(), V.Rt.Lifetime, V.Gov.Share * 100.0);
+}
+
+/**
+ * The FUSE grinder (update 3 SPEC §1.13, §2.6 F7, C2): a new career with Ignite's account from the console's letter, thirty
+ * $5.50 FUSEs a day on autoplay (Push/Fold, skipped to the result) for Days days. FUSE's net within a quarter of a rent in every
+ * 30-day window; and its pace: the world minutes a FUSE takes skipped by the plan against played by hand (the grader's best,
+ * every hand), the lead's accepted 1.12-1.15x measured here.
+ */
+void FuseCareer(Career& C, double& PerAuto, double& PerHand)
+{
+	namespace play = ss::site::play;
+	PaceHooks H;
+	ss::Session S(H, C.Seed);
+	S.NewCareer(Player());
+	S.CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(S, 0.0, 0.1);
+	C.Start = S.WorldMinutes();
+	S.BankrollCents = life::MonthlyRentCents + 120000; // the career's cushion first (Cushion's), then the account
+	std::string Why = S.DebugSite("invite ignite").find("invitation is in Mail") != std::string::npos ? std::string() : std::string("no letter. ");
+	Why += S.AnswerInvite(ss::net::SiteId::Ignite, true);
+	Why += S.Deposit(ss::net::SiteId::Ignite, 20000, "card");
+	if (!Why.empty())
+	{
+		std::printf("  pacing FUSE: joining: %s\n", Why.c_str());
+	}
+	const int FirstDay = ss::net::DayOf(C.Start) + 1;
+	double AutoMinutes = 0.0;
+	int AutoN = 0;
+	std::vector<ss::Chips> NetByDay;
+	ss::Chips NetWas = S.Life.SitePlay.Ig.Fuse.NetCents;
+	for (int K = 0; K < C.Days; ++K)
+	{
+		const int DayNo = FirstDay + K;
+		Now = Until(S, Now, static_cast<double>(DayNo) * Day + 11.0 * 60.0);
+		for (int N = 0; N < 30; ++N)
+		{
+			Cushion(S, ss::net::SiteId::Ignite, 4000);
+			Fed(S);
+			const double From = S.WorldMinutes();
+			if (!S.LightFuse(2, false).empty() || S.CurrentScreen != ss::Screen::Table)
+			{
+				break;
+			}
+			Now = SkipToResult(S, Now, ss::style::Style::PushFold);
+			AutoMinutes += S.WorldMinutes() - From;
+			++AutoN;
+		}
+		NetByDay.push_back(S.Life.SitePlay.Ig.Fuse.NetCents - NetWas);
+		NetWas = S.Life.SitePlay.Ig.Fuse.NetCents;
+		TallyU3(S, C, K);
+	}
+	// The same stake by hand, thirty in a row on the day after: every hand the grader's best, at the table's own pace.
+	Now = Until(S, Now, static_cast<double>(FirstDay + C.Days) * Day + 11.0 * 60.0);
+	double HandMinutes = 0.0;
+	int HandN = 0;
+	for (int N = 0; N < 30; ++N)
+	{
+		Cushion(S, ss::net::SiteId::Ignite, 4000);
+		Fed(S);
+		const double From = S.WorldMinutes();
+		if (!S.LightFuse(2, false).empty() || S.CurrentScreen != ss::Screen::Table)
+		{
+			break;
+		}
+		for (int F = 0; S.CurrentScreen == ss::Screen::Table && F < 4000000; ++F)
+		{
+			Now += 1.0 / 30.0;
+			S.Update(Now);
+			if (S.HasPrompt && Now - S.Prompt.OpenedAt > 0.3)
+			{
+				const std::vector<ss::OptionEV>& Opts = S.Prompt.Analysis.Options;
+				size_t Best = 0;
+				for (size_t I = 1; I < Opts.size(); ++I)
+				{
+					Best = Opts[I].Ev > Opts[Best].Ev ? I : Best;
+				}
+				S.HeroAct(Opts.empty() ? ss::PlayerAction::Fold() : Opts[Best].Action);
+			}
+		}
+		S.LeaveResults();
+		Now = Wait(S, Now, 0.05);
+		HandMinutes += S.WorldMinutes() - From;
+		++HandN;
+	}
+	PerAuto = AutoN > 0 ? AutoMinutes / AutoN : 0.0;
+	PerHand = HandN > 0 ? HandMinutes / HandN : 0.0;
+	// "Nets at most 25% of a rent a month" (§1.13, §2.6 F7): the career's 30-day months. The best sliding 30 days is printed
+	// beside them: one x25 or x100 lands $110-$440 in a day, so a window can be past the line on a lucky run while the
+	// expectation (ROI at most +2% on autoplay, S-J) is far under it.
+	ss::Chips Worst = std::numeric_limits<ss::Chips>::min();
+	std::string Windows;
+	for (int K = 0; K + 30 <= static_cast<int>(NetByDay.size()); K += 30)
+	{
+		const ss::Chips W = DaysSum(NetByDay, K, K + 30);
+		Worst = std::max(Worst, W);
+		Windows += " days " + std::to_string(K + 1) + "-" + std::to_string(K + 30) + " " + ss::Money(W);
+	}
+	ss::Chips Best30 = std::numeric_limits<ss::Chips>::min();
+	for (int K = 0; K + 30 <= static_cast<int>(NetByDay.size()); ++K)
+	{
+		Best30 = std::max(Best30, DaysSum(NetByDay, K, K + 30));
+	}
+	const play::FuseRec& F = S.Life.SitePlay.Ig.Fuse;
+	std::printf("  pacing FUSE grinder: %d FUSEs at $5.50 on autoplay over %d days, won %d (%.1f%%), net %s (%+.1f%% ROI), by 30 days:%s; the best sliding 30 days %s "
+				"(information; a quarter of a rent %s); a FUSE takes %.2f world minutes skipped, %.2f by hand (%d), so autoplay plays %.3fx manual's FUSEs an hour; "
+				"Level %d\n",
+		AutoN, C.Days, F.Won, F.Played > 0 ? 100.0 * F.Won / F.Played : 0.0, ss::Money(F.NetCents).c_str(), F.Played > 0 ? 100.0 * static_cast<double>(F.NetCents) / (550.0 * F.Played) : 0.0,
+		Windows.c_str(), ss::Money(Best30).c_str(), ss::Money(life::MonthlyRentCents / 4).c_str(), PerAuto, PerHand, HandN, PerAuto > 0.0 ? PerHand / PerAuto : 0.0,
+		ss::site::play::IgniteLevel(S.Life.SitePlay));
+	Expect(AutoN >= 30 * C.Days * 9 / 10, "pacing (FUSE grinder): thirty $5.50 FUSEs a day on autoplay");
+	Expect(Worst <= life::MonthlyRentCents / 4, "pacing (FUSE grinder): FUSE's net within a quarter of a rent in each 30-day month of the career (update 3 §1.13)");
+	Expect(PerAuto > 0.0 && PerHand > 0.0 && PerHand / PerAuto <= 1.20,
+		"pacing (FUSE grinder): autoplay plays at most 1.20x manual's FUSEs a world hour (the lead accepted 1.12-1.15x at C2; §2.6 F7 asks 1.05x)");
 }
 } // namespace pacing
 
@@ -4956,6 +5437,9 @@ void CreatorPacing(bool Long)
  * morning each one's own letter comes, $50 by card on each, what piles up withdrawn, and everything there when a rent is near
  * and the bank short. The last segment's six checks, U11's Rewards, and the gate's own three (pacing::SitesChecks). In "long"
  * only: about the time of the creator's career.
+ * Update 3 C2 (update 3 SPEC §1.13): IncomeU3 and the site-promotion tally from the Governor's rings on this career
+ * (pacing::U3Checks), then two careers of its own: the RunItTwice grinder (pacing::RitCareer) and the FUSE grinder
+ * (pacing::FuseCareer). "session_test c3 pacing" runs all three.
  */
 void SitesPacing(bool Long)
 {
@@ -4972,8 +5456,34 @@ void SitesPacing(bool Long)
 	pacing::Run(C);
 	pacing::Checks(C);
 	pacing::SitesChecks(C);
+	pacing::U3Checks(C, "multi-site"); // update 3 C2: IncomeU3 and the site-promotion tally from the Governor's rings
 	std::printf("  pacing multi-site: bankroll day 30 %s, day 60 %s, day 90 %s, day 180 %s; %.1f s\n", ss::Money(C.Bank[0]).c_str(), ss::Money(C.Bank[1]).c_str(), ss::Money(C.Bank[2]).c_str(),
 		ss::Money(C.Bank[3]).c_str(), std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
+	// Update 3 C2's careers (§1.13): the RunItTwice grinder (invited at day 60, 120 days at $11-22) and the FUSE grinder.
+	{
+		const auto T1 = std::chrono::steady_clock::now();
+		pacing::Career R;
+		R.Seed = "pacing-runittwice";
+		R.Days = 180;
+		pacing::RitCareer(R);
+		pacing::U3Checks(R, "RunItTwice");
+		const int64_t Rake = R.RakeBy[2] / ss::site::play::ValuePerCent;
+		const int64_t LeagueScalps = R.PromoBy[2] / ss::site::play::ValuePerCent - R.SecondRun;
+		std::printf("  pacing RunItTwice: its rake %s, League tickets and Team scalps %s (%.1f%% of it; Second Run %s); %.1f s\n", ss::Money(static_cast<ss::Chips>(Rake)).c_str(),
+			ss::Money(static_cast<ss::Chips>(LeagueScalps)).c_str(), Rake > 0 ? 100.0 * static_cast<double>(LeagueScalps) / static_cast<double>(Rake) : 0.0, ss::Money(R.SecondRun).c_str(),
+			std::chrono::duration<double>(std::chrono::steady_clock::now() - T1).count());
+		Expect(R.BySite[2] >= 200 && Rake > 0, "pacing (RunItTwice): 120 days grinding RunItTwice at $11-22 from its invitation");
+		Expect(static_cast<double>(LeagueScalps) <= 0.20 * static_cast<double>(Rake), "pacing (RunItTwice): League tickets and Team scalps within 20% of its RunItTwice rake (update 3 §1.13)");
+	}
+	{
+		const auto T1 = std::chrono::steady_clock::now();
+		pacing::Career F;
+		F.Seed = "pacing-fuse";
+		F.Days = 60;
+		double PerAuto = 0.0, PerHand = 0.0;
+		pacing::FuseCareer(F, PerAuto, PerHand);
+		std::printf("  pacing FUSE grinder: %.1f s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - T1).count());
+	}
 }
 
 /**
@@ -7371,6 +7881,10 @@ void Update2Journey()
 	bool ScriptLate = false;
 	// RunItTwice and the clause.
 	int RitJoinedDay = -1;
+	// (Update 3 G2, §11 Q4: RunItTwice now asks this career on about day 50, not 80, so its first days can meet the day Ignite's
+	// rent script takes whole; the register and PUBLISH steps run on the first days after the signing that are free.)
+	int RegisterDay = -1, PublishDay = -1;
+	bool Published = false;
 	bool TicketsLetter = false;
 	std::string ClauseId;
 	bool RegisterWarned = false, RegisterStruck = false, CureDated = false;
@@ -7437,6 +7951,7 @@ void Update2Journey()
 			{
 				std::printf("    (Team RiverLine: %s)\n", Why.c_str());
 			}
+			RegisterDay = K + 1;
 			Step(When + " Team RiverLine");
 		}
 		const sponsor::Contract* Clause = ClauseId.empty() ? nullptr : sponsor::Find(S->Life.Sponsors, ClauseId);
@@ -7514,9 +8029,12 @@ void Update2Journey()
 			}
 			return !Only && Wallet(Site) >= Need;
 		};
-		if (RitJoinedDay >= 0 && K == RitJoinedDay + 2)
+		// (A day the clock already passed, after the rent script's hop past its deadline, has no table to open: wait for today.)
+		const bool Today = S->WorldMinutes() < Evening;
+		if (RegisterDay >= 0 && K >= RegisterDay && PublishDay < 0 && Today)
 		{
 			// The register button under the clause: it warns first; pressed again, the table opens and it's a strike.
+			PublishDay = K + 1;
 			const int Before = Clause ? Clause->Strikes : -1;
 			RegisterWarned = Only && sponsor::WouldStrike(S->Life.Sponsors, static_cast<int>(net::SiteId::RunItTwice), false, false);
 			if (Wallet(net::SiteId::RunItTwice) < 1100)
@@ -7533,10 +8051,11 @@ void Update2Journey()
 				CureDated = CureDated || (L.Source == "sponsor" && L.Thread == ClauseId && L.Body.find("Stay on RiverLine through") != std::string::npos);
 			}
 		}
-		else if (RitJoinedDay >= 0 && K == RitJoinedDay + 3)
+		else if (PublishDay >= 0 && K >= PublishDay && !Published && Today)
 		{
 			// Studio's PUBLISH on a RunItTwice hand from yesterday's table (still open: the newest thirty are kept): it warns
 			// first; published, it's the second strike, and the deal ends.
+			Published = true;
 			for (const ss::video::Candidate& X : S->VideoCandidates())
 			{
 				RitCandidate = RitCandidate.empty() && X.Site == static_cast<int>(net::SiteId::RunItTwice) && (X.Source == 0 || X.Source == 3) ? X.Id : RitCandidate;
@@ -7654,7 +8173,7 @@ void Update2Journey()
 		const net::SiteDef& D = net::Def(Site);
 		Letters += (Letters.empty() ? "" : "; ") + D.Name + "'s on day " + std::to_string(static_cast<int>((C.Invited[I].second - C.Start) / Day)) + " (" +
 			std::to_string(C.InvitedAt[I].first) + " events, the last hundred's average " + ss::Money(C.InvitedAt[I].second) + ")";
-		Gates = Gates && C.InvitedAt[I].first >= D.Gate.MinEvents && C.InvitedAt[I].second >= D.Gate.MinAbi100;
+		Gates = Gates && pacing::InviteDoor(D, C.InvitedAt[I].first, C.InvitedAt[I].second); // update 3 §11 Q4: either volume door
 		BeforeActI = BeforeActI || C.Invited[I].second < Act1;
 		IgniteAt = Site == net::SiteId::Ignite ? C.Invited[I].second : IgniteAt;
 		RitAt = Site == net::SiteId::RunItTwice ? C.Invited[I].second : RitAt;
@@ -7906,23 +8425,130 @@ void MigrationAll3()
 		// round trip above is their check (SPEC_CREATORS §9.1).
 		Expect(U3 == 0 || Name.rfind("update3_", 0) == 0, (Tag + ": no Update 3 line written back or by its session (S10)").c_str());
 	}
-	// The no-write case's core half: the clause's save, 40 days of the calendar (ss.Stake.Advance's path: every step
-	// CheckCalendar runs, SiteStep and SitePlayStep, VideoStep and the world's), so across a 1st.
+	// The no-write case (§7.5; C2): the clause's save, every rival page opened through ss.Laptop.Open's path (RiverLine::DebugOpen)
+	// and drawn, with the Kast Studio's stream preview drawn after each site's pages (offline: going live is a Kast migration of
+	// its own), then 40 days of the calendar (ss.Stake.Advance's path: every step CheckCalendar runs, SiteStep and SitePlayStep,
+	// VideoStep and the world's), so across a 1st, and the pages again. No Update 3 site\t sub-tag, no world\tleague, no bit.
 	{
 		ss::SaveData D;
 		const bool Parsed = ss::SaveData::Parse(seams::Fixture("update2_multisite.ssave"), D);
 		Hooks H;
 		ss::Session S(H, "migration3-no-write", &D);
+		S.CurrentScreen = ss::Screen::Lobby;
 		const bool Clause = S.TeamRiverLine();
+		int Pages = 0, Drawn = 0;
+		auto OpenRivals = [&S, &Pages, &Drawn](double Now) {
+			ss::ui::RiverLine RL(S);
+			migration3::FlatMeasurer M;
+			for (const char* Site : {"ignite", "runittwice"})
+			{
+				for (const char* Page : {"lobby", "series", "boards", "news", "career", "promotions", "cashier", "fuse", "profile", "live", "league", "desk", "kast studio"})
+				{
+					ss::ui::DrawList L;
+					ss::ui::Canvas C(L, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+					const bool Kast = std::string(Page) == "kast studio";
+					const bool Open = RL.DebugOpen(Kast ? std::string(Page) : "riverline " + std::string(Page) + " " + Site);
+					RL.Draw(C, Now);
+					Pages += Open ? 1 : 0;
+					Drawn += Open && !L.Cmds.empty() ? 1 : 0;
+				}
+			}
+		};
+		OpenRivals(0.0);
 		const double From = S.WorldMinutes();
 		const std::string Stepped = S.DebugStake("advance 960");
+		OpenRivals(1.0);
 		const std::string After = migration2::SavedNow(S, H);
 		const size_t U3 = migration3::U3Bytes(After);
-		std::printf("  migration (update 3): update2_multisite stepped %.0f days under the clause: %s; Update 3 bytes %zu, Update3LinesRead %u\n",
-			(S.WorldMinutes() - From) / ss::net::MinutesPerDay, Stepped.c_str(), U3, static_cast<unsigned>(S.Life.Update3LinesRead));
+		std::printf("  migration (update 3): update2_multisite, %d rival pages and Kast previews opened (%d drawn), stepped %.0f days under the clause: %s; Update 3 bytes "
+					"%zu, Update3LinesRead %u\n",
+			Pages, Drawn, (S.WorldMinutes() - From) / ss::net::MinutesPerDay, Stepped.c_str(), U3, static_cast<unsigned>(S.Life.Update3LinesRead));
+		Expect(Pages >= 20 && Drawn == Pages, "migration (update 3): the no-write case opens and draws every rival page and the Kast preview after each site's");
 		Expect(Parsed && Clause && Stepped.rfind("Advanced", 0) == 0 && S.WorldMinutes() - From >= 40.0 * ss::net::MinutesPerDay - 1.0 && U3 == 0 &&
 				   S.Life.Update3LinesRead == 0,
-			"migration (update 3): the no-write case: update2_multisite's 40 days across a 1st write no Update 3 line and set no Update 3 bit");
+			"migration (update 3): the no-write case: update2_multisite's rival pages and 40 days across a 1st write no Update 3 line and set no Update 3 bit");
+		// §9.3 #7: its first paid rival entry starts the play book from today (the old Ignite history earns nothing back): under
+		// its clause the second press registers it (a strike), and the book holds that one entry's base Sparks and a 1-day Flame.
+		ss::LobbyEvent Ev;
+		bool Found = false;
+		const double World = S.WorldMinutes();
+		for (const ss::net::EventInstance& I : ss::net::Site(ss::net::SiteId::Ignite).Window(World - 60.0, World + 240.0))
+		{
+			const ss::LobbyEvent L = ss::net::Site(ss::net::SiteId::Ignite).Listing(I, nullptr, S.Unlocks());
+			if (!Found && L.Joinable && L.BuyInCents > 0 && L.BuyInCents <= 550 && S.CanAfford(L))
+			{
+				Ev = L;
+				Found = true;
+			}
+		}
+		const ss::Chips* W = ss::site::WalletOf(S.Life.Sites, ss::net::SiteId::Ignite);
+		if (W && *W < Ev.BuyInCents)
+		{
+			S.Deposit(ss::net::SiteId::Ignite, 2000, "card");
+		}
+		const std::string Why = Found ? S.RegisterEvent(Ev, ss::StrikeConfirm{true}) : std::string("no Ignite event open");
+		const ss::site::play::Spark& Sp = S.Life.SitePlay.Ig.S;
+		std::printf("  migration (update 3): update2_multisite's first paid rival entry (%s): %s; base Sparks %lld (its fee %s), flame %d, U3SitePlay %s\n",
+			Found ? Ev.Spec.Name.c_str() : "none", Why.empty() ? "registered" : Why.c_str(), static_cast<long long>(Sp.BaseLife), ss::Money(Ev.Spec.FeeCents).c_str(),
+			S.Life.SitePlay.Ig.F.Streak, (S.Life.Update3LinesRead & ss::life::U3SitePlay) != 0 ? "set" : "NOT SET");
+		Expect(Found && Why.empty() && (S.Life.Update3LinesRead & ss::life::U3SitePlay) != 0 && Sp.BaseLife > 0 && Sp.BaseLife <= 18 * Ev.Spec.FeeCents &&
+				   S.Life.SitePlay.Ig.F.Streak == 1,
+			"migration (update 3): update2_multisite's first paid rival entry starts the play book from today (that entry alone, a 1-day Flame)");
+	}
+	// C2's site-play fixture (update 3 SPEC §7.5; fixture_tool write-u3g2, saved with its world): its round trip in the loop
+	// above; here its facts (both rivals joined, a 9-day Flame with a Spare Match, two Crackers, the Wristband past T10, a FUSE
+	// record with a x25, a Beef, the League's Placement month half played with the world's scores, a Callout, two scalps, a
+	// Guest List hold with its Covered, the Governor's rings) and the sites' budgets on it: their Update 3 lines within 4.4 KB
+	// (§1.8) and the League's world line within 2.5 KB.
+	{
+		namespace life = ss::life;
+		namespace net = ss::net;
+		namespace play = ss::site::play;
+		const bool There = std::find(All.begin(), All.end(), std::string("update3_siteplay.ssave")) != All.end();
+		const std::string Saved = There ? seams::Fixture("update3_siteplay.ssave") : std::string();
+		ss::SaveData D;
+		const bool Parsed = There && ss::SaveData::Parse(Saved, D);
+		Hooks H;
+		ss::Session S(H, "migration3-update3-siteplay", &D);
+		const play::Book& B = S.Life.SitePlay;
+		const play::View Ig = S.SitePlayView(net::SiteId::Ignite);
+		const play::View Rt = S.SitePlayView(net::SiteId::RunItTwice);
+		const size_t Sites = journeys::LineBytesU3(Saved);
+		const size_t League = journeys::LineBytes(Saved, {"world\tleague\t"});
+		// League honesty (§9.6): every member's points on the page are the world's own recorded best days.
+		int Scored = 0, Rows = 0;
+		const ss::world::LeagueBook* Lb = S.Living().League(net::SiteId::RunItTwice);
+		bool Honest = Lb != nullptr;
+		for (const play::LeagueRowView& R : Rt.Rt.Table)
+		{
+			++Rows;
+			if (R.Npc >= 0 && Lb)
+			{
+				const ss::world::LeagueMember* M = ss::world::LeagueMemberOf(*Lb, R.Npc);
+				Scored += R.Points > 0.0 ? 1 : 0;
+				Honest = Honest && M && std::fabs(ss::world::LeaguePoints(*M) - R.Points) < 0.05;
+			}
+		}
+		bool Covered = false;
+		for (const play::Hold& Hd : B.Holds)
+		{
+			Covered = Covered || Hd.Covered > 0;
+		}
+		std::printf("  migration (update 3): update3_siteplay: %zu bytes, the sites' Update 3 lines %zu bytes (of 4,506), the League's world line %zu bytes (of 2,560); "
+					"Ignite: flame %d, %d Spare Match(es), %zu crackers, T%d, L%d, %lld Sparks, FUSE best x%d (%zu on the Wall), Beef %s; RunItTwice: %s %s, rank %d of %d, "
+					"%d members scored, Callout %d, %d scalps; %zu holds; Ignite gave back %.0f%% of %s, RunItTwice %.0f%% of %s; U3SitePlay %s\n",
+			Saved.size(), Sites, League, B.Ig.F.Streak, B.Ig.F.Matches, B.Ig.Boxes.size(), Ig.Ig.Tier, Ig.Ig.Level, static_cast<long long>(B.Ig.S.Balance), B.Ig.Fuse.BestM,
+			B.Ig.Fuse.Wall.size(), Ig.Ig.BeefName.empty() ? "none" : Ig.Ig.BeefName.c_str(), Rt.Rt.DivName.c_str(), Rt.Rt.Placement ? "(Placement)" : "", Rt.Rt.Rank, Rt.Rt.Of,
+			Scored, B.Rt.C.Npc, B.Rt.Sc.Lifetime, B.Holds.size(), Ig.Gov.Share * 100.0, ss::Money(Ig.Gov.Rake30).c_str(), Rt.Gov.Share * 100.0, ss::Money(Rt.Gov.Rake30).c_str(),
+			(S.Life.Update3LinesRead & life::U3SitePlay) != 0 ? "set" : "NOT SET");
+		Expect(Parsed && (S.Life.Update3LinesRead & life::U3SitePlay) != 0 && ss::site::WalletOf(S.Life.Sites, net::SiteId::Ignite) && ss::site::WalletOf(S.Life.Sites, net::SiteId::RunItTwice),
+			"migration (update 3): update3_siteplay is committed: both rivals joined, written with the play book's lines (U3SitePlay)");
+		Expect(B.Ig.F.Streak == 9 && B.Ig.F.Matches >= 1 && B.Ig.Boxes.size() == 2 && Ig.Ig.Tier >= 11 && B.Ig.Fuse.BestM >= 25 && !Ig.Ig.BeefName.empty(),
+			"migration (update 3): update3_siteplay keeps Ignite's facts: a 9-day Flame with a Spare Match, two Crackers, the Wristband past T10, a x25 FUSE, a Beef");
+		Expect(Rt.Rt.League && Rt.Rt.Placement && Rows == 20 && Scored > 0 && Honest && B.Rt.C.Npc >= 0 && B.Rt.Sc.Lifetime >= 2,
+			"migration (update 3): update3_siteplay keeps RunItTwice's: the League month with the world's own scores, a Callout, two scalps");
+		Expect(!B.Holds.empty() && Covered && Ig.Gov.Rake30 > 0 && Rt.Gov.Rake30 > 0, "migration (update 3): update3_siteplay keeps the Guest List (a hold with its Covered) and both rings");
+		Expect(Sites <= 4506 && League > 0 && League <= 2560, "migration (update 3): update3_siteplay's site lines within 4.4 KB and the League's world line within 2.5 KB (§1.8)");
 	}
 	// The creator update's no-write case (SPEC_CREATORS §9.1): update2_creator (304 members, 60 log rows, 3 subs, 10 clips),
 	// every Kast page opened and the Studio's stream preview drawn, then 40 days of the calendar a day at a time with the
@@ -8222,6 +8848,321 @@ void MigrationAll3()
 	std::printf("  migration (update 3): %d of %zu fixtures written back byte for byte (a world after its one migration; the rest but for the last segment's "
 				"own lines), none with an Update 3 line, %.1f s\n",
 		Exact, All.size(), migration2::Since(T0));
+}
+
+/**
+ * U3SitesJourney (update 3 SPEC §8.3, the lead's C2 journey; in "session_test u3"): a new career with both rivals joined from
+ * the console's letters (ss.Site.Invite) and money on each, 60 days of mixed play through the Session's own methods, every
+ * event skipped to its result by the plan (autoplay), the rent covered by the journey:
+ *   - every evening an Ignite event and a RunItTwice event (the dearest at or under $5.50 and $11), RiverLine's hyper every
+ *     other day, a paid FUSE at $1.10 every third; the night's claims as the pages offer them (Dares, the wheel, the tiers);
+ *   - a FUSE on a ticket bought at the Prize Counter (its ordinal advances, no Sparks earned: W4);
+ *   - the League: its Placement group drawn at the first paid entry, the month closed on the 1st by the table (League Night's
+ *     history row), the next group drawn;
+ *   - a Guest List hold accrued and cleared (a governed grant past the ring's room: ss.Site.Play grant), every hold within 60 days;
+ *   - the Team RiverLine clause signed late in the second month: the Flame on ice (a missed day doesn't break it), the next
+ *     League month on leave (no relegation), every play button refused without the second press (no table, no debit, no
+ *     strike), claims allowed;
+ *   - every 20 days the save reads and writes back byte for byte, and the journey goes on from the loaded save; at the end
+ *     Update 3's lines (LineBytesU3) within 27 KB, the sites' within 4.4 KB and the League's world line within 2.5 KB.
+ */
+void U3SitesJourney()
+{
+	namespace life = ss::life;
+	namespace net = ss::net;
+	namespace play = ss::site::play;
+	namespace autoplay = ss::autoplay;
+	namespace style = ss::style;
+	using pacing::Fed;
+	const auto T0 = std::chrono::steady_clock::now();
+	const double Day = 1440.0;
+	Hooks H;
+	std::unique_ptr<ss::Session> S(new ss::Session(H, "u3-sites-journey"));
+	S->NewCareer(journeys::Jesse());
+	S->CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(*S, 0.0, 0.1);
+	auto To = [&](double World) {
+		if (World > S->WorldMinutes() + 0.01)
+		{
+			S->DebugStake("advance " + ss::Fixed((World - S->WorldMinutes()) / 60.0, 4));
+		}
+		Now = Wait(*S, Now, 0.05);
+	};
+	// A table played to its result: the plan skips it (TAG), the player's turns (Sprint hands back) the grader's best.
+	auto PlayOut = [&]() {
+		S->SprintBudgetMs = 1.0e9;
+		if (S->TableCount() > 0)
+		{
+			S->SetAutoplay(0, journeys::PlanOf(style::Style::Tag, autoplay::Mode::Skip, 1, autoplay::Target::Result, 0));
+		}
+		for (int F = 0; S->CurrentScreen == ss::Screen::Table && F < 4000000; ++F)
+		{
+			Now += 1.0 / 30.0;
+			S->Update(Now);
+			if (S->TableCount() == 0 || S->Finishing())
+			{
+				continue;
+			}
+			journeys::BestAt(*S, 0, Now);
+			if (!S->HasPrompt && !S->Glance(0).Busted && !S->AutoPanel(0).Skipping)
+			{
+				S->SkipAhead(0, autoplay::Target::Result);
+			}
+		}
+		S->LeaveResults();
+		Now = Wait(*S, Now, 0.05);
+	};
+	std::set<std::string> Played;
+	// The site's dearest joinable paid event at or under Cap starting within Ahead minutes, played to its result.
+	auto Event = [&](net::SiteId Site, ss::Chips Cap, double Ahead, ss::StrikeConfirm Confirm) -> std::string {
+		const net::Network& Net = net::Site(Site);
+		const double World = S->WorldMinutes();
+		net::EventInstance Pick;
+		ss::Chips Best = -1;
+		for (const net::EventInstance& I : Net.Window(World - 60.0, World + Ahead))
+		{
+			const ss::LobbyEvent L = Net.Listing(I, nullptr, S->Unlocks());
+			if (Played.count(I.Id) == 0 && L.Joinable && L.BuyInCents > 0 && L.BuyInCents <= Cap && L.Spec.Entrants <= 3000 && I.Start <= World + Ahead &&
+				(L.BuyInCents > Best || (L.BuyInCents == Best && I.Start < Pick.Start)))
+			{
+				Pick = I;
+				Best = L.BuyInCents;
+			}
+		}
+		if (Best < 0)
+		{
+			return "nothing open";
+		}
+		Played.insert(Pick.Id);
+		Fed(*S);
+		const std::string Why = S->RegisterEvent(Net.Listing(Pick, nullptr, S->Unlocks()), Confirm);
+		if (!Why.empty())
+		{
+			return Why;
+		}
+		if (S->CurrentScreen != ss::Screen::Table && S->WorldMinutes() < Pick.Start)
+		{
+			To(Pick.Start);
+		}
+		for (int Guard = 0; S->CurrentScreen != ss::Screen::Table && Guard < 60; ++Guard)
+		{
+			Now = Wait(*S, Now, 0.1);
+		}
+		if (S->CurrentScreen == ss::Screen::Table)
+		{
+			PlayOut();
+		}
+		return std::string();
+	};
+	auto Claims = [&]() {
+		const play::View V = S->SitePlayView(net::SiteId::Ignite);
+		int N = 0;
+		for (int K = 0; K < 3; ++K)
+		{
+			N += V.Ig.Dares[static_cast<size_t>(K)].Done && !V.Ig.Dares[static_cast<size_t>(K)].Claimed && S->ClaimDare(K).empty() ? 1 : 0;
+		}
+		for (const play::TierView& Tv : V.Ig.Tiers)
+		{
+			N += Tv.Reached && !Tv.Claimed && Tv.Kind != 0 && S->ClaimTier(Tv.Tier).empty() ? 1 : 0;
+		}
+		N += V.Ig.SpinReady && !V.Ig.Spun && S->SpinWheel().empty() ? 1 : 0;
+		return N;
+	};
+	// Both rivals from the console's letters (ss.Site.Invite), $200 by card on each.
+	S->BankrollCents += 250000;
+	std::string Join = S->DebugSite("invite ignite").find("invitation is in Mail") != std::string::npos ? std::string() : std::string("no Ignite letter. ");
+	Join += S->AnswerInvite(net::SiteId::Ignite, true);
+	Join += S->Deposit(net::SiteId::Ignite, 20000, "card");
+	Join += S->DebugSite("invite runittwice").find("invitation is in Mail") != std::string::npos ? std::string() : std::string("no RunItTwice letter. ");
+	Join += S->AnswerInvite(net::SiteId::RunItTwice, true);
+	Join += S->Deposit(net::SiteId::RunItTwice, 20000, "card");
+	Expect(Join.empty(), ("u3 sites journey: both rivals joined from the console's letters, $200 on each: " + Join).c_str());
+	const int FirstDay = net::DayOf(S->WorldMinutes()) + 1;
+	int IgniteN = 0, RitN = 0, RiverN = 0, FuseN = 0, ClaimN = 0, RoundTrips = 0, RoundTripsSame = 0, Closed = 0, Granted = 0;
+	bool TicketFuse = false, TicketNoSparks = false, OrdinalOn = false;
+	bool ClauseSigned = false, OnIce = false, IceHeld = true, OnLeave = false, Refused = false, RefusedClean = false, ClaimUnderClause = false;
+	int ClauseDay = -1, StreakAtClause = -1, LongestHold = 0, HoldsSeen = 0, HoldsCleared = 0;
+	std::map<std::string, int> HoldSince;
+	int MonthsSeen = 0;
+	int LastMonth = play::PlayMonth(play::PlayDay(S->WorldMinutes()));
+	for (int K = 0; K < 60; ++K)
+	{
+		const int DayNo = FirstDay + K;
+		To(static_cast<double>(DayNo) * Day + 12.0 * 60.0);
+		Fed(*S);
+		if (S->BankrollCents < life::MonthlyRentCents + 60000)
+		{
+			S->BankrollCents += life::MonthlyRentCents + 100000 - S->BankrollCents; // the journey's cushion (the sites are what it watches)
+		}
+		for (const net::SiteId Site : {net::SiteId::Ignite, net::SiteId::RunItTwice})
+		{
+			const ss::Chips* W = ss::site::WalletOf(S->Life.Sites, Site);
+			if (W && *W < 6000)
+			{
+				S->Deposit(Site, 10000, "card");
+			}
+		}
+		const int Month = play::PlayMonth(play::PlayDay(S->WorldMinutes()));
+		MonthsSeen += Month != LastMonth ? 1 : 0;
+		LastMonth = Month;
+		// The clause, late in the second month: signed from Mail (Team RiverLine's renewal-style offer).
+		const bool LateSecond = MonthsSeen >= 1 && !ClauseSigned && play::PlayMonth(play::PlayDay(S->WorldMinutes() + 3.0 * Day)) != Month;
+		if (LateSecond)
+		{
+			const std::string Offered = S->DebugSponsor("offer riverline");
+			const std::string Id = ss::sponsor::OpenOfferFor(S->Life.Sponsors, "riverline", S->WorldMinutes());
+			const std::string Why = Id.empty() ? Offered : S->SignDeal(Id);
+			ClauseSigned = Why.empty() && S->TeamRiverLine();
+			ClauseDay = K;
+			StreakAtClause = S->Life.SitePlay.Ig.F.Streak;
+			if (!ClauseSigned)
+			{
+				std::printf("  u3 sites journey: Team RiverLine not signed: %s\n", Why.c_str());
+			}
+		}
+		if (!ClauseSigned)
+		{
+			// 7 PM: Ignite; 8 PM: RunItTwice; RiverLine's hyper every other day; a paid FUSE every third.
+			To(static_cast<double>(DayNo) * Day + 19.0 * 60.0);
+			IgniteN += Event(net::SiteId::Ignite, 550, 180.0, {}).empty() ? 1 : 0;
+			To(static_cast<double>(DayNo) * Day + 20.0 * 60.0);
+			RitN += Event(net::SiteId::RunItTwice, 1100, 180.0, {}).empty() ? 1 : 0;
+			if (K % 2 == 0)
+			{
+				RiverN += Event(net::SiteId::RiverLine, 550, 120.0, {}).empty() ? 1 : 0;
+			}
+			if (K % 3 == 1)
+			{
+				Fed(*S);
+				if (S->LightFuse(0, false).empty() && S->CurrentScreen == ss::Screen::Table)
+				{
+					++FuseN;
+					PlayOut();
+				}
+			}
+			ClaimN += Claims();
+			// Day 20: a FUSE on a ticket bought at the Prize Counter (7,000 Sparks): the ordinal advances, no Sparks earned.
+			if (K >= 20 && !TicketFuse)
+			{
+				const play::View V = S->SitePlayView(net::SiteId::Ignite);
+				for (const play::PrizeView& P : V.Ig.Prizes)
+				{
+					if (!TicketFuse && P.TicketId == V.Ig.FuseTicketIds[0] && P.Afford && S->BuyPrize(P.Item).empty())
+					{
+						const int Before = S->Life.SitePlay.Ig.Fuse.N[0];
+						const int64_t Base = S->Life.SitePlay.Ig.S.BaseLife;
+						const int64_t Sparks = S->Life.SitePlay.Ig.S.Balance;
+						Fed(*S);
+						TicketFuse = S->LightFuse(0, true).empty();
+						OrdinalOn = S->Life.SitePlay.Ig.Fuse.N[0] == Before + 1;
+						if (S->CurrentScreen == ss::Screen::Table)
+						{
+							PlayOut();
+						}
+						TicketNoSparks = S->Life.SitePlay.Ig.S.BaseLife == Base && S->Life.SitePlay.Ig.S.Balance <= Sparks;
+					}
+				}
+			}
+			// Day 8: a governed grant $1.00 past Ignite's room (the console's ss.Site.Play grant): it waits on the Guest List, then
+			// clears as the spare rake share covers it.
+			if (K == 8 && Granted == 0)
+			{
+				const ss::Chips Room = S->SitePlayView(net::SiteId::Ignite).Gov.Room;
+				Granted = S->DebugSitePlay("grant ignite " + std::to_string(Room + 100)).find("held on the Guest List") != std::string::npos ? 1 : 2;
+			}
+		}
+		else
+		{
+			// Under the clause: no table here. The buttons refuse without the second press, and nothing changes; claims never strike.
+			auto Strikes = [&]() {
+				const ss::sponsor::Contract* C = ss::sponsor::Running(S->Life.Sponsors, "riverline", S->WorldMinutes());
+				return C ? C->Strikes : -1;
+			};
+			if (!Refused)
+			{
+				const ss::Chips Wallet = *ss::site::WalletOf(S->Life.Sites, net::SiteId::Ignite);
+				const int Was = Strikes();
+				To(static_cast<double>(DayNo) * Day + 19.0 * 60.0);
+				const std::string Why = Event(net::SiteId::Ignite, 550, 180.0, {});
+				const std::string Fuse = S->LightFuse(0, false);
+				Refused = !Why.empty() && Why != "nothing open" && !Fuse.empty();
+				RefusedClean = Refused && S->CurrentScreen != ss::Screen::Table && *ss::site::WalletOf(S->Life.Sites, net::SiteId::Ignite) == Wallet && Strikes() == Was && Was >= 0;
+			}
+			const int Before = Strikes();
+			Claims();
+			ClaimUnderClause = (ClaimUnderClause || K == ClauseDay) && Strikes() == Before;
+			const play::View Iv = S->SitePlayView(net::SiteId::Ignite);
+			const play::View Rv = S->SitePlayView(net::SiteId::RunItTwice);
+			OnIce = OnIce || (Iv.Ig.OnIce && K >= ClauseDay + 3);
+			IceHeld = IceHeld && (K < ClauseDay + 3 || S->Life.SitePlay.Ig.F.Streak == StreakAtClause);
+			OnLeave = OnLeave || (Rv.Rt.OnLeave && Rv.Rt.Days == 0 && Rv.Rt.League);
+		}
+		// The League's months closed on the 1st (its history), the Guest List's waits.
+		Closed = static_cast<int>(S->Life.SitePlay.Rt.Hist.size());
+		std::set<std::string> Now0;
+		for (const play::Hold& Hd : S->Life.SitePlay.Holds)
+		{
+			Now0.insert(Hd.Key);
+			if (HoldSince.emplace(Hd.Key, K).second)
+			{
+				++HoldsSeen;
+			}
+			LongestHold = std::max(LongestHold, K - HoldSince[Hd.Key]);
+		}
+		for (auto It = HoldSince.begin(); It != HoldSince.end();)
+		{
+			if (Now0.count(It->first) == 0)
+			{
+				++HoldsCleared;
+				It = HoldSince.erase(It);
+			}
+			else
+			{
+				++It;
+			}
+		}
+		// Every 20 days: the save reads and writes back byte for byte, and the journey goes on from the loaded save.
+		if (K % 20 == 19)
+		{
+			S->Save();
+			const std::string Text = H.Last.Serialize();
+			ss::SaveData Back;
+			const bool Same = ss::SaveData::Parse(Text, Back) && Back.Serialize() == Text;
+			++RoundTrips;
+			RoundTripsSame += Same ? 1 : 0;
+			if (Same)
+			{
+				S.reset();
+				S.reset(new ss::Session(H, "u3-sites-journey", &Back));
+				S->CurrentScreen = ss::Screen::Lobby;
+				Now = Wait(*S, Now, 0.1);
+			}
+		}
+	}
+	S->Save();
+	const std::string Text = H.Last.Serialize();
+	const size_t U3 = journeys::LineBytesU3(Text);
+	const size_t League = journeys::LineBytes(Text, {"world\tleague\t"});
+	const play::View Iv = S->SitePlayView(net::SiteId::Ignite);
+	const play::View Rv = S->SitePlayView(net::SiteId::RunItTwice);
+	std::printf("  u3 sites journey: %d Ignite, %d RunItTwice, %d RiverLine, %d paid FUSEs, a ticket FUSE %s (ordinal %s, Sparks %s); %d claims; Level %d, T%d, flame %d "
+				"(best %d), %lld Sparks; League %s, %d month(s) closed, rank %d of %d; holds seen %d, cleared %d, longest %d days (the grant %s); clause %s on day %d: on ice "
+				"%s (flame held %s), on leave %s, refused %s; %d round trips (%d byte for byte); Update 3 lines %zu bytes (of 27,648), the League's world line %zu; "
+				"Ignite gave back %.0f%% of %s, RunItTwice %.0f%% of %s; %.1f s\n",
+		IgniteN, RitN, RiverN, FuseN, TicketFuse ? "lit" : "NOT LIT", OrdinalOn ? "advanced" : "NOT ADVANCED", TicketNoSparks ? "none" : "SOME", ClaimN, Iv.Ig.Level, Iv.Ig.Tier,
+		S->Life.SitePlay.Ig.F.Streak, S->Life.SitePlay.Ig.F.Best, static_cast<long long>(S->Life.SitePlay.Ig.S.Balance), Rv.Rt.DivName.c_str(), Closed, Rv.Rt.Rank, Rv.Rt.Of,
+		HoldsSeen, HoldsCleared, LongestHold, Granted == 1 ? "held" : Granted == 2 ? "paid at once" : "not made", ClauseSigned ? "signed" : "NOT SIGNED", ClauseDay,
+		OnIce ? "yes" : "NO", IceHeld ? "yes" : "NO", OnLeave ? "yes" : "NO", RefusedClean ? "clean" : Refused ? "with a change" : "NO", RoundTrips, RoundTripsSame, U3, League,
+		Iv.Gov.Share * 100.0, ss::Money(Iv.Gov.Rake30).c_str(), Rv.Gov.Share * 100.0, ss::Money(Rv.Gov.Rake30).c_str(), journeys::SecondsSince(T0));
+	Expect(IgniteN >= 25 && RitN >= 25 && FuseN >= 8 && ClaimN > 0 && (S->Life.Update3LinesRead & life::U3SitePlay) != 0,
+		"u3 sites journey: 60 days of mixed play on both rivals (skipped by the plan), FUSEs and the night's claims, the play book written");
+	Expect(TicketFuse && OrdinalOn && TicketNoSparks, "u3 sites journey: a FUSE on a ticket from the Prize Counter advances its tier's ordinal and earns no Sparks (W4)");
+	Expect(Closed >= 1 && Rv.Rt.League, "u3 sites journey: a League month closed on the 1st by the table, and the next group drawn");
+	Expect(HoldsSeen >= 1 && HoldsCleared >= 1 && LongestHold <= 60, "u3 sites journey: a Guest List hold accrued and cleared, every hold within 60 days");
+	Expect(ClauseSigned && OnIce && IceHeld && OnLeave && RefusedClean && ClaimUnderClause,
+		"u3 sites journey: under Team RiverLine the Flame waits on ice, the League month is on leave, and every play button refuses without the second press (W3, W7)");
+	Expect(RoundTrips >= 2 && RoundTripsSame == RoundTrips, "u3 sites journey: every 20 days the save reads and writes back byte for byte");
+	Expect(U3 <= 27u * 1024u && League <= 2560, "u3 sites journey: Update 3's lines within 27 KB (LineBytesU3) and the League's world line within 2.5 KB");
 }
 
 /**
@@ -8526,9 +9467,9 @@ int main(int Argc, char** Argv)
 	if (U3)
 	{
 		// "u3": update 3's lead checks (update 3 SPEC §7.5, §7.7), run by every C pass and kept out of the default run (no new
-		// check there): MigrationAll3, Phase A's stub over every committed fixture; U3SitesJourney joins it at C2 and
-		// U3CreatorJourney at C3 (here since the C3 gate).
+		// check there): MigrationAll3 over every committed fixture, U3SitesJourney (C2) and U3CreatorJourney (C3).
 		session_test::MigrationAll3();
+		session_test::U3SitesJourney();
 		session_test::U3CreatorJourney();
 		std::printf("%s\n", session_test::Failures == 0 ? "session tests (u3): all passed" : "session tests (u3): FAILED");
 		return session_test::Failures == 0 ? 0 : 1;

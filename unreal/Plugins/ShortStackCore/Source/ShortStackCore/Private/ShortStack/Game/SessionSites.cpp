@@ -3,6 +3,7 @@
 #include "SitesDetail.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Rep.h"
+#include "ShortStack/Game/SiteShow.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/World.h"
 
@@ -79,6 +80,60 @@ std::string SitesWhen(double World)
 }
 } // namespace session_sites_detail
 
+namespace site
+{
+// SiteMoney.cpp's (core-sites-g2, G2); declared in SitesDetail.h by the patch core-sites-g2_to_lead_1.diff.
+int IgniteLevelOf(const life::State& L);
+
+site::play::SettleFacts SettleFactsOf(const ss::Tournament& T, const ss::Results& Res)
+{
+	// Update 3 G2 (SPEC §7.2's Results row, §2.6 F8, §3.6 R2-R4; core-sites-g2): a finished rival event as the play book hears
+	// it. The knockouts and the bust by name (Beef, Payback, the Headliners' scalps, H2H, Team Scalps), the season's points
+	// (the League's raw points; none for a FUSE, which scores no Month, Season or League points), the final table on the rule
+	// the account's record keeps (1st to 9th, as Season::FinalTables), the template (a launch-week one-off as the daily it stands
+	// in for, so The Spark is The Spark in its launch week too), its featured and series flags, and the engine's format.
+	site::play::SettleFacts F;
+	F.Site = net::SiteOf(T.Spec.Id);
+	F.EventId = T.Spec.Id;
+	const std::string Played = T.Spec.Id.substr(0, T.Spec.Id.find('@'));
+	const std::string Daily = net::netsites_detail::NetSitesLaunchBase(Played);
+	F.Template = Daily.empty() ? Played : Daily;
+	F.Fuse = fuse::IsFuse(T.Spec.Id);
+	const net::EventTemplate* Tmpl = F.Fuse || Played.empty() ? nullptr : net::ForEvent(T.Spec.Id).FindTemplate(Played);
+	F.Place = Res.Place;
+	F.Entrants = Res.Entrants;
+	F.Prize = Res.PrizeCents;
+	F.BuyIn = Res.BuyInCents;
+	F.Points = Res.BuyInCents > 0 && !F.Fuse ? net::Points(Res.Place, Res.Entrants, Res.BuyInCents) : 0.0;
+	F.Final = Res.Place >= 1 && Res.Place <= 9 && !F.Fuse;
+	F.Win = Res.Place == 1;
+	F.Format = static_cast<int>(Tmpl ? Tmpl->Fmt : net::Format::Freezeout); // as OnPaidEntry's; a FUSE says so in Fuse
+	F.Featured = Tmpl && Tmpl->Featured;
+	F.Series = Tmpl && !Tmpl->Series.empty();
+	F.FuseM = F.Fuse && Res.BuyInCents > 0 ? static_cast<int>(T.Spec.GuaranteeCents / Res.BuyInCents) : 0;
+	if (T.Players.empty())
+	{
+		return F;
+	}
+	const TPlayer& Hero = T.Hero();
+	for (const TPlayer& P : T.Players)
+	{
+		if (P.Id == Hero.Id)
+		{
+			continue;
+		}
+		if (P.Busted && P.KnockedOutBy == Hero.Id)
+		{
+			F.Knocked.push_back(P.Name);
+		}
+		F.BustedBy = !Hero.KnockedOutBy.empty() && P.Id == Hero.KnockedOutBy ? P.Name : F.BustedBy;
+		F.FuseWinner = F.Fuse && P.Place == 1 ? P.Name : F.FuseWinner;
+	}
+	F.FuseWinner = F.Fuse && Hero.Place == 1 ? Hero.Name : F.FuseWinner;
+	return F;
+}
+} // namespace site
+
 void Session::SiteSettle(const Results& Res)
 {
 	// RiverLine's prize is the bank's (ShowResults paid it and wrote the bank's line). A rival's landed in its wallet: its
@@ -107,35 +162,17 @@ void Session::SiteSettle(const Results& Res)
 	Add.Wins = Res.Place == 1 ? 1 : 0;
 	Add.FinalTables = Res.Place >= 1 && Res.Place <= 9 && !Fuse ? 1 : 0;
 	Add.Events = 1;
-	site::OnPrize(Life.Sites, Site, Res.PrizeCents, "Prize: " + Res.EventName, World, Add);
+	// Update 3 G2 (§1.3; core-fuse's patch core-fuse_to_core-sites-g2_1.diff, taken with the multiplier read here so this file
+	// builds on HEAD alone): a FUSE's prize line names its multiplier and place, "FUSE x25: 1st" (the pool is exactly m x the
+	// buy-in, so m is the guarantee over it, as fuse::MultiplierOf reads it); every other event's, "Prize: " and its name.
+	const int FuseM = Fuse && T->Spec.BuyInCents > 0 ? static_cast<int>(T->Spec.GuaranteeCents / T->Spec.BuyInCents) : 0;
+	const std::string PrizeLabel = Fuse ? "FUSE x" + std::to_string(FuseM) + ": " + Ordinal(Res.Place) : "Prize: " + Res.EventName;
+	site::OnPrize(Life.Sites, Site, Res.PrizeCents, PrizeLabel, World, Add);
 	Life.Update2LinesRead |= life::U2Sites;
-	if (Fuse)
-	{
-		// The result as the site play book hears it (core-siteplay's OnResult; core-sites-g2 hands every result over at G2):
-		// who the player knocked out and who knocked them out, by name, the multiplier and its winner.
-		site::play::SettleFacts F;
-		F.Site = Site;
-		F.EventId = T->Spec.Id;
-		F.Place = Res.Place;
-		F.Entrants = Res.Entrants;
-		F.Prize = Res.PrizeCents;
-		F.BuyIn = Res.BuyInCents;
-		F.Win = Res.Place == 1;
-		F.Format = static_cast<int>(net::Format::Freezeout); // the engine's format; Fuse says what it was
-		F.Fuse = true;
-		F.FuseM = Res.BuyInCents > 0 ? static_cast<int>(T->Spec.GuaranteeCents / Res.BuyInCents) : 0;
-		const TPlayer& Hero = T->Hero();
-		for (const TPlayer& P : T->Players)
-		{
-			if (P.Busted && P.KnockedOutBy == Hero.Id && P.Id != Hero.Id)
-			{
-				F.Knocked.push_back(P.Name);
-			}
-			F.BustedBy = P.Id == Hero.KnockedOutBy && P.Id != Hero.Id ? P.Name : F.BustedBy;
-			F.FuseWinner = P.Place == 1 ? P.Name : F.FuseWinner;
-		}
-		site::play::OnResult(Life.SitePlay, Life, F, World);
-	}
+	// Update 3 G2 (core-sites-g2): every rival result as the site play book hears it, a FUSE's with its multiplier, its winner
+	// and no points. What the book does with it is core-siteplay's OnResult (a result moves only what a paid entry started:
+	// W4, S10).
+	site::play::OnResult(Life.SitePlay, Life, site::SettleFactsOf(*T, Res), World);
 }
 
 std::string Session::AnswerInvite(net::SiteId S, bool Accept)
@@ -276,7 +313,10 @@ std::string Session::DebugSite(const std::string& Args)
 				std::to_string(A.LifetimeEvents) + " events.";
 			if (A.BonusPending > 0 || A.BonusReleased > 0)
 			{
-				Out += " Welcome bonus: " + Money(A.BonusReleased) + " released, " + Money(A.BonusPending) + " pending until " + net::DateLabel(net::DayOf(A.BonusExpires)) + ".";
+				Out += " Welcome bonus: " + Money(A.BonusReleased) + " released, " + Money(A.BonusPending) + " pending until " + net::DateLabel(net::DayOf(A.BonusExpires));
+				// Update 3 (§2.6 F11): the Fuel Gauge's meter, as the pages read it (site::show::Welcome).
+				const site::show::WelcomeView V = site::show::Welcome(A, World);
+				Out += V.NextIn > 0 ? "; the next " + Money(std::min<Chips>(500, V.Pending)) + " in " + Money(V.NextIn) + " of rake." : std::string(".");
 			}
 			if (A.Site == net::SiteId::RunItTwice)
 			{
@@ -313,7 +353,8 @@ std::string Session::DebugSite(const std::string& Args)
 			}
 			// When it opens in this world (World::SiteLaunched; its own day before the world says, C3).
 			const double Opens = LivingWorld.SiteLaunched(D.Id) >= 0.0 ? LivingWorld.SiteLaunched(D.Id) : static_cast<double>(D.LaunchDay) * net::MinutesPerDay;
-			Out += "\n" + D.Name + "'s gate (" + (site::GateMet(D.Id, P, Life.RentsPaid, World) ? "met" : "not met") + "; invitation " + State + "): " +
+			const int Level = site::IgniteLevelOf(Life);
+			Out += "\n" + D.Name + "'s gate (" + (site::GateMet(D.Id, P, Life.RentsPaid, World, nullptr, Level) ? "met" : "not met") + "; invitation " + State + "): " +
 				(Opens <= World ? "open since " : "opens ") + net::DateLabel(net::DayOf(Opens)) + ", rents paid " + std::to_string(Life.RentsPaid) + "/" +
 				std::to_string(D.Gate.MinRentsPaid) + ", paid online events " +
 				std::to_string(std::max(P.OnlineEvents, P.Paid100)) + "/" + std::to_string(D.Gate.MinEvents);
@@ -324,6 +365,16 @@ std::string Session::DebugSite(const std::string& Args)
 			if (D.Gate.SeriesTitle || D.Gate.KastPartner)
 			{
 				Out += "; or " + std::to_string(P.OnlineSeriesTitles) + " online series titles (1), or Kast Partner (" + (P.Partner ? "yes" : "no") + ")";
+			}
+			// Update 3 G2 (§11 Q4): the easier doors, when the site has them.
+			if (D.Gate.MinEvents2 > 0)
+			{
+				Out += "; or " + std::to_string(std::max(P.OnlineEvents, P.Paid100)) + "/" + std::to_string(D.Gate.MinEvents2) + " at a last-100 average of " + Money(P.Abi100) + "/" +
+					Money(D.Gate.MinAbi100_2);
+			}
+			if (D.Gate.IgniteLevel > 0)
+			{
+				Out += "; or Ignite Level " + std::to_string(Level) + "/" + std::to_string(D.Gate.IgniteLevel);
 			}
 			Out += ".";
 		}
@@ -339,11 +390,12 @@ std::string Session::DebugSite(const std::string& Args)
 		{
 			return site::FillCopy(site::CopyText("err:joined"), {{"Site", net::Def(Named).Name}});
 		}
-		// The letter gives the reason the record meets (its gate's), or, forced past every gate, none it can't back up (why:3).
+		// The letter gives the reason the record meets (its gate's), or, forced past every gate, none it can't back up (-1:
+		// why:hello).
 		rep::Public P = Record();
 		rep::FromHistory(P, History);
-		int Why = 3;
-		Why = site::GateMet(Named, P, Life.RentsPaid, World, &Why) ? Why : 3;
+		int Why = -1;
+		Why = site::GateMet(Named, P, Life.RentsPaid, World, &Why, site::IgniteLevelOf(Life)) ? Why : -1;
 		site::Invite(Life.Sites, Life, Named, World, Why, false);
 		Save();
 		return net::Def(Named).Name + "'s invitation is in Mail.";

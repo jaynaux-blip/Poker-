@@ -588,7 +588,10 @@ video::Candidate Fake(video::Kind K, int Source, double World)
 void Session::VideoNoteHand(const Hand& H, const HandFacts& F)
 {
 	using namespace session_video_detail;
-	if (!T)
+	// Update 3 (§2.6 F7; S-J §6 item 13): a FUSE's hands make no candidates. Its table is hand for hand from the first hand
+	// (the engine's one paid place), so every all-in read as a "bubble" and twelve FUSEs filled all 30 of Rerun's slots; a big
+	// FUSE reaches Rerun as idea N1, from the play book.
+	if (!T || fuse::IsFuse(T->Spec.Id))
 	{
 		return;
 	}
@@ -849,7 +852,8 @@ void Session::VideoNoteHand(const Hand& H, const HandFacts& F)
 void Session::VideoRecap(const Results& Res)
 {
 	using namespace session_video_detail;
-	if (!T || Res.Place <= 0)
+	// Update 3 (§2.6 F7): nor does a FUSE's result (idea N1 tells the big ones from the play book's record).
+	if (!T || Res.Place <= 0 || fuse::IsFuse(T->Spec.Id))
 	{
 		return;
 	}

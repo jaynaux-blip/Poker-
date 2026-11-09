@@ -75,8 +75,8 @@ CashMethod SitesBank(Chips WithdrawFee, double HoursMin, double HoursMax)
 /**
  * Ignite Poker (§5.3): "Poker that's actually fun." A bright app that launches in the world on Mon Nov 2, 2026, with a week
  * of guarantees half again as big. Soft tables (the "soft" population, Pending.Strength -0.06), 11% rake on everything, 30
- * seconds a hand at the hypers, a third of RiverLine's traffic (busiest at 8 PM, Sundays x1.2). It invites after Act I and 150
- * paid online events; its welcome is 100% of the first deposit up to $100, released by rake. Coral and sky on plum: every one
+ * seconds a hand at the hypers, a third of RiverLine's traffic (busiest at 8 PM, Sundays x1.2). It invites after Act I and 60
+ * paid online events (Update 3's §11 Q4; Update 2 said 150); its welcome is 100% of the first deposit up to $100, released by rake. Coral and sky on plum: every one
  * of its 16 colours differs from RiverLine's, so the laptop's palette-leak check reads any RiverLine colour inside its skin as
  * a leak.
  *
@@ -120,7 +120,9 @@ SiteDef SitesIgnite()
 	D.TeamSize = 0; // Ignite Squad is P1
 	D.Cashier = {SitesCard(30), SitesBank(300, 72.0, 120.0)};
 	D.MinWithdraw = 2000;
-	D.Gate.MinEvents = 150;
+	// Update 3 G2 (SPEC §11 Q4, the user's answer of 2026-10-27; core-sites-g2): 60 paid online events after Act I's two rents
+	// (Update 2's answer was 150; a "no" is this one constant back to 150).
+	D.Gate.MinEvents = 60;
 	D.Gate.MinRentsPaid = 2;
 	D.LaunchDay = 28; // Mon Nov 2, 2026
 	return D;
@@ -131,7 +133,8 @@ SiteDef SitesIgnite()
  * "turnstone"): bigger guarantees, tougher fields (one band up from RiverLine at the same buy-in, Pending.Strength +0.03),
  * rake that falls at the top (8% to $55, 7% from $109, 5.5% from $530), 55% of RiverLine's traffic (busiest at 9 PM, Sundays
  * x1.5), its own team of six. Its new lobby and points season opened on Night One. It invites at 300 tracked online events
- * with an $11 average over the last hundred, or an online series title, or Kast Partner; its welcome is $33 in tickets.
+ * with an $11 average over the last hundred, or an online series title, or Kast Partner, and since Update 3 (§11 Q4) also at
+ * 150 with a $5.50 average or at Ignite Level 20, all after Act I; its welcome is $33 in tickets.
  *
  * Its colours are the Exchange after the bell (Update 3, SPEC §3.3 and §13, the user's 2026-10-21 restyle; core-sites-look,
  * G1): red and black, all 16 tokens replaced. Onyx ground, carbon panels, frost ink; Signal Red as the one accent ("red is
@@ -176,6 +179,12 @@ SiteDef SitesRunItTwice()
 	D.Gate.MinAbi100 = 1100;
 	D.Gate.SeriesTitle = true;
 	D.Gate.KastPartner = true;
+	// Update 3 G2 (SPEC §11 Q4, the user's answer of 2026-10-27; core-sites-g2), on top of every Update 2 door above and still
+	// after two rents: 150 paid online events at a $5.50 last-100 average, or Ignite Level 20 (the pro site scouts the soft
+	// site's regulars; the level is the play book's, GateMet's caller passes it). A "no" is these three back to 0.
+	D.Gate.MinEvents2 = 150;
+	D.Gate.MinAbi100_2 = 550;
+	D.Gate.IgniteLevel = 20;
 	D.LaunchDay = NightOneDay; // its new lobby opened Tue Oct 6, 2026
 	return D;
 }

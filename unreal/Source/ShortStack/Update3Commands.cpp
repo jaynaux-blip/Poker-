@@ -10,8 +10,8 @@
 //          leans in to see it)
 //   ss.Site.Play <verb> [args]   to the session's DebugSitePlay, the first word in lower case ("ss.Site.Play" alone is
 //          "describe"): describe | fuse <tier> <m> | wheel | dares | league | gov | sparks <n> | flame <days> | level <n>
-//          | scalp <npc> | league-draw | league-close | callout <npc> | grant <site> <cents> | rake <site> <cents>
-//          (fuse, sparks, flame, level, scalp and rake are dev only; "ss.Site.Describe" and the rest stay Update 2's)
+//          | scalp <npc> | beef <name> | league-draw | league-close | callout <npc> | grant <site> <cents> | rake <site> <cents>
+//          (fuse, sparks, flame, level, scalp, beef and rake are dev only; "ss.Site.Describe" and the rest stay Update 2's)
 //   ss.Video.Stats <id> | .Checkin [id] | .Trends | .Ideas | .Sheet <group> <n> | .Repack <id> <title|thumb> <n>
 //          | .Ads <id> <light|standard|heavy> | .Launch <id> <cut|kast|teaser|reply> | .Duel <id>
 //          to the session's DebugVideo, as Update 2's ss.Video.* are (Update 2's ss.Video.Upload takes Update 3's
@@ -136,7 +136,7 @@ FUpdate3Command LaptopOpen(EUpdate3Feature::Laptop, TEXT("ss.Laptop.Open"), null
 // The rival sites' play book (§2.6, §3.6).
 FUpdate3Command SitePlay(EUpdate3Feature::SitePlay, TEXT("ss.Site.Play"), nullptr,
 	TEXT("ss.Site.Play <describe|wheel|dares|league|gov|league-draw|league-close|callout <npc>|grant <site> <cents>>: the sites' play book, the Governor and the League (testing); ")
-	TEXT("<fuse <tier> <m>|sparks <n>|flame <days>|level <n>|scalp <npc>|rake <site> <cents>> (dev only)."));
+	TEXT("<fuse <tier> <m>|sparks <n>|flame <days>|level <n>|scalp <npc>|beef <name>|rake <site> <cents>> (dev only)."));
 // Rerun 2.0 (§4-§6).
 FUpdate3Command VideoStats(EUpdate3Feature::Video, TEXT("ss.Video.Stats"), TEXT("Stats"), TEXT("ss.Video.Stats <id>: one video's numbers, every field, and its components."));
 FUpdate3Command VideoCheckin(EUpdate3Feature::Video, TEXT("ss.Video.Checkin"), TEXT("Checkin"),

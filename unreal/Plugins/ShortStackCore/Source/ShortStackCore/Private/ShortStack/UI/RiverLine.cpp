@@ -5,6 +5,7 @@
 #include "ShortStack/Evaluator.h"
 #include "ShortStack/Game/Badges.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Fuse.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sizing.h"
 #include "ShortStack/Game/Stake.h"
@@ -14,6 +15,7 @@
 #include "ShortStack/UI/SiteArt.h"
 #include "IgniteArt.h"
 #include "RiverLineShared.h"
+#include "RitArt.h"
 
 #include <algorithm>
 #include <cctype>
@@ -247,6 +249,56 @@ Vec2 TblPotSpot(const TblLook& L)
 	return {L.Cx - 118.0f, L.Cy + 56.0f};
 }
 
+/**
+ * G1_AUDIT N12: the vertices a rival felt's chips may take in a frame (the bets, the pot and the chips in flight together;
+ * §10's 22k and 19k hold the rest of the table at its busiest), and the detail every stack on it draws at: the finest that
+ * fits (0 full; 1 fewer points, front stripes and no inner ring; 2 the columns, their faces and front marks, at most 64 a
+ * column, so a full felt of three-column stacks fits at 2 whatever the set).
+ */
+const int TblChipBudget = 1800;
+
+int TblChipDetail(const Session& S, const TblLook& L)
+{
+	std::vector<Chips> Stacks;
+	if (S.PotChips > 0)
+	{
+		Stacks.push_back(S.PotChips);
+	}
+	for (const SeatVis& Seat : S.Seats)
+	{
+		if (Seat.Present && Seat.Bet > 0)
+		{
+			Stacks.push_back(Seat.Bet);
+		}
+	}
+	for (const Flight& F : S.Flights)
+	{
+		if (F.IsChips && F.Amount > 0)
+		{
+			Stacks.push_back(F.Amount);
+		}
+	}
+	for (int Detail = 0; Detail < 2; ++Detail)
+	{
+		int V = 0;
+		for (const Chips A : Stacks)
+		{
+			V += rlsites_detail::SitesChipVertices(A, L.ChipSet, Detail);
+		}
+		if (V <= TblChipBudget)
+		{
+			return Detail;
+		}
+	}
+	return 2;
+}
+
+/** The chip set a rival felt's stacks draw with this frame: the look's, its detail in bits 4-5 (DrawChipStack, Ui.cpp). */
+int TblChipSet(const Session& S, const TblLook& L)
+{
+	return L.SeatList && L.ChipSet > 0 ? L.ChipSet | TblChipDetail(S, L) << 4 : L.ChipSet;
+}
+
 /** A look's bet spot: 0.56 of the way in from the seat to the felt's centre (§2.5, §3.5). */
 Vec2 TblBetSpot(const TblLook& L, Vec2 P)
 {
@@ -299,25 +351,45 @@ Chips TblActionChips(const std::string& Tag)
  * Ignite's capsule in its neon tube (§2.5): a Night rail, a coral-to-pink band with its glow and a cream highlight on the
  * inner edge (breathing on the beat at a final table), the Plum Velvet felt with its radial highlight and a faint scatter of
  * sparks (cached by look and skin). No betting line: §2.5 has none, and its dashes cost the table 1.8k vertices (§10).
+ * G2 fix (M5): the static layers are cached (the felt's colours in the key: a worn felt keeps its look's Key); the rail's drop
+ * shadow draws only the half under the tube that shows, and the cream line is a fill (Cream at 0.55 over Night, the 2-unit
+ * band its stroke covered) under the Night inside it: with the sign, 2,574 vertices to 2,303, the look the same.
  */
 void TblCapsule(Canvas& C, const TblLook& L, double Now, bool Still, bool FinalTable, double Bpm)
 {
 	const Rect F = TblFeltRect(L, 0.0f);
 	const float Rr = L.Chamfer;
-	const auto Grow = [&F](float D) { return Rect{F.X - D, F.Y - D, F.W + 2.0f * D, F.H + 2.0f * D}; };
-	const Rect Shade = Grow(24.0f);
-	C.FillRoundRect({Shade.X, Shade.Y + 6.0f, Shade.W, Shade.H}, Rr + 24.0f, Rgba(0, 0, 0, 0.45f));
-	C.FillRoundRect(Shade, Rr + 24.0f, Hex(rlsites_detail::SitesIgNight));
+	const auto Grow = [F](float D) { return Rect{F.X - D, F.Y - D, F.W + 2.0f * D, F.H + 2.0f * D}; };
+	const uint64_t Felt = (static_cast<uint64_t>(L.Felt) << 32 | L.FeltLight) * 0x100000001b3ull;
+	C.Cached(L.Key ^ 0x7a11d7a11d7a11d7ull ^ Felt, 0.0f, 0.0f, [&L, F, Rr, Grow](Canvas& Cv) {
+		// The drop shadow, 6 below the tube's outer capsule (a stadium: its ends are half circles of Rr + 24): only below the
+		// two capsules' crossing (3 under the ends' centres) does it show, so the polygon runs from just above the equator
+		// round the bottom (its chord inside the capsule over it).
+		const Rect Shade = Grow(24.0f);
+		const float Rs = Rr + 24.0f;
+		const float Cy = Shade.Y + 6.0f + Rs;
+		const int Segs = Cv.SegmentsFor(Rs, Pi * 0.5f + 0.05f);
+		std::vector<Vec2> Drop = Canvas::EllipsePath(Shade.X + Shade.W - Rs, Cy, Rs, Rs, -0.05f, Pi * 0.5f, Segs, true);
+		const std::vector<Vec2> Left = Canvas::EllipsePath(Shade.X + Rs, Cy, Rs, Rs, Pi * 0.5f, Pi + 0.05f, Segs, true);
+		Drop.insert(Drop.end(), Left.begin(), Left.end());
+		Cv.FillPolygon(Drop, Rgba(0, 0, 0, 0.45f));
+		Cv.FillRoundRect(Shade, Rs, Hex(rlsites_detail::SitesIgNight));
+	});
 	// The beat breathes the tube at a final table (Bpm: Ignite's, 96 in Afterburner Hours and 124 the rest of the day, SPEC
 	// §2.3, G1_AUDIT L1); a still while previewing.
 	const float Breath = FinalTable && !Still ? 0.7f + 0.3f * static_cast<float>(0.5 + 0.5 * std::sin(Now * 2.0 * 3.14159265 * Bpm / 60.0)) : 1.0f;
 	C.GlowRoundRect(Grow(12.0f), Rr + 12.0f, TblA(rlsites_detail::SitesIgPink, 0.35f * Breath), 16.0f);
-	C.FillRoundRect(Grow(17.0f), Rr + 17.0f, Paint::Linear({F.X, 0.0f}, {F.X + F.W, 0.0f}, Hex(rlsites_detail::SitesIgCoral), Hex(rlsites_detail::SitesIgPink)));
-	C.FillRoundRect(Grow(7.0f), Rr + 7.0f, Hex(rlsites_detail::SitesIgNight));
-	C.StrokeRoundRect(Grow(6.5f), Rr + 6.5f, TblA(rlsites_detail::SitesIgCream, 0.55f), 2.0f);
-	// The felt and its highlight: a soft lighter pool (a glow's falloff: a fifth of a radial's vertices, §10).
-	C.FillRoundRect(F, Rr, Hex(L.Felt));
-	C.GlowRoundRect({L.Cx - L.Rx * 0.62f, L.Cy - L.Ry * 0.45f - 12.0f, L.Rx * 1.24f, L.Ry * 0.9f}, L.Ry * 0.45f, TblA(L.FeltLight, 0.5f), 80.0f);
+	C.Cached(L.Key ^ 0x7a11d7a11d7a11d8ull ^ Felt, 0.0f, 0.0f, [&L, F, Rr, Grow](Canvas& Cv) {
+		Cv.FillRoundRect(Grow(17.0f), Rr + 17.0f, Paint::Linear({F.X, 0.0f}, {F.X + F.W, 0.0f}, Hex(rlsites_detail::SitesIgCoral), Hex(rlsites_detail::SitesIgPink)));
+		// The cream line, 5.5 to 7.5 out: a fill fades outward a pixel where the stroke faded both ways, so the Night inside it
+		// stops a pixel short of 5.5 (SitesOutlined's rule).
+		const float Px = 1.0f / (Cv.PixelScale() * Cv.Transform().UniformScale());
+		Cv.FillRoundRect(Grow(7.5f), Rr + 7.5f, rlsites_detail::SitesOver(TblA(rlsites_detail::SitesIgCream, 0.55f), Hex(rlsites_detail::SitesIgNight)));
+		Cv.FillRoundRect(Grow(5.5f - Px), Rr + 5.5f - Px, Hex(rlsites_detail::SitesIgNight));
+		// The felt and its highlight: a soft lighter pool (a glow's falloff: a fifth of a radial's vertices, §10).
+		Cv.FillRoundRect(F, Rr, Hex(L.Felt));
+		Cv.GlowRoundRect({L.Cx - L.Rx * 0.62f, L.Cy - L.Ry * 0.45f - 12.0f, L.Rx * 1.24f, L.Ry * 0.9f}, L.Ry * 0.45f, TblA(L.FeltLight, 0.5f), 80.0f);
+	});
 	// Forty sparks at 0.06, scattered by a fixed sequence (no draw).
 	const uint64_t Key = L.Key ^ 0x5ca77e125ca77e12ull ^ Skin::Current().Key();
 	C.Cached(Key, L.Cx, L.Cy, [&L](Canvas& Cv) {
@@ -397,11 +469,25 @@ bool TblOverlaps(const Rect& A, const Rect& B)
 }
 
 /**
+ * G2 fix (M5; "cap repeated glows"): one winner's glow behind a run of cards side by side, from (X0, Y0) to (X1, Y1), drawn
+ * before the run's cards draw without their own (DrawCard's highlight: 4 units out, CardW * 0.12 round, the skin's gold at
+ * 0.9, an 18 blur, each card's already spreading over the next). A three-way split showdown lit 13 card glows.
+ * Review fix (review-g2f-tablestyle): at the canvas's own curve, as DrawCard's: at TblLowGlow's two segments a corner the
+ * 23-unit fringe lit a ray along each corner's diagonal (the falloff fanned over 45-degree steps), four on every winner.
+ */
+void TblRunGlow(Canvas& C, float X0, float Y0, float X1, float Y1, float CardW)
+{
+	C.GlowRoundRect({X0 - 4.0f, Y0 - 4.0f, X1 - X0 + 8.0f, Y1 - Y0 + 8.0f}, CardW * 0.12f, Color{pal::Gold.R, pal::Gold.G, pal::Gold.B, 0.9f}, 18.0f);
+}
+
+/**
  * A listed seat's hole cards (§2.5, §3.5): the hero's big ones up and to the right of Ignite's bubble, or right-aligned over
  * RunItTwice's data card; everyone else's small at the seat's top right (faces at a showdown). While RunItTwice's lower third
- * is up (Band), no card is drawn inside it: the band shows the all-in hands itself.
+ * is up (Band), no card is drawn inside it: the band shows the all-in hands itself. G2 fix (M5): a winner's two cards, both
+ * turned, glow as one (TblRunGlow), and on a Crowded felt (TblStickerCrowd stickers up) the others' small backs draw without
+ * their drop shadow, as the stickers do.
  */
-void TblHoleCards(Canvas& C, const TblLook& L, const SeatVis& Seat, Vec2 P, const Rect& Box, bool Band, double Now, const std::vector<int>& Fading, double FadeAt)
+void TblHoleCards(Canvas& C, const TblLook& L, const SeatVis& Seat, Vec2 P, const Rect& Box, bool Band, double Now, const std::vector<int>& Fading, double FadeAt, bool Crowded)
 {
 	const bool Bubble = L.Seat == rlsites_detail::SeatStyle::Bubble;
 	const bool HeroBig = Seat.IsHero && (Seat.Hole.size() == 2 || !Fading.empty());
@@ -418,13 +504,19 @@ void TblHoleCards(Canvas& C, const TblLook& L, const SeatVis& Seat, Vec2 P, cons
 		const bool Live = Seat.HasCards && !Seat.Folded && Seat.Hole.size() == 2;
 		const std::vector<int> Cards = Live ? std::vector<int>{Seat.Hole[0], Seat.Hole[1]} : Fading;
 		const double Dealt = Now - Seat.DealtAt;
+		// Both turned (the second card's flip ends 0.7 s after the deal): one glow for the pair.
+		const bool Run = Live && Seat.Winner && Dealt >= 0.7;
+		if (Run)
+		{
+			TblRunGlow(C, X0, Bubble ? Y0 - 4.0f : Y0, Bubble ? X0 + 40.0f + Cw : X0 + 2.0f * Cw + 4.0f, Y0 + Ch, Cw);
+		}
 		for (size_t I = 0; I < Cards.size() && I < 2; ++I)
 		{
 			CardOpts O;
 			if (Live)
 			{
 				O.Flip = static_cast<float>(Clamp01((Dealt - 0.35 - static_cast<double>(I) * 0.1) / 0.25));
-				O.Highlight = Seat.Winner;
+				O.Highlight = Seat.Winner && !Run;
 			}
 			else
 			{
@@ -457,18 +549,40 @@ void TblHoleCards(Canvas& C, const TblLook& L, const SeatVis& Seat, Vec2 P, cons
 	{
 		return;
 	}
+	if (Seat.Winner)
+	{
+		TblRunGlow(C, X0, Y0, X0 + Step + Cw, Y0 + Ch, Cw);
+	}
 	for (int I = 0; I < 2; ++I)
 	{
+		if (!Faces && Crowded && L.CardBack > 0)
+		{
+			ui_detail::TblBackBare(C, X0 + static_cast<float>(I) * Step, Y0, Cw, Ch, (static_cast<float>(I) - 0.5f) * 0.15f, L.CardBack);
+			continue;
+		}
 		CardOpts O;
 		O.Rotate = Faces ? 0.0f : (static_cast<float>(I) - 0.5f) * 0.15f;
-		O.Highlight = Seat.Winner;
 		O.Back = L.CardBack;
 		DrawCard(C, Faces ? Seat.Hole[static_cast<size_t>(I)] : -1, X0 + static_cast<float>(I) * Step, Y0, Cw, Ch, O);
 	}
 }
 
+/**
+ * Whether a seat's action sticker is up (Ignite's bubbles, §2.5): its last action for 30 s, never a fold. G2 fix (M5): once
+ * the hand is over and the seat's hand is named, the name takes over (RunItTwice's tag gives way the same): a split showdown
+ * kept five stale CHECKs up beside five hand names.
+ */
+bool TblStickerUp(const SeatVis& V, double Now, bool HandOver)
+{
+	const bool Named = !V.HandLabel.empty() && HandOver && !V.Folded;
+	return V.Present && !V.LastAction.empty() && Now - V.LastActionAt < 30.0 && V.LastAction != "Fold" && !Named;
+}
+
+/** G2 fix (M5): from this many stickers up at once (an 8-way called pot puts up seven), they draw without their drop shadow. */
+const int TblStickerCrowd = 4;
+
 /** Ignite's action sticker (§2.5): a 16-point starburst with a cream outline over the bubble, the verb and the amount. */
-void TblSticker(Canvas& C, float Cx, float Cy, float R, const Color& Fill, const std::string& Top, const std::string& Low)
+void TblSticker(Canvas& C, float Cx, float Cy, float R, const Color& Fill, const std::string& Top, const std::string& Low, bool Shadow)
 {
 	const auto Burst = [&](float Rr, const Color& Col, float Dy) {
 		std::vector<Vec2> Pts;
@@ -480,7 +594,10 @@ void TblSticker(Canvas& C, float Cx, float Cy, float R, const Color& Fill, const
 		}
 		C.FillPolygon(Pts, Col);
 	};
-	Burst(R + 3.0f, Rgba(0, 0, 0, 0.35f), 2.0f);
+	if (Shadow)
+	{
+		Burst(R + 3.0f, Rgba(0, 0, 0, 0.35f), 2.0f);
+	}
 	Burst(R + 3.0f, Hex(rlsites_detail::SitesIgCream), 0.0f);
 	Burst(R, Fill, 0.0f);
 	TextStyle St = Ts(Low.empty() ? R * 0.46f : R * 0.42f, 900, Hex(rlsites_detail::SitesIgPlumInk), Align::Center, Baseline::Middle);
@@ -567,10 +684,13 @@ bool TblActionButton(Ui& UI, Canvas& C, const TblLook& L, const std::string& Id,
 		{
 			C.GlowRoundRect({Body.X + 10.0f, Body.Y + Body.H - 14.0f, Body.W - 20.0f, 16.0f}, 8.0f, TblA(rlsites_detail::SitesIgPink, 0.45f), 12.0f);
 		}
-		C.FillRoundRect(Body, Rr, Fill);
 		if (Role == TblRole::Fold)
 		{
-			C.StrokeRoundRect(Body, Rr, Hex(0x6a4a9a), 2.0f);
+			rlsites_detail::SitesOutlined(C, Body, Rr, Fill, Hex(0x6a4a9a), 2.0f); // G2 fix M5: its rim and body as two fills
+		}
+		else
+		{
+			C.FillRoundRect(Body, Rr, Fill);
 		}
 		C.FillRoundRect({Body.X + 10.0f, Body.Y + 4.0f, Body.W - 20.0f, 10.0f}, 5.0f, Rgba(255, 255, 255, Role == TblRole::Fold ? 0.06f : 0.22f));
 	}
@@ -679,8 +799,7 @@ void TblComposure(Canvas& C, const TblLook& L, float Comp, float X, float Y, flo
 		}
 		return;
 	}
-	C.FillRoundRect({X, Y, W, 10.0f}, 5.0f, Hex(rlsites_detail::SitesIgNight));
-	C.StrokeRoundRect({X, Y, W, 10.0f}, 5.0f, pal::Line, 1.0f);
+	rlsites_detail::SitesOutlined(C, {X, Y, W, 10.0f}, 5.0f, Hex(rlsites_detail::SitesIgNight), pal::Line, 1.0f); // G2 fix M5: two fills
 	const float Fw = std::max(10.0f, W * Comp);
 	const Paint Fill = Comp > 0.6f ? Paint::Linear({X, 0.0f}, {X + W, 0.0f}, Hex(rlsites_detail::SitesIgLime), pal::Green)
 		: Comp > 0.35f			   ? Paint::Linear({X, 0.0f}, {X + W, 0.0f}, Hex(rlsites_detail::SitesIgSun), Hex(rlsites_detail::SitesIgTang))
@@ -733,16 +852,17 @@ double TblSlider(Ui& UI, Canvas& C, const TblLook& L, bool& Drag, const std::str
 		C.FillRect({Kx - 1.0f, Knob.Y + 5.0f, 2.0f, Knob.H - 10.0f}, pal::Accent);
 		return V;
 	}
-	C.FillRoundRect({R.X, Cy - 5.0f, R.W, 10.0f}, 5.0f, Hex(rlsites_detail::SitesIgNight));
-	C.StrokeRoundRect({R.X, Cy - 5.0f, R.W, 10.0f}, 5.0f, pal::Line, 1.0f);
+	// G2 fix (M5): the track's rim and body as two fills, and of the knob's shadow only the arc that shows.
+	rlsites_detail::SitesOutlined(C, {R.X, Cy - 5.0f, R.W, 10.0f}, 5.0f, Hex(rlsites_detail::SitesIgNight), pal::Line, 1.0f);
 	C.FillRoundRect({R.X, Cy - 5.0f, std::max(10.0f, R.W * Share), 10.0f}, 5.0f, Paint::Linear({R.X, 0.0f}, {R.X + R.W, 0.0f}, Hex(rlsites_detail::SitesIgCoral), Hex(rlsites_detail::SitesIgPink)));
 	if (St.Hover || Drag)
 	{
 		C.GlowRoundRect({Kx - 13.0f, Cy - 13.0f, 26.0f, 26.0f}, 13.0f, TblA(rlsites_detail::SitesIgPink, 0.45f), 10.0f);
 	}
-	C.FillCircle(Kx, Cy + 2.0f, 13.0f, Rgba(0, 0, 0, 0.35f));
-	C.FillCircle(Kx, Cy, 13.0f, Hex(rlsites_detail::SitesIgCream));
-	C.StrokeArc(Kx, Cy, 11.5f, 0.0f, 2.0f * Pi, Hex(rlsites_detail::SitesIgCoral), 3.0f);
+	rlsites_detail::SitesDropDisc(C, Kx, Cy, 13.0f, 2.0f, Rgba(0, 0, 0, 0.35f));
+	// The knob: a coral ring (10 to 13) round a cream middle, as two discs (the middle's edge fading 9 to 10, as the ring's did).
+	C.FillCircle(Kx, Cy, 13.0f, Hex(rlsites_detail::SitesIgCoral));
+	C.FillCircle(Kx, Cy, 9.0f, Hex(rlsites_detail::SitesIgCream));
 	rlsites_detail::SitesSpark(C, Kx, Cy, 6.0f, Hex(rlsites_detail::SitesIgCoral));
 	return V;
 }
@@ -822,6 +942,24 @@ int TblNextJump(const Tournament& T)
 		}
 	}
 	return 0;
+}
+
+/**
+ * What a table's places pay. A FUSE pays the session's split (fuse::PrizeAt: 80/12/8 from x25 up), not the engine's one
+ * place of the whole pool; every other event its own payouts.
+ */
+std::vector<Chips> TblPays(const Tournament& T)
+{
+	if (fuse::MultiplierOf(T.Spec) <= 0)
+	{
+		return T.Payouts;
+	}
+	std::vector<Chips> Out;
+	for (int P = 1; P <= 3 && fuse::PrizeAt(T.Spec, P) > 0; ++P)
+	{
+		Out.push_back(fuse::PrizeAt(T.Spec, P));
+	}
+	return Out.empty() ? T.Payouts : Out;
 }
 
 /** "100/200 (25)": blinds and ante as the RunItTwice centre line and INFO print them. */
@@ -1019,9 +1157,12 @@ void TblIgHead(Canvas& C, const Tournament& T, const Rect& Head, bool LevelFlash
 	TextStyle Lvl = Ts(14.0f, 900, pal::Ink, Align::Right);
 	Lvl.Face = static_cast<int8_t>(Font::BlackItalic);
 	C.Text("LEVEL " + std::to_string(T.LevelIndex + 1), X + W - 20.0f, Y + 34.0f, Lvl);
-	C.Text(ChipsText(static_cast<double>(Lv.Sb)) + "/" + ChipsText(static_cast<double>(Lv.Bb)) + " \xC2\xB7 ante " + ChipsText(static_cast<double>(Lv.Ante)), X + W - 20.0f, Y + 52.0f, Ts(12.0f, 700, pal::Muted, Align::Right));
+	// G2 fix (G2_AUDIT L8): the ante only while there is one (a FUSE has none at any level: never "ante 0").
+	const std::string Ante = Lv.Ante > 0 ? " \xC2\xB7 ante " + ChipsText(static_cast<double>(Lv.Ante)) : std::string();
+	C.Text(ChipsText(static_cast<double>(Lv.Sb)) + "/" + ChipsText(static_cast<double>(Lv.Bb)) + Ante, X + W - 20.0f, Y + 52.0f, Ts(12.0f, 700, pal::Muted, Align::Right));
 	std::string Sub = Money(T.Spec.BuyInCents);
-	Sub += T.Spec.GuaranteeCents > 0 ? " \xC2\xB7 GTD " + net::MoneyShort(T.Spec.GuaranteeCents) : std::string();
+	// A FUSE's prize to the cent ("a $27.50 prize", as its welcome line says), never rounded to $28.
+	Sub += T.Spec.GuaranteeCents > 0 ? " \xC2\xB7 GTD " + (fuse::MultiplierOf(T.Spec) > 0 ? Money(T.Spec.GuaranteeCents) : net::MoneyShort(T.Spec.GuaranteeCents)) : std::string();
 	Sub += " \xC2\xB7 " + Grouped(T.Spec.Entrants) + " entries";
 	C.Text(Sub, X + 72.0f, Y + 70.0f, Ts(13.0f, 600, pal::Ink, Align::Left, Baseline::Alphabetic, false, W - 72.0f - 22.0f));
 	// The blind clock as a fuse: burnt behind the spark, rope ahead of it.
@@ -1056,9 +1197,10 @@ void TblIgHead(Canvas& C, const Tournament& T, const Rect& Head, bool LevelFlash
 	const TPlayer& Me = T.Hero();
 	const bool Itm = T.InTheMoney();
 	const int Jump = TblNextJump(T);
+	const std::vector<Chips> Pays = TblPays(T);
 	const std::pair<std::string, std::string> Stats[4] = {
 		{Grouped(T.Remaining), "LEFT OF " + Grouped(T.Spec.Entrants)},
-		{Itm ? (Jump > 0 ? Money(T.PrizeFor(Jump)) : std::string("\xE2\x80\x94")) : std::to_string(T.PaidPlaces()), Itm ? std::string("NEXT JUMP") : "PAID \xC2\xB7 MIN " + Money(T.Payouts.back())},
+		{Itm ? (Jump > 0 ? Money(T.PrizeFor(Jump)) : std::string("\xE2\x80\x94")) : std::to_string(Pays.size()), Itm ? std::string("NEXT JUMP") : "PAID \xC2\xB7 MIN " + Money(Pays.back())},
 		{Me.Busted ? std::string("\xE2\x80\x94") : Ordinal(T.HeroRank()), "YOUR RANK"},
 		{TblBbLower(static_cast<Chips>(JsRound(T.AverageStack())), Bb), "AVERAGE"},
 	};
@@ -1077,11 +1219,12 @@ void TblIgHead(Canvas& C, const Tournament& T, const Rect& Head, bool LevelFlash
 void TblIgPayouts(Canvas& C, const Tournament& T, const Rect& Box)
 {
 	float Y = Box.Y + 16.0f;
-	C.Text(std::to_string(T.PaidPlaces()) + " PAID \xC2\xB7 MIN CASH " + Money(T.Payouts.back()), Box.X + 4.0f, Y, Ts(12.0f, 800, pal::Muted));
+	const std::vector<Chips> Pays = TblPays(T);
+	C.Text(std::to_string(Pays.size()) + " PAID \xC2\xB7 MIN CASH " + Money(Pays.back()), Box.X + 4.0f, Y, Ts(12.0f, 800, pal::Muted));
 	Y += 12.0f;
 	static const uint32_t Medals[3] = {rlsites_detail::SitesIgSun, 0xdcd3ec, 0xe0915a};
 	const int HeroRank = T.Hero().Busted ? 0 : T.HeroRank();
-	for (const std::pair<int, int>& Band : PayoutBands(static_cast<int>(T.Payouts.size())))
+	for (const std::pair<int, int>& Band : PayoutBands(static_cast<int>(Pays.size())))
 	{
 		if (Y + 34.0f > Box.Y + Box.H)
 		{
@@ -1109,7 +1252,7 @@ void TblIgPayouts(Canvas& C, const Tournament& T, const Rect& Box)
 		C.Text(Label, Box.X + 38.0f, Y + 20.0f, Ts(14.0f, 700, Reached || You ? pal::Ink : pal::Muted));
 		TextStyle Pz = Ts(16.0f, 900, Reached || You ? pal::Gold : pal::Muted, Align::Right);
 		Pz.Face = static_cast<int8_t>(Font::BlackItalic);
-		C.Text(Money(T.Payouts[static_cast<size_t>(Band.first - 1)]), Box.X + Box.W - 14.0f, Y + 21.0f, Pz);
+		C.Text(Money(Pays[static_cast<size_t>(Band.first - 1)]), Box.X + Box.W - 14.0f, Y + 21.0f, Pz);
 		Y += 34.0f;
 	}
 }
@@ -1710,7 +1853,9 @@ void RiverLine::Table(double Now)
 		}
 	}
 
-	// Pot and board: the stack is what's been gathered in; the label counts the bets out in front too.
+	// Pot and board: the stack is what's been gathered in; the label counts the bets out in front too. A rival felt's stacks
+	// share its chip budget (G1_AUDIT N12: TblChipSet carries the frame's detail; RiverLine's is its ChipSet, today's).
+	const int ChipSet = TblChipSet(S, Look);
 	if (!Rival)
 	{
 		if (S.PotChips > 0)
@@ -1729,7 +1874,7 @@ void RiverLine::Table(double Now)
 		if (S.PotChips > 0)
 		{
 			const Vec2 Ps = TblPotSpot(Look);
-			DrawChipStack(*C, S.PotChips, Ps.X, Ps.Y, 0.9f, 1.0f, Look.ChipSet);
+			DrawChipStack(*C, S.PotChips, Ps.X, Ps.Y, 0.9f, 1.0f, ChipSet);
 		}
 		if (const Chips Total = PotTotal(); Total > 0)
 		{
@@ -1761,6 +1906,26 @@ void RiverLine::Table(double Now)
 	const float By0 = Rival ? FeltCy - 70.0f : FeltCy - 45.0f;
 	const std::vector<Card> Winners = WinningCards();
 	auto IsWinner = [&](Card Cd) { return std::find(Winners.begin(), Winners.end(), Cd) != Winners.end(); };
+	// G2 fix (M5): on a rival's felt a run of winning cards side by side, each turned, glows once behind the run (TblRunGlow); a
+	// card still turning keeps its own.
+	std::vector<bool> InRun(S.Board.size(), false);
+	if (Rival && !Winners.empty())
+	{
+		const auto Lit = [&](size_t I) { return IsWinner(S.Board[I]) && Now - (I < S.BoardShownAt.size() ? S.BoardShownAt[I] : 0.0) >= 0.25; };
+		for (size_t I = 0; I < S.Board.size(); ++I)
+		{
+			if (InRun[I] || !Lit(I))
+			{
+				continue;
+			}
+			size_t J = I;
+			while (J < S.Board.size() && Lit(J))
+			{
+				InRun[J++] = true;
+			}
+			TblRunGlow(*C, Bx0 + static_cast<float>(I) * (Bw + 10.0f), By0, Bx0 + static_cast<float>(J - 1) * (Bw + 10.0f) + Bw, By0 + Bh, Bw);
+		}
+	}
 	for (size_t I = 0; I < S.Board.size(); ++I)
 	{
 		const double At = I < S.BoardShownAt.size() ? S.BoardShownAt[I] : 0.0;
@@ -1770,7 +1935,7 @@ void RiverLine::Table(double Now)
 		}
 		CardOpts O;
 		O.Flip = static_cast<float>(std::min(1.0, (Now - At) / 0.25));
-		O.Highlight = IsWinner(S.Board[I]);
+		O.Highlight = IsWinner(S.Board[I]) && !InRun[I];
 		O.Dim = !Winners.empty() && !IsWinner(S.Board[I]);
 		O.Back = Look.CardBack;
 		DrawCard(*C, S.Board[I], Bx0 + static_cast<float>(I) * (Bw + 10.0f), By0, Bw, Bh, O);
@@ -1799,7 +1964,7 @@ void RiverLine::Table(double Now)
 			continue;
 		}
 		const Vec2 P = BetPos(Seat.Seat);
-		DrawChipStack(*C, Seat.Bet, P.X, P.Y, 0.85f, 1.0f, Look.ChipSet);
+		DrawChipStack(*C, Seat.Bet, P.X, P.Y, 0.85f, 1.0f, ChipSet);
 		if (!Rival)
 		{
 			UI.Text(ChipsText(static_cast<double>(Seat.Bet)), P.X, P.Y + 30.0f, Ts(15.0f, 700, Hex(0xffffff), Align::Center));
@@ -1813,12 +1978,13 @@ void RiverLine::Table(double Now)
 		}
 		else
 		{
-			// Ignite: the figure in a Night pill under the chips, BlackItalic.
+			// Ignite: the figure in a Night pill under the chips, BlackItalic. G2 fix (M5): its violet rim and its body as two fills
+			// (the body Night at 0.92 over the felt, as one colour), not a fill and a stroke: 137 vertices to 82 a bet.
 			const std::string Amt = ChipsText(static_cast<double>(Seat.Bet));
 			TextStyle Bt = Ts(13.0f, 900, Hex(rlsites_detail::SitesIgCream), Align::Center, Baseline::Middle);
 			Bt.Face = static_cast<int8_t>(Font::BlackItalic);
 			const float Wd = std::max(56.0f, C->Measure(Amt, 13.0f, Font::BlackItalic) + 22.0f);
-			UI.RRect({P.X - Wd / 2.0f, P.Y + 14.0f, Wd, 20.0f}, 10.0f, TblA(rlsites_detail::SitesIgNight, 0.92f), Hex(0x5a3a86), 1.0f);
+			rlsites_detail::SitesOutlined(*C, {P.X - Wd / 2.0f, P.Y + 14.0f, Wd, 20.0f}, 10.0f, rlsites_detail::SitesOver(TblA(rlsites_detail::SitesIgNight, 0.92f), FeltMid), Hex(0x5a3a86), 1.0f);
 			UI.Text(Amt, P.X, P.Y + 24.5f, Bt);
 		}
 	}
@@ -2070,7 +2236,15 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 		const Chips Bb = S.CurHand ? std::max<Chips>(1, S.CurHand->BigBlind) : (S.T ? std::max<Chips>(1, S.T->CurrentLevel().Bb) : 1);
 		const bool InBb = rlsites_detail::SitesBetsInBb(*this, Look);
 		const bool Fading = IsHero && Seat.Folded && S.AutoFolded && Now - S.AutoFoldedAt < 1.5;
-		TblHoleCards(*C, Look, Seat, P, Box, Band, Now, Fading ? S.AutoFoldedCards : std::vector<Card>(), S.AutoFoldedAt);
+		// G2 fix (M5): Ignite's felt is crowded with TblStickerCrowd stickers up (an 8-way called pot puts up seven): its stickers
+		// and the small backs then draw without their drop shadows.
+		int Up = 0;
+		for (const SeatVis& V : S.Seats)
+		{
+			Up += TblStickerUp(V, Now, HandOver) ? 1 : 0;
+		}
+		const bool Crowded = Bubble && Up >= TblStickerCrowd;
+		TblHoleCards(*C, Look, Seat, P, Box, Band, Now, Fading ? S.AutoFoldedCards : std::vector<Card>(), S.AutoFoldedAt, Crowded);
 		AvatarSpec Pic = AvatarFor(Seat.Name);
 		if (IsHero)
 		{
@@ -2123,7 +2297,7 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 			{
 				C->GlowRoundRect({P.X - R - 14.0f, P.Y - R - 14.0f, 2.0f * R + 28.0f, 2.0f * R + 28.0f}, R + 14.0f, TblA(rlsites_detail::SitesIgSun, 0.5f), 18.0f);
 			}
-			C->FillCircle(P.X, P.Y + 3.0f, R + 5.0f, Rgba(0, 0, 0, 0.4f));
+			rlsites_detail::SitesDropDisc(*C, P.X, P.Y, R + 5.0f, 3.0f, Rgba(0, 0, 0, 0.4f)); // G2 fix M5: the shadow's arc that shows
 			C->FillCircle(P.X, P.Y, R + 5.0f, Hex(0x3b2a55)); // the level ring's track round the avatar (its arc is G2's levels)
 			DrawAvatar(*C, P.X, P.Y, R - 1.0f, Pic);
 			if (Seat.IsRival)
@@ -2171,7 +2345,7 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 			else
 			{
 				const float Nw = std::min(Look.CardW, std::max(70.0f, UI.Measure(Seat.Name, 12.5f, 800) + 22.0f));
-				UI.RRect({P.X - Nw / 2.0f, Py, Nw, 22.0f}, 11.0f, Hex(rlsites_detail::SitesIgCream));
+				rlsites_detail::SitesSmallRoundRect(*C, {P.X - Nw / 2.0f, Py, Nw, 22.0f}, 11.0f, Hex(rlsites_detail::SitesIgCream)); // G2 fix M5
 				UI.Text(Seat.Name, P.X, Py + 15.5f, Ts(12.5f, 800, NameInk, Align::Center, Baseline::Alphabetic, false, Nw - 14.0f));
 				// ALL IN stays cream like every stack (review fix: in Hot Pink it vanished into the neon tube at the capsule's ends,
 				// and read 3.96:1 on the felt); the pink ALL IN sticker marks it.
@@ -2186,20 +2360,21 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 				const auto Head = S.Bounties.find(Seat.Id);
 				const std::string Tag = Money(Head == S.Bounties.end() ? 0 : Head->second);
 				const float Tw = UI.Measure(Tag, 12.0f, 800) + 16.0f;
-				UI.RRect({P.X + R * 0.3f, P.Y - R - 10.0f, Tw, 22.0f}, 11.0f, Hex(0x3a1f08), pal::Orange);
+				rlsites_detail::SitesOutlined(*C, {P.X + R * 0.3f, P.Y - R - 10.0f, Tw, 22.0f}, 11.0f, Hex(0x3a1f08), pal::Orange, 1.0f); // G2 fix M5: two fills
 				UI.Text(Tag, P.X + R * 0.3f + Tw / 2.0f, P.Y - R + 1.0f, Ts(12.0f, 800, pal::Orange, Align::Center, Baseline::Middle, true));
 			}
 			if (Labelled)
 			{
 				const float Tw = UI.Measure(Seat.HandLabel, 13.0f, 800) + 20.0f;
 				const float Ly = IsHero ? Py + 30.0f : Py + 48.0f + (Hud.empty() ? 0.0f : 14.0f);
-				UI.RRect({P.X - Tw / 2.0f, Ly, Tw, 22.0f}, 11.0f, Seat.Winner ? Hex(rlsites_detail::SitesIgSun) : TblA(rlsites_detail::SitesIgNight, 0.9f));
+				rlsites_detail::SitesSmallRoundRect(*C, {P.X - Tw / 2.0f, Ly, Tw, 22.0f}, 11.0f, Seat.Winner ? Hex(rlsites_detail::SitesIgSun) : TblA(rlsites_detail::SitesIgNight, 0.9f)); // G2 fix M5
 				UI.Text(Seat.HandLabel, P.X, Ly + 16.0f, Ts(13.0f, 800, Seat.Winner ? Hex(rlsites_detail::SitesIgPlumInk) : Hex(rlsites_detail::SitesIgCream), Align::Center));
 			}
-			if (Shown)
+			if (Shown && !Labelled)
 			{
 				// The action as a starburst sticker over the bubble's left shoulder: CALL in sky, a raise in coral, ALL IN
-				// bigger in pink, CHECK small (§2.5). A fold only dims the bubble.
+				// bigger in pink, CHECK small (§2.5). A fold only dims the bubble. G2 fix (M5): a named hand takes over at the
+				// showdown (TblStickerUp), and on a crowded felt the stickers lose their drop shadow.
 				const std::string& Tag = Seat.LastAction;
 				const size_t Sp = Tag.find(' ');
 				const std::string Verb = rlnet_detail::NetUpper(Tag.substr(0, Sp));
@@ -2207,7 +2382,7 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 				const bool AllIn = Tag == "All-in";
 				const float Rs = AllIn ? 30.0f : Tag == "Check" ? 20.0f : 26.0f;
 				const Color Fill = AllIn ? Hex(rlsites_detail::SitesIgPink) : Tag == "Check" || StartsWith(Tag, "Call") ? Hex(rlsites_detail::SitesIgSky) : Hex(rlsites_detail::SitesIgCoral);
-				TblSticker(*C, P.X - R * 0.95f, P.Y - R - 6.0f, Rs, Fill, AllIn ? std::string("ALL IN") : Verb, AllIn ? std::string() : Amt);
+				TblSticker(*C, P.X - R * 0.95f, P.Y - R - 6.0f, Rs, Fill, AllIn ? std::string("ALL IN") : Verb, AllIn ? std::string() : Amt, !Crowded);
 			}
 			if (Seat.HasEquity && !Seat.Folded && S.CurHand && !S.CurHand->bComplete)
 			{
@@ -2651,7 +2826,7 @@ void RiverLine::DrawFlight(const Flight& F, double Now)
 	}
 	if (F.IsChips)
 	{
-		DrawChipStack(*C, F.Amount, X, Y, 0.75f, static_cast<float>(1.0 - std::max(0.0, T - (Hop ? 0.92 : 0.85)) * (Hop ? 12.0 : 5.0)), Look.ChipSet);
+		DrawChipStack(*C, F.Amount, X, Y, 0.75f, static_cast<float>(1.0 - std::max(0.0, T - (Hop ? 0.92 : 0.85)) * (Hop ? 12.0 : 5.0)), TblChipSet(S, Look));
 	}
 	else
 	{
@@ -3006,7 +3181,7 @@ void RiverLine::Controls(double Now)
 			}
 			else
 			{
-				UI.RRect(Box, Box.H / 2.0f, Hex(rlsites_detail::SitesIgNight), pal::Line);
+				rlsites_detail::SitesOutlined(*C, Box, Box.H / 2.0f, Hex(rlsites_detail::SitesIgNight), pal::Line, 1.0f); // G2 fix M5: two fills
 			}
 			TextStyle Fig = Ts(20.0f, 800, Slab ? pal::Gold : pal::Ink, Align::Right);
 			Fig.Face = Look.NumberFace;
@@ -3127,23 +3302,33 @@ void RiverLine::SidePanel(double Now)
 		const float Blink = Previewing ? 1.0f : 0.6f + 0.4f * static_cast<float>(std::sin(Now * 4.0));
 		if (Rit)
 		{
-			// RunItTwice (§3.5): one Carbon panel cut 10; tabs INFO, PAYOUTS, CHAT (and STREAM while live on Kast) in
-			// BoldCondensed caps, the active one on Panel2 over the panel's one twin stripe (half scale: 4 and 1.5, gap 2), Hot
-			// White. The LEAGUE tab is G2's, as the rail's LEAGUE plate.
+			// RunItTwice (§3.5): one Carbon panel cut 10; tabs INFO, LEAGUE (G2), PAYOUTS, CHAT (and STREAM while live on Kast)
+			// in BoldCondensed caps, the active one on Panel2 over the panel's one twin stripe (half scale: 4 and 1.5, gap 2), Hot
+			// White. LEAGUE isn't a RightTab (Session.h is frozen): it's this laptop's choice (rlrit_detail::RitUi::SideLeague),
+			// its body ui-rit's (RitSideLeague: the group live, the projected place by outcome, PROMOTION ZONE on a cash).
+			bool& League = rlrit_detail::RitOf(this).SideLeague;
 			const std::vector<Vec2> Outline = rlsites_detail::SitesCutPath(Panel, 10.0f);
 			C->FillPolygon(Outline, pal::Panel);
-			const std::pair<RightTab, const char*> Tabs[4] = {{RightTab::Info, "Info"}, {RightTab::Payouts, "Payouts"}, {RightTab::Chat, "Chat"}, {RightTab::Stream, "Stream"}};
-			const int TabCount = Live ? 4 : 3;
+			struct TblRitTab
+			{
+				RightTab Tab;
+				const char* Label;
+				bool League;
+			};
+			const TblRitTab Tabs[5] = {{RightTab::Info, "Info", false}, {RightTab::Info, "League", true}, {RightTab::Payouts, "Payouts", false}, {RightTab::Chat, "Chat", false},
+				{RightTab::Stream, "Stream", false}};
+			const int TabCount = Live ? 5 : 4;
 			const float TabW = Wd / static_cast<float>(TabCount);
 			for (int I = 0; I < TabCount; ++I)
 			{
 				const Rect R{X + static_cast<float>(I) * TabW, Panel.Y, TabW, 40.0f};
-				const Ui::ClickState St = UI.Clickable(std::string("tab") + Tabs[I].second, R);
+				const Ui::ClickState St = UI.Clickable(std::string("tab") + Tabs[I].Label, R);
 				if (St.Clicked)
 				{
-					S.Tab = Tabs[I].first;
+					League = Tabs[I].League;
+					S.Tab = Tabs[I].League ? S.Tab : Tabs[I].Tab;
 				}
-				const bool Active = Shown == Tabs[I].first;
+				const bool Active = Tabs[I].League ? League : !League && Shown == Tabs[I].Tab;
 				if (Active)
 				{
 					if (I == TabCount - 1)
@@ -3157,22 +3342,26 @@ void RiverLine::SidePanel(double Now)
 					C->FillRect({R.X + 14.0f, R.Y + 29.0f, R.W - 28.0f, 4.0f}, pal::Accent);
 					C->FillRect({R.X + 14.0f, R.Y + 35.0f, R.W - 28.0f, 1.5f}, pal::Accent);
 				}
-				UI.Text(rlnet_detail::NetUpper(Tabs[I].second), R.X + R.W / 2.0f, R.Y + 18.0f, TblFaced(Look, 13.0f, Active ? pal::Gold : St.Hover ? pal::Ink : pal::Muted, Align::Center, Baseline::Middle));
-				if (Tabs[I].first == RightTab::Stream)
+				UI.Text(rlnet_detail::NetUpper(Tabs[I].Label), R.X + R.W / 2.0f, R.Y + 18.0f, TblFaced(Look, 13.0f, Active ? pal::Gold : St.Hover ? pal::Ink : pal::Muted, Align::Center, Baseline::Middle));
+				if (Tabs[I].Tab == RightTab::Stream)
 				{
 					C->FillRect({R.X + 12.0f, R.Y + 14.0f, 7.0f, 7.0f}, rlnet_detail::NetA(pal::Accent, Blink));
 				}
 			}
 			C->FillRect({X, Panel.Y + 40.0f, Wd, 1.0f}, pal::Line);
 			C->StrokePolyline(Outline, true, pal::Line, 1.0f);
-			if (Shown == RightTab::Stream)
+			if (!League && Shown == RightTab::Stream)
 			{
 				StreamSide({X, Panel.Y + 48.0f, Wd, Panel.H - 48.0f}, Now);
 				return;
 			}
 			const Rect Body{X + 16.0f, Panel.Y + 52.0f, Wd - 32.0f, Panel.H - 52.0f - 14.0f};
 			C->PushClip(Body);
-			if (Shown == RightTab::Info)
+			if (League)
+			{
+				rlrit_detail::RitSideLeague(*this, *C, Body, Now);
+			}
+			else if (Shown == RightTab::Info)
 			{
 				// The ICM value from Structure's Icm(), started once a hand has ended and walked a frame's budget at a time (§3.5, §10;
 				// g1-audit N2: no frame pays for a whole final table).
@@ -3191,8 +3380,7 @@ void RiverLine::SidePanel(double Now)
 		}
 		// Ignite (§2.5): a rounded panel, the event's head with the blind clock as a fuse, candy tabs (the active one in the
 		// accent with plum ink), chat bubbles, Payouts with medals, Standings with level rings.
-		C->FillRoundRect(Panel, Look.PanelRadius, Paint::Linear({0.0f, Panel.Y}, {0.0f, Panel.Y + Panel.H}, pal::Panel, pal::Bg));
-		C->StrokeRoundRect(Panel, Look.PanelRadius, pal::Line, 1.0f);
+		rlsites_detail::SitesOutlined(*C, Panel, Look.PanelRadius, Paint::Linear({0.0f, Panel.Y}, {0.0f, Panel.Y + Panel.H}, pal::Panel, pal::Bg), pal::Line, 1.0f); // G2 fix M5
 		TblIgHead(*C, T, {X, Panel.Y, Wd, 162.0f}, LevelFlash, T.LevelSecondsLeft());
 		const std::pair<RightTab, const char*> Tabs[4] = {{RightTab::Chat, "Chat"}, {RightTab::Stream, "Stream"}, {RightTab::Payouts, "Payouts"}, {RightTab::Info, "Standings"}};
 		const int TabCount = Live ? 4 : 3;

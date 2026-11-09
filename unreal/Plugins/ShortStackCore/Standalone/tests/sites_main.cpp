@@ -25,6 +25,12 @@
 // functions (the projected overlay against a hand-computed case, the Club's accrual at every tier edge, spike S-D's crafted
 // second boards and a fuzz, the Desk from a fixture History); U3Marks the new siteart marks and RunItTwice's six recoloured
 // emblem families.
+//
+// Update 3 G2 (core-sites-g2, SPEC v1.2 §8.3 #8): RealSchedules pins "The Spark" (id spark-jackpot kept); Invitations is
+// rewritten for §11 Q4 as answered (Ignite at 60; RunItTwice also at 150 at $5.50 or Ignite Level 20, every Update 2 door kept,
+// each letter its reason); U3G2Facts the SettleFacts every rival result hands the play book; U3G2Welcome the welcome window and
+// each entry's release as the Governor reads them, and the 1st writing nothing into an untouched book; SoftBound adds Ignite's
+// promotional EV at the Governor's ceilings.
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
 #include "CopyLint.h"
 #include "Trademarks.h"
@@ -68,6 +74,19 @@
 #include <system_error>
 #include <thread>
 #include <vector>
+
+// Update 3 G2 (core-sites-g2): SiteMoney.cpp's and SessionSites.cpp's new helpers, declared here until the patch
+// core-sites-g2_to_lead_1.diff puts them in SitesDetail.h (the same declarations, so either way compiles).
+namespace ss
+{
+namespace site
+{
+int IgniteLevelOf(const life::State& L);
+bool WelcomeWindow(const Account& A, double World);
+Chips WelcomeReleasedBy(const Account& A, Chips Fee, double World);
+site::play::SettleFacts SettleFactsOf(const ss::Tournament& T, const ss::Results& Res);
+} // namespace site
+} // namespace ss
 
 namespace sites_test
 {
@@ -1165,7 +1184,41 @@ void RealSchedules()
 	const net::EventTemplate* Spark = Ig.FindTemplate("ignite.spark-jackpot");
 	const net::EventTemplate* Flip = Ig.FindTemplate("ignite.flip-go");
 	const net::EventTemplate* Blaze = Ig.FindTemplate("ignite.sunday-blaze");
-	Expect(Spark && Spark->BuyInCents == 550 && Spark->StartMinute == 20 * 60 && Spark->GtdCents > 0 && Spark->Featured, "the Spark Jackpot: $5.50 every night at 8 PM, guaranteed");
+	Expect(Spark && Spark->BuyInCents == 550 && Spark->StartMinute == 20 * 60 && Spark->GtdCents > 0 && Spark->Featured, "The Spark: $5.50 every night at 8 PM, guaranteed");
+	// Update 3 G2 (SPEC §1.10, W10; core-sites-g2, a listed deliberate rewrite): "Spark Jackpot" is shown as The Spark everywhere
+	// a player reads it, its launch week's one-offs too; the id spark-jackpot (saves, tickets, EventArt, every instance's seed)
+	// doesn't move, and no template, letter, news line or label says "Spark Jackpot" any more.
+	{
+		bool Renamed = Spark && Spark->Name == "The Spark" && Ig.TicketOf("ignite.spark-jackpot") == "ignite.spark-jackpot";
+		int Launches = 0;
+		for (int K = 1; K <= 7; ++K)
+		{
+			const net::EventTemplate* One = Ig.FindTemplate("ignite.spark-jackpot-launch" + std::to_string(K));
+			Renamed = Renamed && One && One->Name == "The Spark";
+			Launches += One ? 1 : 0;
+		}
+		bool Gone = true;
+		for (const net::Network* Nw : {&Ig, &Rt})
+		{
+			for (const net::EventTemplate& T : Nw->Templates())
+			{
+				Gone = Gone && T.Name.find("Jackpot") == std::string::npos;
+			}
+		}
+		std::vector<std::string> Words = site::Copy();
+		for (const std::string& S : site::CopyLabels())
+		{
+			Words.push_back(S);
+		}
+		for (const std::string& S : Words)
+		{
+			Gone = Gone && S.find("Spark Jackpot") == std::string::npos;
+		}
+		const std::string Bree = site::CopyText("invite:ignite");
+		Expect(Renamed && Launches == 7 && Gone && Bree.find("The Spark every night at 8 PM") != std::string::npos,
+			"The Spark: the template's name and its 7 launch-week one-offs, id spark-jackpot kept; no rival template or site copy says \"Jackpot\" (" +
+				std::to_string(Words.size()) + " lines read)");
+	}
 	Expect(Flip && Flip->Fmt == net::Format::Flip && Flip->EveryMinutes == 60 && Flip->Speed == "Hyper" && Ig.FindTemplate("ignite.flip-go-bounty") &&
 			Ig.FindTemplate("ignite.flip-go-bounty")->Fmt == net::Format::Bounty,
 		"Flip & Run every hour, and the Flip & Run Bounty");
@@ -1298,7 +1351,7 @@ void LaunchAndFields()
 	net::EventInstance Found;
 	Expect(!Ig.FindInstance("ignite.spark-jackpot@" + std::to_string((Launch - 1) * 1440 + 1200), Found) &&
 			Ig.FindInstance("ignite.spark-jackpot@" + std::to_string((Launch + 7) * 1440 + 1200), Found),
-		"Ignite's Spark Jackpot the night before launch was never scheduled; a week after, it is");
+		"Ignite's The Spark the night before launch was never scheduled; a week after, it is");
 	// Ignite's launch week: every guaranteed event those seven days is its own one-off, the guarantee half again as big; the
 	// daily stays out; on Nov 9 the dailies are back.
 	int Twins = 0;
@@ -1329,7 +1382,7 @@ void LaunchAndFields()
 	{
 		Back = Back || E.Id.rfind("ignite.spark-jackpot@", 0) == 0;
 	}
-	Expect(Back, "on Nov 9 the Spark Jackpot is its daily self again");
+	Expect(Back, "on Nov 9 The Spark is its daily self again");
 	// Fields without the floor, guarantees at 0.9 of the median pool: 10-25% of guaranteed events overlay over a month; at least
 	// half in Ignite's launch week.
 	auto Rate = [](const net::Network& N, int From, int To, int& Gtd) {
@@ -1556,14 +1609,14 @@ void Money()
 	site::Deposit(Play.Sites, Play, PlayBank, net::SiteId::Ignite, 10000, "", T0);
 	site::Account* Pa = site::AccountOf(Play.Sites, net::SiteId::Ignite);
 	Pa->Cents -= 550;
-	site::OnBuyIn(Play.Sites, net::SiteId::Ignite, 550, 61, "Buy-in: $5.50 Spark Jackpot", T0 + 60);
+	site::OnBuyIn(Play.Sites, net::SiteId::Ignite, 550, 61, "Buy-in: $5.50 The Spark", T0 + 60);
 	site::Season Add;
 	Add.Points = 120;
 	Add.Won = 18600;
 	Add.FinalTables = 1;
 	Add.Events = 1;
 	Pa->Cents += 18600;
-	site::OnPrize(Play.Sites, net::SiteId::Ignite, 18600, "Prize: $5.50 Spark Jackpot", T0 + 300, Add);
+	site::OnPrize(Play.Sites, net::SiteId::Ignite, 18600, "Prize: $5.50 The Spark", T0 + 300, Add);
 	Expect(Pa->Cents == SitesLines(*Pa) && Pa->RakeMonth == 61 && Pa->RakeLife == 61 && Pa->LifetimeWon == 18600 && Pa->LifetimeEvents == 1 && Pa->Hero.FinalTables == 1 &&
 			Pa->Hero.Points == 120.0 && Pa->Lines.size() == 3,
 		"a rival's buy-in and prize: one line each, the rake and the record counted, the wallet equal to its lines");
@@ -1599,35 +1652,108 @@ void RentLine()
 
 void Invitations()
 {
+	// Update 3 G2 (SPEC §11 Q4 as the user answered it on 2026-10-27; core-sites-g2's listed deliberate rewrites of Update 2's
+	// gate checks): Ignite at 60 paid online events (was 150); RunItTwice also at 150 at a $5.50 last-100 average (GateMet's Why
+	// 3) or at Ignite Level 20 (Why 4); every Update 2 door still opens it (Why 0, 1, 2); none of them before two rents.
 	const double After = (net::Def(net::SiteId::Ignite).LaunchDay + 3) * SitesDay + 600.0;
+	const net::InviteGate& IgGate = net::Def(net::SiteId::Ignite).Gate;
+	const net::InviteGate& RtGate = net::Def(net::SiteId::RunItTwice).Gate;
+	Expect(IgGate.MinEvents == 60 && IgGate.MinRentsPaid == 2 && IgGate.MinEvents2 == 0 && IgGate.IgniteLevel == 0 && RtGate.MinEvents == 300 && RtGate.MinAbi100 == 1100 &&
+			RtGate.SeriesTitle && RtGate.KastPartner && RtGate.MinRentsPaid == 2 && RtGate.MinEvents2 == 150 && RtGate.MinAbi100_2 == 550 && RtGate.IgniteLevel == 20,
+		"the gates as answered (Q4): Ignite 60 after two rents; RunItTwice 300 at $11, a title or Partner, and now 150 at $5.50 or Ignite Level 20, after two rents");
 	ss::rep::Public P;
-	P.OnlineEvents = 149;
-	Expect(!site::GateMet(net::SiteId::Ignite, P, 2, After), "Ignite: 149 paid online events, no");
-	P.OnlineEvents = 150;
-	Expect(site::GateMet(net::SiteId::Ignite, P, 2, After) && !site::GateMet(net::SiteId::Ignite, P, 1, After), "Ignite: 150 and two rents paid, yes; one rent, no (Act I isn't over)");
+	P.OnlineEvents = 59;
+	Expect(!site::GateMet(net::SiteId::Ignite, P, 2, After), "Ignite: 59 paid online events, no");
+	P.OnlineEvents = 60;
+	Expect(site::GateMet(net::SiteId::Ignite, P, 2, After) && !site::GateMet(net::SiteId::Ignite, P, 1, After), "Ignite: 60 and two rents paid, yes; one rent, no (Act I isn't over)");
 	Expect(!site::GateMet(net::SiteId::Ignite, P, 2, (net::Def(net::SiteId::Ignite).LaunchDay - 1) * SitesDay + 600.0), "Ignite: never before it opens");
+	P.OnlineEvents = 150;
+	Expect(site::GateMet(net::SiteId::Ignite, P, 2, After), "Ignite: Update 2's 150 still opens it");
 	{
 		// A career older than the world's tracker (or a save with no world): its last hundred in History count (C3).
 		ss::rep::Public Old;
-		Old.Paid100 = 100;
-		Expect(!site::GateMet(net::SiteId::Ignite, Old, 2, After), "Ignite: 100 in History and none tracked is still under 150");
+		Old.Paid100 = 59;
+		Expect(!site::GateMet(net::SiteId::Ignite, Old, 2, After), "Ignite: 59 in History and none tracked is still under 60");
 		Old.OnlineEvents = 40;
-		Old.Paid100 = 150;
+		Old.Paid100 = 60;
 		Expect(site::GateMet(net::SiteId::Ignite, Old, 2, After), "Ignite: the gate counts History's paid events when the tracker has fewer");
 	}
-	P.OnlineEvents = 300;
-	P.Abi100 = 1099;
 	int Why = -1;
-	Expect(!site::GateMet(net::SiteId::RunItTwice, P, 2, After), "RunItTwice: 300 events at a $10.99 average, no");
+	// Update 2's volume door: 300 at an $11 average, Why 0, and first whenever it's met.
+	P.OnlineEvents = 300;
 	P.Abi100 = 1100;
-	Expect(site::GateMet(net::SiteId::RunItTwice, P, 2, After, &Why) && Why == 0, "RunItTwice: 300 at $11.00, yes");
+	Expect(site::GateMet(net::SiteId::RunItTwice, P, 2, After, &Why) && Why == 0, "RunItTwice: 300 at $11.00, yes (Why 0)");
+	// Rewritten (Update 2 read "no" for both): 300 at $10.99 and 299 at $11.00 now open the second volume door.
+	P.Abi100 = 1099;
+	Expect(site::GateMet(net::SiteId::RunItTwice, P, 2, After, &Why) && Why == 3, "RunItTwice: 300 events at a $10.99 average, yes now, by 150 at $5.50 (Why 3)");
+	P.Abi100 = 1100;
 	P.OnlineEvents = 299;
-	Expect(!site::GateMet(net::SiteId::RunItTwice, P, 2, After), "RunItTwice: 299 at $11.00, no");
+	Expect(site::GateMet(net::SiteId::RunItTwice, P, 2, After, &Why) && Why == 3, "RunItTwice: 299 at $11.00, yes now, by 150 at $5.50 (Why 3)");
+	// The second volume door, at its edges.
+	P.OnlineEvents = 150;
+	P.Abi100 = 550;
+	Expect(site::GateMet(net::SiteId::RunItTwice, P, 2, After, &Why) && Why == 3 && !site::GateMet(net::SiteId::RunItTwice, P, 1, After), "RunItTwice: 150 at $5.50, yes (Why 3); one rent, no");
+	P.Abi100 = 549;
+	Expect(!site::GateMet(net::SiteId::RunItTwice, P, 2, After), "RunItTwice: 150 at a $5.49 average, no");
+	P.OnlineEvents = 149;
+	P.Abi100 = 1100;
+	Expect(!site::GateMet(net::SiteId::RunItTwice, P, 2, After), "RunItTwice: 149 at $11.00, no");
+	{
+		ss::rep::Public Old;
+		Old.OnlineEvents = 90;
+		Old.Paid100 = 100;
+		Old.Abi100 = 550;
+		Expect(!site::GateMet(net::SiteId::RunItTwice, Old, 2, After), "RunItTwice: 100 in History at $5.50 is still under 150");
+	}
+	// The Ignite Level door: the caller passes the play book's level.
+	P.OnlineEvents = 0;
+	P.Abi100 = 0;
+	Expect(!site::GateMet(net::SiteId::RunItTwice, P, 2, After, &Why, 19), "RunItTwice: Ignite Level 19, no");
+	Expect(site::GateMet(net::SiteId::RunItTwice, P, 2, After, &Why, 20) && Why == 4 && !site::GateMet(net::SiteId::RunItTwice, P, 1, After, nullptr, 40),
+		"RunItTwice: Ignite Level 20, yes (Why 4); one rent, no, at any level");
+	Expect(!site::GateMet(net::SiteId::Ignite, P, 2, After, nullptr, 50), "Ignite has no level door: Level 50 and no events, no");
+	// Update 2's other doors, each alone.
 	P.OnlineSeriesTitles = 1;
 	Expect(site::GateMet(net::SiteId::RunItTwice, P, 2, After, &Why) && Why == 1 && !site::GateMet(net::SiteId::RunItTwice, P, 1, After), "RunItTwice: an online series title, yes (after Act I)");
 	P.OnlineSeriesTitles = 0;
 	P.Partner = true;
 	Expect(site::GateMet(net::SiteId::RunItTwice, P, 2, After, &Why) && Why == 2, "RunItTwice: Kast Partner, yes");
+	P.Partner = false;
+	Expect(!site::GateMet(net::SiteId::RunItTwice, P, 2, After, &Why, 1), "RunItTwice: nothing at all, no");
+	// The play book's level (Ignite Level, lifetime base Sparks against LevelNeeds), as site::Step passes it: an empty book is
+	// Level 1 (an old save, a new career), and the book is only read.
+	{
+		State Lv;
+		const int Empty = site::IgniteLevelOf(Lv);
+		const int64_t Need20 = site::play::LevelNeeds(20);
+		Lv.SitePlay.Ig.S.BaseLife = Need20;
+		const int At20 = site::IgniteLevelOf(Lv);
+		Lv.SitePlay.Ig.S.BaseLife = Need20 - 1;
+		const int Under20 = site::IgniteLevelOf(Lv);
+		std::printf("ignite level: an empty book is Level %d; LevelNeeds(20) = %lld base Sparks reads Level %d, one fewer Level %d\n", Empty, static_cast<long long>(Need20), At20,
+			Under20);
+		// Until core-siteplay's LevelNeeds lands (Phase A's stub answers 0 for every level), every book reads Level 1.
+		const bool Live = site::play::LevelNeeds(2) > 0;
+		Expect(Empty == 1 && (Live ? At20 == 20 && Under20 == 19 : At20 == 1 && Under20 == 1) && Lv.Update3LinesRead == 0,
+			"Ignite Level from the play book: an empty book Level 1; " + std::string(Live ? "LevelNeeds(20) base Sparks Level 20, one fewer Level 19" : "LevelNeeds still a stub: Level 1") +
+				"; nothing written");
+	}
+	// The letters' reasons (RunItTwice's {Why}): each door its own sentence; a forced invitation claims nothing.
+	{
+		State Lt;
+		const double At = After;
+		const std::pair<int, const char*> Reasons[] = {{0, "Three hundred tournaments"}, {1, "A series title"}, {2, "We watch the streams"}, {3, "A hundred and fifty tournaments"},
+			{4, "the regulars over at Ignite"}, {-1, "We like to say hello early."}, {7, "We like to say hello early."}};
+		bool Said = true;
+		for (const std::pair<int, const char*>& R : Reasons)
+		{
+			Lt.Inbox.clear();
+			Lt.Sites.Invites.clear();
+			site::Invite(Lt.Sites, Lt, net::SiteId::RunItTwice, At, R.first, false);
+			Said = Said && !Lt.Inbox.empty() && Lt.Inbox.back().Body.find(R.second) != std::string::npos && Lt.Inbox.back().Body.find('{') == std::string::npos;
+		}
+		Expect(Said, "RunItTwice's invitation gives the door's own reason (0 to 4), and a forced one says hello and nothing more");
+	}
 	// (Review.) The record's last-hundred numbers from History (rep::FromHistory): Abi100 averages the paid events only (a
 	// freeroll costs nothing), and a series title is a win in a series event on any site; a daily won, or a series event
 	// cashed short of first, is no title.
@@ -1697,6 +1823,45 @@ void Invitations()
 		"a routine letter holds that company's next one for a week, no other's");
 	site::Step(J.Sites, J, Bank, Q, 0, After, After + 2 * SitesDay, Texts);
 	Expect(J.Inbox.size() == 1, "and no invitation from a site already joined");
+	// Update 3 G2 (§11 Q4): the day's step finds the new doors itself. 150 paid events at $5.50 brings both letters, RunItTwice's
+	// with its reason; a play book at Ignite Level 20 and nothing else brings RunItTwice's alone (once LevelNeeds is
+	// core-siteplay's; while it's Phase A's stub every book is Level 1 and nothing comes); and the book is never written.
+	{
+		State R;
+		R.RentsPaid = 2;
+		Chips RBank = 0;
+		ss::rep::Public V;
+		V.OnlineEvents = 150;
+		V.Abi100 = 550;
+		site::Step(R.Sites, R, RBank, V, 0, After, After + SitesDay, Texts);
+		const ss::life::Letter* Rit = nullptr;
+		int Ig = 0;
+		for (const ss::life::Letter& M : R.Inbox)
+		{
+			Rit = M.Thread == "runittwice" && M.Kind == site::LetterInvite ? &M : Rit;
+			Ig += M.Thread == "ignite" && M.Kind == site::LetterInvite ? 1 : 0;
+		}
+		Expect(Rit && Ig == 1 && Rit->Body.find("A hundred and fifty tournaments") != std::string::npos && Rit->From == "Ingrid Vale, RunItTwice Player Development",
+			"Q4: 150 events at a $5.50 average: Ignite's letter and RunItTwice's, from Ingrid Vale, with its reason");
+		State Lv;
+		Lv.RentsPaid = 2;
+		Lv.SitePlay.Ig.S.BaseLife = site::play::LevelNeeds(20);
+		const ss::life::State Before = Lv;
+		site::Step(Lv.Sites, Lv, RBank, ss::rep::Public(), 0, After, After + SitesDay, Texts);
+		int RitLetters = 0;
+		int IgLetters = 0;
+		bool Reason = false;
+		for (const ss::life::Letter& M : Lv.Inbox)
+		{
+			RitLetters += M.Thread == "runittwice" && M.Kind == site::LetterInvite ? 1 : 0;
+			IgLetters += M.Thread == "ignite" && M.Kind == site::LetterInvite ? 1 : 0;
+			Reason = Reason || (M.Thread == "runittwice" && M.Body.find("the regulars over at Ignite") != std::string::npos);
+		}
+		const bool Live = site::play::LevelNeeds(2) > 0;
+		Expect((Live ? RitLetters == 1 && Reason : RitLetters == 0) && IgLetters == 0 && Lv.SitePlay.Ig.S.BaseLife == Before.SitePlay.Ig.S.BaseLife && Lv.Update3LinesRead == 0,
+			std::string("Q4: a Level 20 play book and no events: ") + (Live ? "RunItTwice's letter alone, with its reason" : "nothing yet (LevelNeeds is Phase A's stub)") +
+				"; the book only read");
+	}
 }
 
 void Promotions()
@@ -1980,7 +2145,7 @@ void RivalNews()
 		Opened = Opened || (It.Title == "Ignite Poker is live" && It.Body.find("$25K Sunday Blaze") != std::string::npos && It.Tag == "LAUNCH");
 		Promo = Promo || It.Tag == "PROMO";
 		Overlay = Overlay || (It.Tag == "OVERLAY" && It.Title.find("overlays by") != std::string::npos && It.Body.find("Ignite covered the difference.") != std::string::npos);
-		// (The event's own name keeps its buy-in, "$5.50 Spark Jackpot"; the money it's short is what's counted.)
+		// (The event's own name keeps its buy-in, "$5.50 The Spark"; the money it's short is what's counted.)
 		const size_t By = It.Title.find(" overlays by ");
 		Whole = Whole && (It.Tag != "OVERLAY" || (By != std::string::npos && !Cents(It.Title.substr(By)) && !Cents(It.Body)));
 		// (review-c3-fixes) The figure the item carries (the news card's big number, the ticker's "(...)") is the headline's
@@ -2353,6 +2518,22 @@ void SoftBound(int Count)
 	const double Micro0 = MicroRoi;
 	Expect(Micro0 > 0.0 && Soft0 <= 1.5 * Micro0,
 		"the soft population's bound: Ignite's after-rake ROI " + SitesNum(100.0 * Soft0) + "% is at most 1.5x RiverLine's " + SitesNum(100.0 * Micro0) + "%");
+	// Update 3 G2 (SPEC §2.7, core-sites-g2): the bound with Ignite's promotional EV on top. Every cash-valued grant there is a
+	// share of the rake the player paid, capped by the Value Governor (W6): at most 50% of the 30-day rake at any grant, 75%
+	// inside the 60-day welcome window (the welcome release counts in it); the loops are designed to give back 32-45% at the
+	// median (§2.7's bound, 45%). So a $5.50 event's promotional EV is at most that share of its fee, as ROI points. RiverLine's
+	// own rakeback is left out of its side, which only makes the bound harder.
+	const double FeeShare = static_cast<double>(IgFee) / static_cast<double>(BuyIn);
+	const double Median = 0.45 * FeeShare;
+	const double Ceiling = 0.50 * FeeShare;
+	const double Window = 0.75 * FeeShare;
+	std::printf("soft bound with promotions: Ignite's %s fee is %.1f%% of the buy-in; at the loops' 45%% median %+.1f%% (ratio %.2f), at the Governor's 50%% %+.1f%% (%.2f), "
+				"inside the welcome window's 75%% %+.1f%% (%.2f), against RiverLine's %+.1f%%\n",
+		ss::Money(IgFee).c_str(), 100.0 * FeeShare, 100.0 * (Soft0 + Median), Micro0 > 0.0 ? (Soft0 + Median) / Micro0 : 0.0, 100.0 * (Soft0 + Ceiling),
+		Micro0 > 0.0 ? (Soft0 + Ceiling) / Micro0 : 0.0, 100.0 * (Soft0 + Window), Micro0 > 0.0 ? (Soft0 + Window) / Micro0 : 0.0, 100.0 * Micro0);
+	Expect(IgFee == 61 && Micro0 > 0.0 && Soft0 + Ceiling <= 1.5 * Micro0 && Soft0 + Window <= 1.5 * Micro0,
+		"the soft bound with promotional EV: Ignite's ROI " + SitesNum(100.0 * Soft0) + "% plus the Governor's most (50%, " + SitesNum(100.0 * Ceiling) +
+			" points; 75% in the welcome window, " + SitesNum(100.0 * Window) + ") is at most 1.5x RiverLine's " + SitesNum(100.0 * Micro0) + "%");
 }
 
 void SitesCopy()
@@ -3859,6 +4040,286 @@ void U3Marks()
 	std::printf("rit emblems: %d families, %d with their red, chrome or white accent drawn\n", Families, Accented);
 	Expect(Families == 6 && Dirty == 0 && Accented == 6, "RunItTwice's six emblem families on Onyx and Carbon in red, chrome and white (no slate, no gold, no RiverLine colour)");
 }
+
+// ------------------------------------------------------------------ Update 3 G2 (core-sites-g2): the result's facts, the welcome
+
+/**
+ * A finished event's table for SettleFactsOf, built by hand: the hero and eight others with their places and who busted whom
+ * (the tournament isn't played; the facts read only the spec and the players). Busts names each loser's buster by index into
+ * the field (-1 the hero, -2 nobody).
+ */
+struct SitesFactsSeat
+{
+	int Place;
+	int BustedBy;
+};
+
+std::unique_ptr<ss::Tournament> SitesFactsTable(const std::string& Id, Chips BuyIn, Chips Gtd, int HeroPlace, int HeroBustedBy, const std::vector<SitesFactsSeat>& Field)
+{
+	ss::TournamentSpec S;
+	S.Id = Id;
+	S.Name = "facts";
+	S.BuyInCents = BuyIn;
+	S.FeeCents = 0;
+	S.GuaranteeCents = Gtd;
+	S.Entrants = static_cast<int>(Field.size()) + 1;
+	S.StartingStack = 2000;
+	S.TableSize = 9;
+	S.Population = "soft";
+	S.Speed = "Turbo";
+	S.LevelMinutes = 5.0;
+	S.SecondsPerHand = 30.0;
+	std::unique_ptr<ss::Tournament> T = std::make_unique<ss::Tournament>(S, "grinder_3c", "sites-facts:" + Id);
+	std::vector<ss::TPlayer*> Others;
+	ss::TPlayer* Hero = nullptr;
+	for (ss::TPlayer& P : T->Players)
+	{
+		if (P.IsHero)
+		{
+			Hero = &P;
+		}
+		else
+		{
+			Others.push_back(&P);
+		}
+	}
+	if (!Hero || Others.size() < Field.size())
+	{
+		return T;
+	}
+	auto Id0 = [&](int K) { return K == -1 ? Hero->Id : K >= 0 && K < static_cast<int>(Others.size()) ? Others[static_cast<size_t>(K)]->Id : std::string(); };
+	Hero->Place = HeroPlace;
+	Hero->Busted = HeroPlace > 1;
+	Hero->KnockedOutBy = HeroPlace > 1 ? Id0(HeroBustedBy) : std::string();
+	for (size_t K = 0; K < Field.size(); ++K)
+	{
+		Others[K]->Place = Field[K].Place;
+		Others[K]->Busted = Field[K].Place > 1;
+		Others[K]->KnockedOutBy = Field[K].Place > 1 ? Id0(Field[K].BustedBy) : std::string();
+	}
+	return T;
+}
+
+/** The name of the one in the field (not the player) who finished in Place ("" for none). */
+std::string SitesFactsName(const ss::Tournament& T, int Place)
+{
+	for (const ss::TPlayer& P : T.Players)
+	{
+		if (!P.IsHero && P.Place == Place)
+		{
+			return P.Name;
+		}
+	}
+	return std::string();
+}
+
+ss::Results SitesFactsResult(const ss::Tournament& T, int Place, Chips Prize)
+{
+	ss::Results R;
+	R.EventName = T.Spec.Name;
+	R.Place = Place;
+	R.Entrants = T.Spec.Entrants;
+	R.PrizeCents = Prize;
+	R.BuyInCents = T.Spec.BuyInCents;
+	return R;
+}
+
+/**
+ * SPEC §8.3 #8 (core-sites-g2's P0): SiteSettle hands every rival result to site::play::OnResult as SettleFacts: the knockouts
+ * by name, who busted the player, the season's points (none for a FUSE), the final table, the template (a launch-week one-off
+ * as its daily), the featured and series flags and the engine's format; a FUSE's multiplier and winner.
+ */
+void U3G2Facts()
+{
+	const int Day = ss::world::DayOn(2026, 12, 3);
+	const std::string At = "@" + std::to_string(Day * 1440 + 18 * 60);
+	// A RunItTwice Supper Stack (a Matchday for Open and Iron): 2nd of 120 (the final table's nine built here); the player
+	// knocked out two (5th, 7th) and the winner knocked the player out.
+	{
+		const std::vector<SitesFactsSeat> Field = {{1, -2}, {3, 0}, {4, 0}, {5, -1}, {6, 0}, {7, -1}, {8, 0}, {9, 0}};
+		const std::unique_ptr<ss::Tournament> T = SitesFactsTable("runittwice.supper-stack" + At, 550, 0, 2, 0, Field);
+		ss::Results R = SitesFactsResult(*T, 2, 1100);
+		R.Entrants = 120;
+		const ss::site::play::SettleFacts F = site::SettleFactsOf(*T, R);
+		std::vector<std::string> Want = {SitesFactsName(*T, 5), SitesFactsName(*T, 7)};
+		std::vector<std::string> Got = F.Knocked;
+		std::sort(Want.begin(), Want.end());
+		std::sort(Got.begin(), Got.end());
+		const std::string Winner = SitesFactsName(*T, 1);
+		Expect(F.Site == net::SiteId::RunItTwice && F.EventId == T->Spec.Id && F.Template == "runittwice.supper-stack" && F.Place == 2 && F.Entrants == 120 && F.Prize == 1100 &&
+				F.BuyIn == 550 && F.Points == net::Points(2, 120, 550) && F.Points > 0.0 && F.Final && !F.Win && Got == Want && F.BustedBy == Winner && !F.Featured && !F.Series &&
+				F.Format == static_cast<int>(net::Format::Freezeout) && !F.Fuse && F.FuseM == 0 && F.FuseWinner.empty(),
+			"facts: a RunItTwice Supper Stack, 2nd of 9: the template, the season's points (" + SitesNum(F.Points) + "), the final table, two knockouts by name (" +
+				std::to_string(F.Knocked.size()) + ") and the winner who busted the player (" + F.BustedBy + ")");
+	}
+	// A win in a series event (the RunItTwice Open): nobody busted the player; Series set.
+	{
+		const std::vector<SitesFactsSeat> Field = {{2, -1}, {3, 0}, {4, -1}, {5, 1}, {6, 1}, {7, 2}, {8, 2}, {9, 3}};
+		const std::unique_ptr<ss::Tournament> T = SitesFactsTable("runittwice.open26-12@" + std::to_string(ss::world::DayOn(2026, 11, 18) * 1440 + 900), 1100, 0, 1, -2, Field);
+		const ss::site::play::SettleFacts F = site::SettleFactsOf(*T, SitesFactsResult(*T, 1, 4400));
+		const net::EventTemplate* Tm = net::ForEvent(T->Spec.Id).FindTemplate("runittwice.open26-12");
+		Expect(Tm && F.Template == "runittwice.open26-12" && F.Series && F.Win && F.Final && F.BustedBy.empty() && F.Knocked.size() == 2 && F.Featured == Tm->Featured &&
+				F.Format == static_cast<int>(Tm->Fmt) && F.Points == net::Points(1, 9, 1100),
+			"facts: a RunItTwice Open event won: the series flag, the format, no buster, the two the player busted");
+	}
+	// The Spark in Ignite's launch week: the one-off reads as the daily it stands in for, featured; 12th of 9 can't be, so 12th
+	// is past the final table: none.
+	{
+		const std::vector<SitesFactsSeat> Field = {{1, -2}, {2, 0}, {3, 0}, {4, 1}, {5, 1}, {6, 2}, {7, 2}, {8, 0}};
+		const int Launch = net::Def(net::SiteId::Ignite).LaunchDay;
+		const std::unique_ptr<ss::Tournament> T =
+			SitesFactsTable("ignite.spark-jackpot-launch3@" + std::to_string((Launch + 2) * 1440 + 1200), 550, 0, 9, 3, Field);
+		ss::Results R = SitesFactsResult(*T, 12, 0);
+		R.Entrants = 410;
+		const ss::site::play::SettleFacts F = site::SettleFactsOf(*T, R);
+		Expect(F.Site == net::SiteId::Ignite && F.Template == "ignite.spark-jackpot" && F.Featured && !F.Series && !F.Final && F.Points == net::Points(12, 410, 550) &&
+				F.BustedBy == SitesFactsName(*T, 4) && !F.BustedBy.empty() && F.Knocked.empty(),
+			"facts: The Spark's launch-week one-off reads as The Spark (template ignite.spark-jackpot, featured); 12th of 410 is no final table");
+	}
+	// A FUSE at x25 the player won: no points and no final table (§2.6 F7), the multiplier from the pool, the winner the player.
+	// (The id's form is core-fuse's, "ignite.fuse<tier>@<minute>#<n>"; while fuse::IsFuse is still Phase A's stub, as in an
+	// isolated build of this track alone, the FUSE cases wait for it.)
+	const std::string FuseId = "ignite.fuse0@" + std::to_string(Day * 1440 + 22 * 60) + "#7";
+	if (!ss::fuse::IsFuse(FuseId))
+	{
+		std::printf("facts: fuse::IsFuse is still Phase A's stub here; the FUSE cases wait for core-fuse\n");
+	}
+	else
+	{
+		const std::vector<SitesFactsSeat> Field = {{2, -1}, {3, -1}};
+		const std::string Id = FuseId;
+		const std::unique_ptr<ss::Tournament> T = SitesFactsTable(Id, 110, 25 * 110, 1, -2, Field);
+		const ss::site::play::SettleFacts F = site::SettleFactsOf(*T, SitesFactsResult(*T, 1, 2200));
+		Expect(F.Fuse && F.FuseM == 25 && F.Points == 0.0 && !F.Final && F.Win && F.FuseWinner == T->Hero().Name && F.Knocked.size() == 2 &&
+				F.Format == static_cast<int>(net::Format::Freezeout) && F.Site == net::SiteId::Ignite,
+			"facts: a FUSE x25 won: no points, no final table, the multiplier (" + std::to_string(F.FuseM) + ") and its winner, the player");
+		// Lost heads-up: the winner by name (who busted the player), still no points.
+		const std::vector<SitesFactsSeat> Lost = {{1, -2}, {3, 0}};
+		const std::unique_ptr<ss::Tournament> T2 = SitesFactsTable(Id, 110, 25 * 110, 2, 0, Lost);
+		const ss::site::play::SettleFacts F2 = site::SettleFactsOf(*T2, SitesFactsResult(*T2, 2, 330));
+		Expect(F2.Fuse && F2.FuseWinner == SitesFactsName(*T2, 1) && !F2.FuseWinner.empty() && F2.BustedBy == F2.FuseWinner && F2.Points == 0.0 && !F2.Final && !F2.Win &&
+				F2.Knocked.empty(),
+			"facts: a FUSE lost heads-up: its winner named twice (the winner, the one who busted the player), no points");
+	}
+}
+
+/**
+ * SPEC §1.3, §1.4, §2.6 F11 (core-sites-g2): Ignite's welcome bonus as the Value Governor reads it. The window is the 60 days
+ * from the first deposit (the 75% ceiling); each paid entry's release is exactly what OnBuyIn just put in the wallet, so the
+ * Governor books it on that day; the 1st's Second Run writes no play-book line into a save whose book was never started.
+ */
+void U3G2Welcome()
+{
+	const double T0 = ss::world::DayOn(2026, 11, 10) * SitesDay + 600.0;
+	State L;
+	Chips Bank = 1000000;
+	site::Join(L.Sites, net::SiteId::Ignite, T0);
+	site::Account* A = site::AccountOf(L.Sites, net::SiteId::Ignite);
+	const bool BeforeDeposit = site::WelcomeWindow(*A, T0);
+	site::Deposit(L.Sites, L, Bank, net::SiteId::Ignite, 10000, "", T0);
+	Expect(!BeforeDeposit && site::WelcomeWindow(*A, T0) && site::WelcomeWindow(*A, T0 + 60.0 * SitesDay) && !site::WelcomeWindow(*A, T0 + 60.0 * SitesDay + 1.0) &&
+			!site::WelcomeWindow(*A, T0 - 1.0),
+		"the welcome window: from the first deposit to the 60th day after it, not a minute either side");
+	// Every paid entry's release, as the Governor reads it after OnBuyIn, against what OnBuyIn put in the wallet: the fees of
+	// Ignite's buy-ins and FUSE's, in a cycle, until the $100 match is all released.
+	const Chips Fees[] = {12, 61, 9, 26, 121, 44, 242, 36, 1};
+	Chips Booked = 0;
+	bool Exact = true;
+	int Entries = 0;
+	int Pieces = 0;
+	double W = T0;
+	for (int K = 0; K < 2000 && A->BonusPending > 0; ++K)
+	{
+		const Chips Fee = Fees[static_cast<size_t>(K) % (sizeof(Fees) / sizeof(Fees[0]))];
+		const Chips Was = A->BonusReleased;
+		W += 30.0;
+		A->Cents -= 10 * Fee;
+		site::OnBuyIn(L.Sites, net::SiteId::Ignite, 10 * Fee, Fee, "Buy-in", W);
+		const Chips Did = A->BonusReleased - Was;
+		const Chips Read = site::WelcomeReleasedBy(*A, Fee, W);
+		Exact = Exact && Did == Read && (Did == 0 || Did % 500 == 0);
+		Booked += Read;
+		Pieces += Read > 0 ? 1 : 0;
+		++Entries;
+	}
+	Expect(Exact && Booked == 10000 && A->BonusReleased == 10000 && A->BonusPending == 0 && Pieces >= 20,
+		"each paid entry's welcome release, read after OnBuyIn, is exactly what it put in the wallet: " + ss::Money(Booked) + " over " + std::to_string(Entries) + " entries, " +
+			std::to_string(Pieces) + " of them releasing");
+	site::OnBuyIn(L.Sites, net::SiteId::Ignite, 550, 61, "Buy-in", W + 30.0);
+	Expect(site::WelcomeReleasedBy(*A, 61, W + 30.0) == 0 && site::WelcomeReleasedBy(*A, 61, T0 + 61.0 * SitesDay) == 0 && site::WelcomeReleasedBy(*A, 0, W) == 0,
+		"nothing more once the match is out, after the 60 days, or for a free entry");
+	// RunItTwice has no welcome window or release.
+	State R;
+	site::Join(R.Sites, net::SiteId::RunItTwice, T0);
+	site::Deposit(R.Sites, R, Bank, net::SiteId::RunItTwice, 10000, "", T0);
+	site::Account* Rt = site::AccountOf(R.Sites, net::SiteId::RunItTwice);
+	site::OnBuyIn(R.Sites, net::SiteId::RunItTwice, 0, 6000, "Buy-in", T0 + 60.0);
+	Expect(!site::WelcomeWindow(*Rt, T0 + 60.0) && site::WelcomeReleasedBy(*Rt, 6000, T0 + 60.0) == 0, "RunItTwice: no welcome window, no release");
+	// The 1st: the Second Run Club pays November's $60 of rake ($9.00) as Update 2 pinned it; with no play book started (an old
+	// save: U3SitePlay unset) the Governor isn't touched and no Update 3 line is written; with the book started, the same cents.
+	const double First = ss::world::DayOn(2026, 12, 1) * SitesDay;
+	std::vector<std::pair<std::string, std::string>> Texts;
+	const ss::rep::Public P;
+	State Untouched = R;
+	Chips UBank = 0;
+	site::Step(Untouched.Sites, Untouched, UBank, P, 0, First - 60.0, First + 60.0, Texts);
+	bool Rings = Untouched.SitePlay.Holds.empty();
+	for (const ss::site::play::GovRing& G : Untouched.SitePlay.Gov)
+	{
+		Rings = Rings && G.Day0 == -1 && G.Promo == ss::site::play::GovRing().Promo && G.Banked == 0;
+	}
+	const site::Account* Ut = site::AccountOf(Untouched.Sites, net::SiteId::RunItTwice);
+	State Started = R;
+	Started.Update3LinesRead |= ss::life::U3SitePlay;
+	Chips SBank = 0;
+	site::Step(Started.Sites, Started, SBank, P, 0, First - 60.0, First + 60.0, Texts);
+	const site::Account* St = site::AccountOf(Started.Sites, net::SiteId::RunItTwice);
+	Expect(Ut && St && Ut->Lines.back().Cents == 900 && Ut->Lines.back().Kind == 4 && Untouched.Update3LinesRead == 0 && Rings && St->Lines.back().Cents == 900 &&
+			St->Cents == Ut->Cents,
+		"the 1st's Second Run Club: $9.00 as pinned; an untouched book stays untouched (no Update 3 line); a started one gets the same cents");
+	// (Review.) The Governor counts that Second Run in the slots of the month that earned it (§1.3, §1.4): a book started by
+	// twelve paid entries in November, $60 of rake in its ring, reads the Club's 15% as given back once the 1st has paid, and
+	// a second step over the same midnight books nothing more. (The close's day is November's last 6 AM day; a day later would
+	// book December, which has no rake yet, and mark December's Second Run done before it is earned.)
+	{
+		State G;
+		Chips GBank = 1000000;
+		site::Join(G.Sites, net::SiteId::RunItTwice, T0);
+		site::Deposit(G.Sites, G, GBank, net::SiteId::RunItTwice, 10000, "", T0);
+		site::Account* Ga = site::AccountOf(G.Sites, net::SiteId::RunItTwice);
+		Ga->Cents += 56000;
+		for (int K = 1; K <= 12; ++K)
+		{
+			const double At = T0 + K * SitesDay;
+			const std::string Ev = "runittwice.supper-stack@" + std::to_string(static_cast<long long>(At));
+			Ga->Cents -= 5500;
+			site::OnBuyIn(G.Sites, net::SiteId::RunItTwice, 5500, 500, "Buy-in: $55 Supper Stack", At);
+			ss::site::play::OnPaidEntry(G.SitePlay, G, net::SiteId::RunItTwice, 500, 5500, static_cast<int>(net::Format::Freezeout), Ev, At);
+		}
+		bool Live = false;
+		for (const ss::site::play::GovRing& Ring : G.SitePlay.Gov)
+		{
+			Live = Live || Ring.Day0 >= 0;
+		}
+		if (!Live)
+		{
+			std::printf("second run: the Governor is still Phase A's stub here; its booking waits for core-siteplay\n");
+		}
+		else
+		{
+			const double Before = ss::site::play::GivenBack30(G.SitePlay, net::SiteId::RunItTwice);
+			Chips GB = 0;
+			site::Step(G.Sites, G, GB, P, 0, First - 60.0, First + 60.0, Texts);
+			const double After = ss::site::play::GivenBack30(G.SitePlay, net::SiteId::RunItTwice);
+			site::Step(G.Sites, G, GB, P, 0, First - 30.0, First + 120.0, Texts);
+			const double Again = ss::site::play::GivenBack30(G.SitePlay, net::SiteId::RunItTwice);
+			std::printf("second run: given back on RunItTwice %.4f before the 1st, %.4f after, %.4f after an overlapping step; the wallet's line %s\n", Before, After, Again,
+				ss::Money(Ga->Lines.back().Cents).c_str());
+			Expect(Ga->Lines.back().Cents == 900 && Ga->Lines.back().Kind == 4 && Before == 0.0 && std::fabs(After - 0.15) < 1e-6 && Again == After,
+				"the Governor books the 1st's Second Run ($9.00 of $60.00) into November's slots: given back 0% before, 15% after, once over overlapping steps");
+		}
+	}
+}
 } // namespace sites_test
 
 int main(int Argc, char** Argv)
@@ -3911,6 +4372,10 @@ int main(int Argc, char** Argv)
 	U3Welcome();
 	U3ShowCopy();
 	U3Marks();
+	// Update 3 G2 (core-sites-g2): every result's facts for the play book, the welcome bonus as the Governor reads it. (The Q4
+	// gates are in Invitations, The Spark in RealSchedules, the promotional EV in SoftBound.)
+	U3G2Facts();
+	U3G2Welcome();
 	SoftBound(300);
 	std::printf("sites tests: %d passed, %d failed in %.1fs\n", Passed, Failures, SitesSeconds(T0));
 	return Failures == 0 ? 0 : 1;

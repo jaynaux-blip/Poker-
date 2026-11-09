@@ -16,6 +16,8 @@
 namespace ss
 {
 struct HistoryEntry;
+struct Results;
+class Tournament;
 namespace life
 {
 struct State;
@@ -39,6 +41,10 @@ class World;
 
 namespace site
 {
+namespace play
+{
+struct SettleFacts;
+}
 /** The marks the sites add to the wall calendar and the second screen (life::Mark::Kind; stake uses 30s, sponsor 20s, video 40s). */
 enum SiteMarkKind : int
 {
@@ -80,12 +86,31 @@ const net::CashMethod* MethodFor(net::SiteId S, const std::string& Id, bool Out)
 
 /**
  * The invitation gate (§5.4) against the public record: the site launched by World, Act I over (RentsPaid), and the site's
- * own door (Ignite: 150 paid online events; RunItTwice: 300 with an $11 average over the last hundred, or an online series
- * title, or Kast Partner). Why (when met): 0 events, 1 a series title, 2 Kast Partner. Update 3 (SPEC §7.2, §11 Q4): 3 the
- * second volume path (InviteGate::MinEvents2 at MinAbi100_2), 4 the Ignite Level path (IgniteLevel, the play book's level the
- * caller passes); both are off while their gate fields are zero (until G2).
+ * own door (Ignite: 60 paid online events since Update 3's §11 Q4, 150 before; RunItTwice: 300 with an $11 average over the
+ * last hundred, or an online series title, or Kast Partner). Why (when met): 0 events, 1 a series title, 2 Kast Partner.
+ * Update 3 (SPEC §7.2, §11 Q4, answered 2026-10-27): 3 the second volume path (InviteGate::MinEvents2 at MinAbi100_2:
+ * RunItTwice 150 at $5.50), 4 the Ignite Level path (IgniteLevel: RunItTwice Level 20, the play book's level the caller
+ * passes, IgniteLevelOf); a path whose gate fields are zero is off.
  */
 bool GateMet(net::SiteId S, const rep::Public& P, int RentsPaid, double World, int* Why = nullptr, int IgniteLevel = 0);
+/**
+ * Update 3 G2 (core-sites-g2; SiteMoney.cpp): Ignite Level from the play book, the largest n whose site::play::LevelNeeds the
+ * lifetime base Sparks reach (an empty book is Level 1), read only: what GateMet's callers pass for the Ignite Level door.
+ */
+int IgniteLevelOf(const life::State& L);
+/** Ignite's welcome window (§1.4, §2.6 F11): from the first deposit to the 60th day after it, inclusive (the Governor's 75%). */
+bool WelcomeWindow(const Account& A, double World);
+/**
+ * The welcome bonus one paid entry's fee released (§1.3), read after site::OnBuyIn counted that fee: what the Governor books on
+ * that day, never holds. 0 outside the window, for a free entry, or once the match is out.
+ */
+Chips WelcomeReleasedBy(const Account& A, Chips Fee, double World);
+/**
+ * A finished rival event as the play book hears it (SessionSites.cpp; Session::SiteSettle hands it to site::play::OnResult):
+ * knockouts and the bust by name, the season's points (none for a FUSE), the final table (1st to 9th), the template (a
+ * launch-week one-off as its daily), the featured and series flags, the engine's format, a FUSE's multiplier and winner.
+ */
+play::SettleFacts SettleFactsOf(const Tournament& T, const Results& Res);
 /** Sends a site's invitation now (State 0, or 3 for the second letter 30 days after a decline). Forced by ss.Site.Invite. */
 void Invite(Book& B, life::State& L, net::SiteId S, double World, int Why, bool Second);
 /** Mail from a site (Source "site", the thread its key): LetterInvite, or LetterRoutine (at most one a week a company, §1.7). */
