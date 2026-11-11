@@ -1334,7 +1334,9 @@ std::vector<Chips> Network::Payouts(const EventInstance& E) const
 {
 	const EventTemplate& T = TemplateOf(E);
 	const Chips MinCash = T.BuyInCents == 0 ? 1 : T.BuyInCents * 3 / 2;
-	return PayoutTable(E.Pool, E.Entries, MinCash);
+	// Update 4 (SPEC v1.7 §2.4.3; §6 PA-13): the one payout function, on the template's curve (Standard on every template until
+	// G1's rival festival Mains: PayoutTable exactly). E.Pool already holds any added money (Make).
+	return PayoutFor(E.Pool, E.Entries, MinCash, T.Curve);
 }
 
 LobbyEvent Network::Listing(const EventInstance& E, std::string* Lock, int Unlocks) const

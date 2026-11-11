@@ -286,6 +286,10 @@ void RiverLine::PlayerCard(double Now)
 		}
 		Nx += Mw + 8.0f;
 	}
+	// Update 4 (SPEC v1.7 §3.19.3; step A-2, LEAD_CALLS Q-6): the header pills gain CAME FOR YOU, in NEW FACE's place for a wake member
+	// (RiverLineCardStory.cpp, W-ui's at G2; it draws none before, so the header is today's).
+	const float CameFor = CardCameFor(P, Nx, R.Y + 40.0f, Now);
+	Nx += CameFor > 0.0f ? CameFor + 8.0f : 0.0f;
 	if (Rail.empty())
 	{
 		// No badges to show (none held, or the rules not in yet): what the world says about them, as before.
@@ -297,7 +301,7 @@ void RiverLine::PlayerCard(double Now)
 		{
 			Nx += NetPill(*C, NetUpper(P.Sponsor), Nx, R.Y + 40.0f, pal::Gold, false, 10.0f) + 8.0f;
 		}
-		if (P.New)
+		if (P.New && CameFor <= 0.0f)
 		{
 			NetPill(*C, "NEW FACE", Nx, R.Y + 40.0f, pal::Accent, true, 10.0f);
 		}
@@ -329,6 +333,12 @@ void RiverLine::PlayerCard(double Now)
 		Ts(16.0f, 600, CardSoft(), Align::Left, Baseline::Alphabetic, false, 640.0f));
 	UI.Text(P.Stakes + "  \xC2\xB7  " + P.Live + "  \xC2\xB7  " + P.Style + (P.Streams ? "  \xC2\xB7  Kast, " + Grouped(P.Followers) + " followers" : std::string()), R.X + 142.0f, R.Y + 124.0f,
 		Ts(14.0f, 500, pal::Muted, Align::Left, Baseline::Alphabetic, false, 700.0f));
+	// Update 4 (SPEC v1.7 §3.19.3; step A-2, LEAD_CALLS Q-6): the OVERVIEW's TPI line under the identity line (RiverLineCardStory.cpp,
+	// W-ui's at G2; nothing before).
+	if (CardTab == 0)
+	{
+		CardTpiLine(P, R, Now);
+	}
 	// Status and the close button.
 	{
 		const Color Sc = P.Status == "Active" ? pal::Green : P.Status == "Retired" ? pal::Muted : pal::Orange;
@@ -343,6 +353,9 @@ void RiverLine::PlayerCard(double Now)
 			CardShown = -1;
 		}
 	}
+	// Update 4 (SPEC v1.7 §3.19.2-§3.19.3; step A-2, LEAD_CALLS Q-6): the FOLLOW toggle on every tab, left of the status pill
+	// (RiverLineCardStory.cpp, W-ui's at G2; from day 2: nothing before).
+	CardFollow(P, R, Now);
 
 	const bool StatsTab = CardTab == 3;
 	if (StatsTab)

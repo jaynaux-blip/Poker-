@@ -1226,6 +1226,23 @@ private:
 		double HoldUntil = 0.0;
 	};
 	std::vector<PlayOn> PlayOns;
+	// Update 4, step A-2 (SPEC v1.7 §4.10, §4.13, §4.15; §6 PA-39, LEAD_CALLS Q-5): the Big Field's session seams, bodies in
+	// SessionBig.cpp (B-session's from G3).
+	/** Steps every play-on inside the frame's shared budget (bigfield::kModelSliceMs; kModelSkipSliceMs while a time skip's ease
+	 *  runs), whole engine steps split into pieces with the clock checked between them; delivers a finished one to the world
+	 *  (§4.10.1 items 3 and 5). B-session calls it from Update after TableStep at G3. Phase A: nothing (PlayOns is always empty) and
+	 *  nobody calls it. */
+	void PlayOnStep();
+	/** YOUR RUN's collection after every tick of the table in front (§4.15.1): hands, Remaining, the hero's rank and stack in big
+	 *  blinds into the run's samples, the best rank and its hand, the biggest stack, the real seconds and the clock minutes; kept
+	 *  into Life.YourRuns at the end. B-session calls it at G3. Phase A: nothing, and nobody calls it. */
+	void RunNote();
+	/** RegisterEvent's payment block, extracted (§6 PA-39, §4.13.1 item 3): a ticket (the site's ledger line "Ticket: {name}") or the
+	 *  buy-in from a package's roll or the event's site's pot ("Buy-in: {name}", the rake hooks with RakeOverride when it is >= 0,
+	 *  the rival site's loops, the stake record). Bullet 1 is today's registration, line for line and in the same order; Reenter
+	 *  pays bullet 2 on (G3, B-session: "Re-entry: {name}" and the reentry:<instance>#<bullet> key in site::Book::Done). Phase A:
+	 *  every bullet pays as bullet 1 (nothing passes another). */
+	void PayEntry(const LobbyEvent& Ev, Chips RakeOverride, int Bullet = 1);
 
 	SessionHooks& Hooks;
 	std::set<std::string> TextsSeen;

@@ -1007,7 +1007,8 @@ std::string Capitalized(std::string S)
 
 std::vector<Result> StoryOf(const std::string& Story)
 {
-	// "day^event^place^entries^prizeCents^online" records joined by '|', newest first.
+	// "day^event^place^entries^prizeCents^online" records joined by '|', newest first; Update 4 (§2.4.3, PA-14): a 7th field, the
+	// payout curve, only on a record whose curve isn't Standard (1: Main; any other value reads as Standard).
 	std::vector<Result> Out;
 	size_t Start = 0;
 	while (Start < Story.size())
@@ -1039,6 +1040,10 @@ std::vector<Result> StoryOf(const std::string& Story)
 			R.Entries = std::atoi(F[3].c_str());
 			R.Prize = static_cast<Chips>(std::strtoll(F[4].c_str(), nullptr, 10));
 			R.Online = F[5] == "1";
+			if (F.size() >= 7 && std::atoi(F[6].c_str()) == static_cast<int>(PayoutCurve::Main))
+			{
+				R.Curve = PayoutCurve::Main;
+			}
 			Out.push_back(R);
 		}
 		Start = End + 1;
@@ -1065,6 +1070,10 @@ std::string StoryText(const std::vector<Result>& Results)
 		}
 		Out += std::to_string(R.Day) + "^" + Event + "^" + std::to_string(R.Place) + "^" + std::to_string(R.Entries) + "^" + std::to_string(R.Prize) + "^" +
 			(R.Online ? "1" : "0");
+		if (R.Curve != PayoutCurve::Standard)
+		{
+			Out += "^" + std::to_string(static_cast<int>(R.Curve)); // Update 4 (§2.4.3, PA-14): never on a Standard record
+		}
 	}
 	return Out;
 }
@@ -1405,7 +1414,9 @@ Said Line(Moment M, const Context& C)
 				{
 					// A bubble is the first place out of the money: nothing paid, and one place past what a field that size
 					// pays (PayoutTable's places, the world's and the rooms'). Ninth of twenty with nothing is a bust, not a bubble.
-					const int Paid = R.Entries > 0 ? static_cast<int>(PayoutTable(static_cast<Chips>(R.Entries) * 100, R.Entries, 1).size()) : 0;
+					// Update 4 (SPEC v1.7 §2.4.3; §6 PA-13): PaidPlaces on the record's curve, PayoutFor(...).size() without the
+					// arithmetic (Standard: PayoutTable's count, so the same place for every field).
+					const int Paid = R.Entries > 0 ? ss::PaidPlaces(R.Entries, R.Curve) : 0;
 					if (R.Prize > 0 || R.Entries <= 0 || R.Place != Paid + 1)
 					{
 						return Said();

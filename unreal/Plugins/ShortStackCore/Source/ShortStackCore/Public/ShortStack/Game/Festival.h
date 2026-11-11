@@ -150,5 +150,33 @@ SHORTSTACKCORE_API std::vector<life::Mark> Marks(double From, double To, double 
 SHORTSTACKCORE_API const Festival* PassFestival(net::SiteId Site, double World);
 /** The paid online events the Pass needs for F: 0 for the brand's first edition (F.Edition == 1), Gate.FestivalEvents after. */
 SHORTSTACKCORE_API int PassNeeds(const Festival& F, const net::InviteGate& Gate);
+
+// Step A-2 (LEAD_CALLS Q-5): every function the festival sections name in this header, declared before the freeze with a stub that
+// answers empty or none (in G/Festival.cpp; at G1 each body lands in its owner's file, named below, and replaces its stub here).
+
+/** YOUR <FESTIVAL> (§2.8.2): the hub panel's numbers and the register sheets' two-line strip, each host drawing it in its own skin
+ *  from this one view (FestYourStrip). Presentation only: never saved. */
+struct YourLineView
+{
+	bool Shown = false;        // the hero has played the edition (never on a plain series event)
+	std::string Name;          // the edition's name, "FEIGN 2026" ("YOUR {FESTIVAL}")
+	int Rank = 0, Scorers = 0; // "race {Rank} of {Scorers}", once the hero scores (Rank 0: not yet)
+	int Events = 0, Cashes = 0;
+	int Best = 0, Field = 0;   // "best {Best} of {Field}" (U10's line; singular at one: "1 event · 1 cash")
+};
+/** The hero's line in edition F, from the world's record of their festival results and the race (W null: none). G1 (F-hubs with
+ *  F-world's race). Phase A: not shown. */
+SHORTSTACKCORE_API YourLineView YourLine(const Festival& F, const world::World* W);
+
+// Every festival string joins an inventory (§1.2 item 12, §2.11): CopyLint, both trademark tiers and U1 run over each, every template
+// filled from a sample world (FestCopy, FestCopyUi). Phase A: each is empty.
+/** Core strings: the festivals' names, taglines and event names (G/Festival.cpp, F-net's at G1). */
+SHORTSTACKCORE_API std::vector<std::string> Inventory();
+/** Dee's festival lines and Rerun's festival titles (G/SessionFest.cpp, F-world's at G1). */
+SHORTSTACKCORE_API std::vector<std::string> TextInventory();
+/** The hubs', the register sheets' and the takeovers' UI strings (UI/RiverLineFestival.cpp, F-hubs' at G1). */
+SHORTSTACKCORE_API std::vector<std::string> FestUiInventory();
+/** The words the festival art prints: arches, bandstands, floors, word-marks (UI/FestivalArt.cpp, F-look's at G1). */
+SHORTSTACKCORE_API std::vector<std::string> FestArtInventory();
 } // namespace fest
 } // namespace ss

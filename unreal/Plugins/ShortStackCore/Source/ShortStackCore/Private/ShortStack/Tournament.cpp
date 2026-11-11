@@ -29,7 +29,9 @@ Tournament::Tournament(const TournamentSpec& InSpec, const std::string& HeroName
 	Levels = Spec.Levels.empty() ? StandardLevels() : Spec.Levels;
 	TableSize = Spec.TableSize > 0 ? Spec.TableSize : 9;
 	Remaining = Spec.Entrants;
-	const Chips Pool = MaxChips(Spec.GuaranteeCents, static_cast<Chips>(Spec.Entrants) * (Spec.BuyInCents - Spec.FeeCents - Spec.BountyCents));
+	// Update 4 (SPEC v1.7 §2.4.1, §2.4.3; §6 PA-13): the site's added money sits on top of the pool (0 on every spec until G1's
+	// rival festival Mains, so the pool is today's).
+	const Chips Pool = MaxChips(Spec.GuaranteeCents, static_cast<Chips>(Spec.Entrants) * (Spec.BuyInCents - Spec.FeeCents - Spec.BountyCents)) + Spec.AddedCents;
 	PrizePoolCents = Pool;
 	const Chips MinCash = Spec.BuyInCents > 0 ? static_cast<Chips>(JsRound(static_cast<double>(Spec.BuyInCents - Spec.FeeCents - Spec.BountyCents) * 1.4)) : 20;
 	if (Spec.SeatValueCents > 0)
@@ -44,7 +46,10 @@ Tournament::Tournament(const TournamentSpec& InSpec, const std::string& HeroName
 	}
 	else
 	{
-		Payouts = PayoutTable(Pool, Spec.Entrants, MinCash);
+		// Update 4 (SPEC v1.7 §2.4.3; §6 PA-13): the one payout function. Under the Main curve every consumer pays the network's min
+		// cash, 1.5x the buy-in, so the engine, the network, the world and the talk agree to the cent (FestCurveAgrees); Standard is
+		// PayoutTable exactly, and nothing sets Main before G1, so the table is today's.
+		Payouts = PayoutFor(Pool, Spec.Entrants, Spec.Curve == PayoutCurve::Main ? Spec.BuyInCents * 3 / 2 : MinCash, Spec.Curve);
 	}
 
 	Rng NameRng = R.Fork("names");

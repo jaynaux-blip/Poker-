@@ -425,6 +425,23 @@ private:
 	void NotebookIcon(const Rect& R);
 	// The player card's STORY tab, its fifth (RiverLineCardStory.cpp, W-ui at G2, §3.19.2): Card is the card's rect.
 	void CardStory(const world::Profile& P, const Rect& Card, double Now);
+	// Step A-2 (LEAD_CALLS Q-6; §3.17 R4, §3.19.3): G2's other card, results and plate hooks, each a stub in W-ui's files that draws
+	// nothing and answers false (or 0) until G2, so nothing moves in Phase A. The card's FOLLOW toggle, drawn on every tab at
+	// {Card.X + Card.W - 330, Card.Y + 30, 110, 26} (the STORY tab's rect too); true when it drew (RiverLineCardStory.cpp).
+	bool CardFollow(const world::Profile& P, const Rect& Card, double Now);
+	// The OVERVIEW's TPI line under the identity line (from the first Monday); true when it drew (RiverLineCardStory.cpp).
+	bool CardTpiLine(const world::Profile& P, const Rect& Card, double Now);
+	// The player's own card: the TPI line under its identity line (from the first cash); true when it drew (RiverLineCardStory.cpp).
+	bool HeroCardTpiLine(const Rect& Card, double Now);
+	// The header's CAME FOR YOU pill at (X, Y), in NEW FACE's place for a wake member; its width, 0 when it draws none
+	// (RiverLineCardStory.cpp).
+	float CardCameFor(const world::Profile& P, float X, float Y, double Now);
+	// The results screen's names from the player's table, each with the card's FOLLOW toggle, inside Area; true when it drew
+	// (RiverLineCardStory.cpp).
+	bool ResultsFollow(const Rect& Area, double Now);
+	// A plate that shows a pill: the pill takes the badge's slot and the badge moves to the avatar ring. Called only for a seat whose
+	// Pill isn't 0 (never in Phase A); moves (X, Y), the badge's centre, and answers true; false leaves the slot (RiverLineStoryArt.cpp).
+	bool SeatBadgeRing(const SeatVis& Seat, const Rect& Plate, float& X, float& Y);
 	// The light card's draw, over any page after the app's frame (RiverLineCrowdCard.cpp, S-ui at G4, §5.9).
 	void CrowdCard(double Now);
 

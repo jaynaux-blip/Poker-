@@ -3,7 +3,10 @@
 //
 // Phase A (§6 PA-6, the lead): stubs that keep today's behaviour. All() is empty, so no series is a festival and every query
 // answers "none": FestivalOf, LiveOn, Next and PassFestival null, PhaseOf Off, Marks empty, RecordOf false, SeatsWon 0,
-// IsTitleTemplate false. The brand table and IsChampionship are the spec's fixed facts (nothing reads them before G1).
+// IsTitleTemplate false. The brand table and IsChampionship are the spec's fixed facts (nothing reads them before G1). Step A-2 (the
+// lead; LEAD_CALLS Q-5): YourLine is not shown and the four inventories are empty. At G1 TextInventory's body lands in
+// G/SessionFest.cpp (F-world), FestUiInventory's in UI/RiverLineFestival.cpp (F-hubs) and FestArtInventory's in UI/FestivalArt.cpp
+// (F-look): each stub below goes when its body lands (one definition each).
 #include "ShortStack/Game/Festival.h"
 
 #include "ShortStack/Game/Life.h"
@@ -120,6 +123,31 @@ int PassNeeds(const Festival& F, const net::InviteGate& Gate)
 {
 	// §2.10 item 1: a brand's first edition invites on the two rents alone; from the second, the gate's FestivalEvents.
 	return F.Edition == 1 ? 0 : Gate.FestivalEvents;
+}
+
+YourLineView YourLine(const Festival& /*F*/, const world::World* /*W*/)
+{
+	return YourLineView();
+}
+
+std::vector<std::string> Inventory()
+{
+	return {};
+}
+
+std::vector<std::string> TextInventory()
+{
+	return {};
+}
+
+std::vector<std::string> FestUiInventory()
+{
+	return {};
+}
+
+std::vector<std::string> FestArtInventory()
+{
+	return {};
 }
 } // namespace fest
 } // namespace ss

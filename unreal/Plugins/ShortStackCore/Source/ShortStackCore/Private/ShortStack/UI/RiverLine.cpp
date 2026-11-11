@@ -2532,8 +2532,14 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 			}
 			if (Pin.K != badge::Kind::Count)
 			{
-				const float Gx = Bubble ? P.X + (IsHero ? 38.0f : 32.0f) * 0.72f : Box.X + 11.0f + (IsHero ? 42.0f : 36.0f) - 2.0f;
-				const float Gy = Bubble ? P.Y - (IsHero ? 38.0f : 32.0f) * 0.72f : Box.Y + 10.0f;
+				float Gx = Bubble ? P.X + (IsHero ? 38.0f : 32.0f) * 0.72f : Box.X + 11.0f + (IsHero ? 42.0f : 36.0f) - 2.0f;
+				float Gy = Bubble ? P.Y - (IsHero ? 38.0f : 32.0f) * 0.72f : Box.Y + 10.0f;
+				// Update 4 (SPEC v1.7 §3.17 R4; step A-2, LEAD_CALLS Q-6): a seat with a pill moves its badge to the avatar ring
+				// (RiverLineStoryArt.cpp, W-ui's at G2; no seat has a pill before).
+				if (Seat.Pill != 0)
+				{
+					SeatBadgeRing(Seat, Box, Gx, Gy);
+				}
 				C->FillCircle(Gx, Gy, 9.0f, Bubble ? Hex(0x1d1230) : pal::Panel);
 				badgeart::Draw(*C, Pin, Gx, Gy, 13.0f, Now);
 				if (Npc >= -1 && UI.Hover({Gx - 8.0f, Gy - 8.0f, 16.0f, 16.0f}))
@@ -2669,8 +2675,14 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 		}
 		if (Pin.K != badge::Kind::Count)
 		{
-			const float Gx = Plate.X + 46.0f;
-			const float Gy = P.Y - 16.0f;
+			float Gx = Plate.X + 46.0f;
+			float Gy = P.Y - 16.0f;
+			// Update 4 (SPEC v1.7 §3.17 R4; step A-2, LEAD_CALLS Q-6): the pill takes this slot and the badge moves to the avatar ring
+			// (RiverLineStoryArt.cpp, W-ui's at G2; no seat has a pill before).
+			if (Seat.Pill != 0)
+			{
+				SeatBadgeRing(Seat, Plate, Gx, Gy);
+			}
 			C->FillCircle(Gx, Gy, 9.0f, rlsites_detail::SitesTone(0x0b1220));
 			badgeart::Draw(*C, Pin, Gx, Gy, 13.0f, Now);
 			if (Npc >= -1 && UI.Hover({Gx - 8.0f, Gy - 8.0f, 16.0f, 16.0f}))
@@ -3844,6 +3856,10 @@ void RiverLine::ResultsScreen(double Now)
 		UI.Text(std::string(StreetTitle(G.OnStreet)) + " \xC2\xB7 you chose " + Lower(G.Chosen.Label), 220.0f, Y + 4.0f, Ts(16.0f, 600));
 		UI.Text(G.Note, 1045.0f, Y + 4.0f, Ts(15.0f, 500, pal::Muted, Align::Right, Baseline::Alphabetic, false, 480.0f));
 	}
+
+	// Update 4 (SPEC v1.7 §3.19.3; step A-2, LEAD_CALLS Q-6): the names from the player's table, each with the card's FOLLOW toggle,
+	// in the right column between the XP lines and the button (RiverLineCardStory.cpp, W-ui's at G2; nothing before).
+	ResultsFollow({1120.0f, RlTop + 410.0f, 420.0f, RlH - 140.0f - (RlTop + 410.0f)}, Now);
 
 	ButtonOpts Back;
 	Back.Kind = ButtonKind::Primary;
