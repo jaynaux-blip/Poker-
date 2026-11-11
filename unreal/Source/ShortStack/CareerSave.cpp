@@ -173,8 +173,18 @@ void FCareerSaver::Submit(const ss::SaveData& Data)
 {
 	if (IsBusy())
 	{
-		// The newest save is the one that matters: it waits for the worker.
+		// The newest save is the one that matters: it waits for the worker. One of the same world state as the save already waiting
+		// (the same stamp) may come without its snapshot (the session keeps the stamp, not the snapshot): it keeps the waiting one's.
+		std::shared_ptr<const ss::world::World> Kept;
+		if (Waiting.IsSet() && !Data.WorldSnapshot && Data.WorldStamp.Valid() && Waiting.GetValue().WorldStamp == Data.WorldStamp)
+		{
+			Kept = Waiting.GetValue().WorldSnapshot;
+		}
 		Waiting = Data;
+		if (Kept)
+		{
+			Waiting.GetValue().WorldSnapshot = Kept;
+		}
 		return;
 	}
 	Start(ss::SaveData(Data));
@@ -212,25 +222,30 @@ void FCareerSaver::Start(ss::SaveData&& Data)
 void FCareerSaver::Write(ss::SaveData& Data)
 {
 	const double T0 = FPlatformTime::Seconds();
-	// The world's text: written once per snapshot (the same one comes back until the world moves on).
-	bool bLent = false;
-	if (Data.WorldSnapshot && Data.WorldText.empty())
+	// The world's text: written once per stamp (the same stamp comes back until the world moves on), then shared into the save; the
+	// snapshot is let go once its text is written (Update 4, §6 PA-34), so the world's pages stop being shared with it.
+	if (Data.WorldText.empty() && Data.WorldStamp.Valid())
 	{
-		if (Data.WorldSnapshot != TextOf)
+		if (Data.WorldStamp != TextOf && Data.WorldSnapshot)
 		{
 			WorldText.clear();
 			Data.WorldSnapshot->Write(WorldText);
-			TextOf = Data.WorldSnapshot;
+			TextOf = Data.WorldStamp;
 		}
-		Data.WorldText.swap(WorldText);
-		bLent = true;
+		if (Data.WorldStamp == TextOf)
+		{
+			Data.WorldText = WorldText;
+		}
+		Data.WorldSnapshot.reset();
+	}
+	else if (Data.WorldSnapshot && Data.WorldText.empty())
+	{
+		// A snapshot without a stamp: its text for this save alone.
+		Data.WorldSnapshot->Write(Data.WorldText);
+		Data.WorldSnapshot.reset();
 	}
 	const double T1 = FPlatformTime::Seconds();
 	const std::string Text = Data.Serialize();
-	if (bLent)
-	{
-		Data.WorldText.swap(WorldText);
-	}
 	CareerSave::SaveNow(Text, false);
 	UE_LOG(LogCareerSave, Verbose, TEXT("Background save: world text %.1f ms, the rest %.1f ms."), (T1 - T0) * 1000.0, (FPlatformTime::Seconds() - T1) * 1000.0);
 }

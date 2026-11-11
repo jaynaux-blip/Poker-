@@ -69,5 +69,11 @@ std::vector<StoryNote> World::TakeStoryNotes()
 {
 	return {};
 }
+
+std::vector<int> World::SeatCandidates(const std::vector<int>& /*Who*/, int /*Today*/)
+{
+	// Phase A (LEAD_CALLS Q-5): nobody is chosen; the session keeps today's fresh-faces block (G2: W-table's seating rule, §3.17 R2).
+	return {};
+}
 } // namespace world
 } // namespace ss

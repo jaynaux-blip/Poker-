@@ -50,25 +50,6 @@ std::string Seeded(const World& W, const char* What, const std::string& Key)
 	return "world/" + std::to_string(W.Seed()) + "/" + What + "/" + Key;
 }
 
-/** An online option or a live event someone could enter today. */
-struct Option
-{
-	Pending P;
-	double LogBuy = 0.0;
-	int Minute = 0; // of the day it starts
-	bool Featured = false;
-	bool Weekly = false; // a weekly major (not a daily)
-	bool Underground = false;
-	int Cap = 0;
-	std::string Template; // online template id ("" live)
-	std::string Final;    // satellites: the Main Event the chain of seats ends at
-	LiveLevel Level = LiveLevel::None;
-	Region Where = Region::Americas;
-	std::set<int> Invited; // the Summit
-	net::SiteId Site = net::SiteId::RiverLine; // online: the site it's on (update 2 §5.9)
-	bool Overlay = false;                       // a rival's guarantee its field won't cover (the skilled hunt these)
-};
-
 double Lerp(double A, double B, double T)
 {
 	return A + (B - A) * T;
@@ -364,11 +345,11 @@ void Sim::Post(World& W, double At, EventKind K, int Who, const std::string& Wha
 		W.Log.erase(W.Log.begin(), W.Log.begin() + 1000);
 	}
 	// The turns of a career go on their journey too.
-	if (Who < 0 || Who >= static_cast<int>(W.Roster.size()))
+	if (Who < 0 || Who >= static_cast<int>(W.People().size()))
 	{
 		return;
 	}
-	Npc& N = W.Roster[static_cast<size_t>(Who)];
+	Npc& N = W.Edit(Who);
 	const int Day = sim::DayAt(At);
 	switch (K)
 	{
@@ -598,536 +579,738 @@ Pending Sim::LiveEventOf(World& W, const LiveEvent& E)
 	return P;
 }
 
+// ------------------------------------------------------------------ the day's plan, in ranges (Update 4, SPEC v1.7 §3.7 R2, §6 PA-35)
+
+namespace worldsim_detail
+{
+/** The option a plan list's entry names (PlanState's lists hold these refs, never pointers, so World copies mid-plan). */
+PlanOption& SimPlanOpt(PlanState& S, uint32_t Ref)
+{
+	const size_t List = static_cast<size_t>(Ref >> 24);
+	const size_t I = static_cast<size_t>(Ref & 0xFFFFFFu);
+	return List == 0 ? S.Online[I] : S.Rivals[List][I];
+}
+
+uint32_t SimPlanRef(size_t List, size_t I)
+{
+	return static_cast<uint32_t>((List << 24) | I);
+}
+
+/** cyrb128, as Rng's own seeding (Rng.cpp's SeedState), over a byte range: SimPlanFork's string-free seed. */
+void SimPlanSeed(const char* Str, size_t Len, uint32_t Out[4])
+{
+	uint32_t H1 = 1779033703u;
+	uint32_t H2 = 3144134277u;
+	uint32_t H3 = 1013904242u;
+	uint32_t H4 = 2773480762u;
+	for (size_t K = 0; K < Len; ++K)
+	{
+		const uint32_t Ch = static_cast<unsigned char>(Str[K]);
+		H1 = H2 ^ ((H1 ^ Ch) * 597399067u);
+		H2 = H3 ^ ((H2 ^ Ch) * 2869860233u);
+		H3 = H4 ^ ((H3 ^ Ch) * 951274213u);
+		H4 = H1 ^ ((H4 ^ Ch) * 2716044179u);
+	}
+	H1 = (H3 ^ (H1 >> 18)) * 597399067u;
+	H2 = (H4 ^ (H2 >> 22)) * 2869860233u;
+	H3 = (H1 ^ (H3 >> 17)) * 951274213u;
+	H4 = (H2 ^ (H4 >> 19)) * 2716044179u;
+	H1 ^= H2 ^ H3 ^ H4;
+	H2 ^= H1;
+	H3 ^= H1;
+	H4 ^= H1;
+	Out[0] = H1;
+	Out[1] = H2;
+	Out[2] = H3;
+	Out[3] = H4;
+}
+
+/** Writes V's decimal digits at the end of Buf (which ends at End); returns where they start. */
+char* SimPlanDigits(char* End, uint32_t V)
+{
+	char* P = End;
+	do
+	{
+		*--P = static_cast<char>('0' + V % 10u);
+		V /= 10u;
+	} while (V != 0u);
+	return P;
+}
+
+/**
+ * R.Fork(std::to_string(Id)) without the strings (rev-code M8): the same draw from R, the same seed text ("<draw>:<id>") hashed
+ * the same way and the same 15 warm-up draws, so Q's stream is Fork's exactly. Id >= 0.
+ */
+Rng SimPlanFork(Rng& R, int Id)
+{
+	const uint32_t V = R.NextUint32();
+	char Buf[24];
+	char* const End = Buf + sizeof(Buf);
+	char* Start = SimPlanDigits(End, static_cast<uint32_t>(Id));
+	*--Start = ':';
+	Start = SimPlanDigits(Start, V);
+	uint32_t State[4];
+	SimPlanSeed(Start, static_cast<size_t>(End - Start), State);
+	Rng Q = R;
+	Q.SetState(State);
+	for (int K = 0; K < 15; ++K)
+	{
+		Q.NextUint32();
+	}
+	return Q;
+}
+
+/** A Rng continuing from a carried state (TurnCarry's month and week streams). */
+Rng SimTurnRng(const std::array<uint32_t, 4>& State)
+{
+	Rng R{std::string()};
+	R.SetState(State.data());
+	return R;
+}
+
+bool SimPlanByBuyIn(const PlanOption& A, const PlanOption& B)
+{
+	return A.P.BuyIn < B.P.BuyIn || (A.P.BuyIn == B.P.BuyIn && A.P.Start < B.P.Start);
+}
+
+bool SimQueueOrder(const Pending& A, const Pending& B)
+{
+	return A.End < B.End;
+}
+} // namespace worldsim_detail
+
+PlanBox::PlanBox() = default;
+
+PlanBox::PlanBox(const PlanBox& O) : P(O.P ? std::make_unique<PlanState>(*O.P) : nullptr)
+{
+}
+
+PlanBox& PlanBox::operator=(const PlanBox& O)
+{
+	if (this != &O)
+	{
+		P = O.P ? std::make_unique<PlanState>(*O.P) : nullptr;
+	}
+	return *this;
+}
+
+PlanBox::~PlanBox() = default;
+
+PlanState& PlanBox::Open()
+{
+	P = std::make_unique<PlanState>();
+	return *P;
+}
+
+void PlanBox::Close() noexcept
+{
+	P.reset();
+}
+
 void Sim::PlanDay(World& W, int Day)
+{
+	// Every day not yet planned up to Day, one after another (each: its options and its order, everyone's decisions, its queue
+	// insertion), then the queue in end order: the ranges a held turn slices (§3.7 R2) run these same pieces.
+	while (PlanBegin(W, Day))
+	{
+		PlanPeople(W, 0, PlanCount(W));
+		PlanEnd(W);
+	}
+	PlanSort(W);
+}
+
+bool Sim::PlanBegin(World& W, int Day)
+{
+	constexpr int SiteCount = static_cast<int>(net::SiteId::Count);
+	if (W.Planned + 1 > Day)
+	{
+		return false;
+	}
+	const int D = W.Planned + 1;
+	W.Planned = D;
+	PlanState& S = W.Turn.Plan.Open();
+	S.Day = D;
+	S.Until = Day;
+	S.R = Rng(Seeded(W, "plan", std::to_string(D)));
+
+	// What's on: each open site's schedule (RiverLine's as it always was), and the live calendar. Each site keeps its own
+	// list (update 2 S-6: one list of every site's options would make everyone scan them all, and PlanDay pays for it).
+	std::map<std::string, bool> Alive;
+	S.Open = OpenOn(W, D);
+	auto Gather = [&](const net::Network& Net, std::vector<PlanOption>& Out) {
+		const net::SiteId Site = Net.Site();
+		for (const net::EventInstance& E : Net.Window(static_cast<double>(D) * 1440.0, static_cast<double>(D + 1) * 1440.0))
+		{
+			const net::EventTemplate& T = Net.TemplateOf(E);
+			if (T.BuyInCents <= 0 || E.Start + E.Duration <= W.Now)
+			{
+				continue;
+			}
+			if (T.Fmt == net::Format::Satellite)
+			{
+				// No one grinds satellites to a Main Event that has already been played (on the satellite's own site).
+				auto Found = Alive.find(T.SeatTicket);
+				if (Found == Alive.end())
+				{
+					net::EventInstance Next;
+					Found = Alive.emplace(T.SeatTicket, Net.NextFor(FinalTarget(T.SeatTicket), E.Start, Next)).first;
+				}
+				if (!Found->second)
+				{
+					continue;
+				}
+			}
+			PlanOption O;
+			O.P = OnlineEvent(W, E);
+			O.LogBuy = std::log(static_cast<double>(T.BuyInCents));
+			O.Minute = static_cast<int>(E.Start - static_cast<double>(D) * 1440.0);
+			O.Featured = T.Featured;
+			O.Weekly = T.OnlyDay == -9999 && T.Days != 0x7f;
+			O.Template = T.Id;
+			O.Final = T.Fmt == net::Format::Satellite ? FinalTarget(T.SeatTicket) : std::string();
+			O.Cap = std::max(2, E.Entries * 7 / 10);
+			O.Site = Site;
+			if (Site != net::SiteId::RiverLine && T.GtdCents > 0)
+			{
+				// A rival's guarantee is set near its usual pool and its field has no floor (§5.8): some don't fill.
+				const Chips Contribution = static_cast<Chips>(std::llround(static_cast<double>(T.BuyInCents) * Net.Definition().Rake.PrizeShare(T)));
+				O.Overlay = T.GtdCents > Contribution * static_cast<Chips>(E.Entries);
+			}
+			S.SeriesOn |= !T.Series.empty() ? SiteBit(Site) : 0;
+			Out.push_back(std::move(O));
+		}
+		std::sort(Out.begin(), Out.end(), SimPlanByBuyIn);
+	};
+	Gather(net::Shared(), S.Online);
+	for (int Si = 1; Si < SiteCount; ++Si)
+	{
+		if ((S.Open & (1 << Si)) != 0)
+		{
+			const net::SiteId Site = static_cast<net::SiteId>(Si);
+			Gather(net::Site(Site), S.Rivals[static_cast<size_t>(Si)]);
+			S.Traffic[static_cast<size_t>(Si)] = net::Def(Site).Traffic.Scale;
+		}
+	}
+	// Who scans what: RiverLine's list for everyone with no rival account (today's order, so they choose as they always
+	// did); for a rival's members, the lists of the sites they play, merged once a day for each set of sites (PlanList).
+	S.HomeList.reserve(S.Online.size());
+	for (size_t K = 0; K < S.Online.size(); ++K)
+	{
+		S.HomeList.push_back(SimPlanRef(0, K));
+	}
+	S.Widest = S.Online.size();
+	for (const LiveEvent& E : LiveCalendar(D))
+	{
+		if (E.Start + E.Duration <= W.Now || W.Cancelled.count(E.Id) > 0)
+		{
+			continue; // over, or called off
+		}
+		PlanOption O;
+		O.P = LiveEventOf(W, E);
+		O.LogBuy = std::log(static_cast<double>(std::max<Chips>(1, E.BuyIn)));
+		O.Minute = static_cast<int>(E.Start - static_cast<double>(D) * 1440.0);
+		O.Underground = E.Kind == LiveKind::Underground;
+		O.Cap = O.Underground ? E.Field : std::max(2, E.Field * 85 / 100);
+		O.Level = E.Level;
+		O.Where = E.Where;
+		// Dee's games (Regular's test, once per event instead of once per person): "dees@<day>".
+		if (O.P.Id.rfind("dees@", 0) == 0)
+		{
+			O.Dees = true;
+			O.DeesDay = std::atoi(O.P.Id.c_str() + 5);
+		}
+		if (E.Kind == LiveKind::Summit)
+		{
+			// The year's best by reputation, by invitation.
+			std::vector<std::pair<float, int>> Best;
+			for (const Npc& N : W.People())
+			{
+				if (N.Playing())
+				{
+					Best.push_back({N.RepOf(Rep::Overall), N.Id});
+				}
+			}
+			std::sort(Best.begin(), Best.end(), [](const std::pair<float, int>& A, const std::pair<float, int>& B) { return A.first > B.first || (A.first == B.first && A.second < B.second); });
+			for (size_t K = 0; K < Best.size() && K < 36; ++K)
+			{
+				O.Invited.insert(Best[K].second);
+			}
+		}
+		S.Live.push_back(std::move(O));
+	}
+
+	// Everyone decides, in a different order every day (so the full events fill up fairly).
+	S.Order.reserve(W.People().size());
+	for (const Npc& N : W.People())
+	{
+		if (N.Playing())
+		{
+			S.Order.push_back(N.Id);
+		}
+	}
+	S.R.Shuffle(S.Order);
+	S.RoomRegular.assign(W.People().size(), 0);
+	for (const int Id : W.EmbercrestRegulars())
+	{
+		S.RoomRegular[static_cast<size_t>(Id)] = 1;
+	}
+	S.Weight.assign(S.Widest, 0.0);
+	return true;
+}
+
+int Sim::PlanCount(const World& W)
+{
+	const PlanState* S = W.Turn.Plan.Get();
+	return S ? static_cast<int>(S->Order.size()) : 0;
+}
+
+const std::vector<uint32_t>& Sim::PlanList(PlanState& S, int Mask)
 {
 	constexpr int SiteCount = static_cast<int>(net::SiteId::Count);
 	const int Home = SiteBit(net::SiteId::RiverLine);
-	for (int D = W.Planned + 1; D <= Day; ++D)
+	if (Mask == Home)
 	{
-		W.Planned = D;
-		Rng R(Seeded(W, "plan", std::to_string(D)));
-
-		// What's on: each open site's schedule (RiverLine's as it always was), and the live calendar. Each site keeps its own
-		// list (update 2 S-6: one list of every site's options would make everyone scan them all, and PlanDay pays for it).
-		std::vector<Option> Online;
-		std::array<std::vector<Option>, static_cast<size_t>(SiteCount)> Rivals;
-		std::array<double, static_cast<size_t>(SiteCount)> Traffic{};
-		std::vector<Option> Live;
-		int SeriesOn = 0; // the sites running a series today (bits)
-		std::map<std::string, bool> Alive;
-		const int Open = OpenOn(W, D);
-		auto Gather = [&](const net::Network& Net, std::vector<Option>& Out) {
-			const net::SiteId Site = Net.Site();
-			for (const net::EventInstance& E : Net.Window(static_cast<double>(D) * 1440.0, static_cast<double>(D + 1) * 1440.0))
+		return S.HomeList;
+	}
+	auto Found = S.Merged.find(Mask);
+	if (Found != S.Merged.end())
+	{
+		return Found->second;
+	}
+	std::vector<uint32_t>& L = S.Merged[Mask];
+	if ((Mask & Home) != 0)
+	{
+		L = S.HomeList;
+	}
+	for (int Si = 1; Si < SiteCount; ++Si)
+	{
+		if ((Mask & (1 << Si)) != 0)
+		{
+			for (size_t K = 0; K < S.Rivals[static_cast<size_t>(Si)].size(); ++K)
 			{
-				const net::EventTemplate& T = Net.TemplateOf(E);
-				if (T.BuyInCents <= 0 || E.Start + E.Duration <= W.Now)
-				{
-					continue;
-				}
-				if (T.Fmt == net::Format::Satellite)
-				{
-					// No one grinds satellites to a Main Event that has already been played (on the satellite's own site).
-					auto Found = Alive.find(T.SeatTicket);
-					if (Found == Alive.end())
-					{
-						net::EventInstance Next;
-						Found = Alive.emplace(T.SeatTicket, Net.NextFor(FinalTarget(T.SeatTicket), E.Start, Next)).first;
-					}
-					if (!Found->second)
-					{
-						continue;
-					}
-				}
-				Option O;
-				O.P = OnlineEvent(W, E);
-				O.LogBuy = std::log(static_cast<double>(T.BuyInCents));
-				O.Minute = static_cast<int>(E.Start - static_cast<double>(D) * 1440.0);
-				O.Featured = T.Featured;
-				O.Weekly = T.OnlyDay == -9999 && T.Days != 0x7f;
-				O.Template = T.Id;
-				O.Final = T.Fmt == net::Format::Satellite ? FinalTarget(T.SeatTicket) : std::string();
-				O.Cap = std::max(2, E.Entries * 7 / 10);
-				O.Site = Site;
-				if (Site != net::SiteId::RiverLine && T.GtdCents > 0)
-				{
-					// A rival's guarantee is set near its usual pool and its field has no floor (§5.8): some don't fill.
-					const Chips Contribution = static_cast<Chips>(std::llround(static_cast<double>(T.BuyInCents) * Net.Definition().Rake.PrizeShare(T)));
-					O.Overlay = T.GtdCents > Contribution * static_cast<Chips>(E.Entries);
-				}
-				SeriesOn |= !T.Series.empty() ? SiteBit(Site) : 0;
-				Out.push_back(std::move(O));
+				L.push_back(SimPlanRef(static_cast<size_t>(Si), K));
 			}
-			std::sort(Out.begin(), Out.end(), [](const Option& A, const Option& B) { return A.P.BuyIn < B.P.BuyIn || (A.P.BuyIn == B.P.BuyIn && A.P.Start < B.P.Start); });
+		}
+	}
+	std::stable_sort(L.begin(), L.end(), [&S](uint32_t A, uint32_t B) {
+		const PlanOption& Oa = SimPlanOpt(S, A);
+		const PlanOption& Ob = SimPlanOpt(S, B);
+		return Oa.P.BuyIn < Ob.P.BuyIn || (Oa.P.BuyIn == Ob.P.BuyIn && Oa.P.Start < Ob.P.Start);
+	});
+	S.Widest = std::max(S.Widest, L.size());
+	return L;
+}
+
+void Sim::PlanPeople(World& W, int From, int To)
+{
+	PlanState* OpenPlan = W.Turn.Plan.Get();
+	if (!OpenPlan)
+	{
+		return;
+	}
+	PlanState& S = *OpenPlan;
+	const int D = S.Day;
+	const int Day = S.Until; // (grow::BuyInScale reads PlanDay's argument, as it always has)
+	std::vector<PlanOption*> LiveOrder;
+	LiveOrder.reserve(S.Live.size());
+	const int Stop = std::min(To, static_cast<int>(S.Order.size()));
+	for (int At = std::max(0, From); At < Stop; ++At)
+	{
+		const int Id = S.Order[static_cast<size_t>(At)];
+		// Only a person holding seats is changed here (their tickets): only their page is made the world's own (PA-34).
+		const Npc& PlanLook = W.People()[static_cast<size_t>(Id)];
+		Npc* Mine = PlanLook.Tickets.empty() ? nullptr : &W.Edit(Id);
+		const Npc& N = Mine ? *Mine : PlanLook;
+		Rng Q = SimPlanFork(S.R, Id);
+		const bool Backed = N.Backer != -1;
+		Chips Avail = Backed ? std::max<Chips>(N.Bankroll, sim::TierAbi[sim::TierIndex(N.Tier)] * 40) : N.Bankroll;
+		auto Enter = [&](PlanOption& O, Chips Cost, bool Ticket, int Bullets, float Share) {
+			Entry En;
+			En.Npc = Id;
+			En.Ticket = Ticket;
+			En.Staked = Backed && !Ticket;
+			En.Bullets = Bullets;
+			En.Share = Share;
+			O.P.Who.push_back(En);
+			Avail -= Cost;
 		};
-		Gather(net::Shared(), Online);
-		for (int S = 1; S < SiteCount; ++S)
-		{
-			if ((Open & (1 << S)) != 0)
-			{
-				const net::SiteId Site = static_cast<net::SiteId>(S);
-				Gather(net::Site(Site), Rivals[static_cast<size_t>(S)]);
-				Traffic[static_cast<size_t>(S)] = net::Def(Site).Traffic.Scale;
-			}
-		}
-		// Who scans what: RiverLine's list for everyone with no rival account (today's order, so they choose as they always
-		// did); for a rival's members, the lists of the sites they play, merged once a day for each set of sites.
-		std::vector<Option*> HomeList;
-		HomeList.reserve(Online.size());
-		for (Option& O : Online)
-		{
-			HomeList.push_back(&O);
-		}
-		std::map<int, std::vector<Option*>> Merged;
-		size_t Widest = Online.size();
-		auto ListFor = [&](int Mask) -> const std::vector<Option*>& {
-			if (Mask == Home)
-			{
-				return HomeList;
-			}
-			auto Found = Merged.find(Mask);
-			if (Found != Merged.end())
-			{
-				return Found->second;
-			}
-			std::vector<Option*>& L = Merged[Mask];
-			if ((Mask & Home) != 0)
-			{
-				L = HomeList;
-			}
-			for (int S = 1; S < SiteCount; ++S)
-			{
-				if ((Mask & (1 << S)) != 0)
-				{
-					for (Option& O : Rivals[static_cast<size_t>(S)])
-					{
-						L.push_back(&O);
-					}
-				}
-			}
-			std::stable_sort(L.begin(), L.end(), [](const Option* A, const Option* B) { return A->P.BuyIn < B->P.BuyIn || (A->P.BuyIn == B->P.BuyIn && A->P.Start < B->P.Start); });
-			Widest = std::max(Widest, L.size());
-			return L;
-		};
-		for (const LiveEvent& E : LiveCalendar(D))
-		{
-			if (E.Start + E.Duration <= W.Now || W.Cancelled.count(E.Id) > 0)
-			{
-				continue; // over, or called off
-			}
-			Option O;
-			O.P = LiveEventOf(W, E);
-			O.LogBuy = std::log(static_cast<double>(std::max<Chips>(1, E.BuyIn)));
-			O.Minute = static_cast<int>(E.Start - static_cast<double>(D) * 1440.0);
-			O.Underground = E.Kind == LiveKind::Underground;
-			O.Cap = O.Underground ? E.Field : std::max(2, E.Field * 85 / 100);
-			O.Level = E.Level;
-			O.Where = E.Where;
-			if (E.Kind == LiveKind::Summit)
-			{
-				// The year's best by reputation, by invitation.
-				std::vector<std::pair<float, int>> Best;
-				for (const Npc& N : W.Roster)
-				{
-					if (N.Playing())
-					{
-						Best.push_back({N.RepOf(Rep::Overall), N.Id});
-					}
-				}
-				std::sort(Best.begin(), Best.end(), [](const std::pair<float, int>& A, const std::pair<float, int>& B) { return A.first > B.first || (A.first == B.first && A.second < B.second); });
-				for (size_t K = 0; K < Best.size() && K < 36; ++K)
-				{
-					O.Invited.insert(Best[K].second);
-				}
-			}
-			Live.push_back(std::move(O));
-		}
+		// Regular (who goes to their own back-room game) with the event half decided once a day: the room's faces only, Dee's four
+		// at her table on her nights unless they're away on a trip.
+		const bool PlanFace = N.From == Origin::Cast || N.Rival;
+		const bool PlanDeeFour = PlanFace && (N.Name == "Sal" || N.Name == "Big Lou" || N.Name == "Twitch" || N.Name == "Mei");
+		auto DeesGame = [&](const PlanOption& O) { return PlanFace && O.Dees && PlanDeeFour && !(N.TripUntil >= O.DeesDay && O.DeesDay >= N.TripFrom); };
 
-		// Everyone decides, in a different order every day (so the full events fill up fairly).
-		std::vector<int> Order;
-		Order.reserve(W.Roster.size());
-		for (const Npc& N : W.Roster)
+		// Live: the room's weekly, the back-room games, a festival on a trip, the big ones. A regular's own game is
+		// decided first (Dee's, on her nights): her regulars are at her table, not at another room's event that day.
+		int LiveToday = 0;
+		LiveOrder.clear();
+		for (PlanOption& O : S.Live)
 		{
-			if (N.Playing())
+			if (DeesGame(O))
 			{
-				Order.push_back(N.Id);
+				LiveOrder.push_back(&O);
 			}
 		}
-		R.Shuffle(Order);
-		std::vector<char> RoomRegular(W.Roster.size(), 0);
-		for (const int Id : W.EmbercrestRegulars())
+		const size_t OwnGames = LiveOrder.size();
+		for (PlanOption& O : S.Live)
 		{
-			RoomRegular[static_cast<size_t>(Id)] = 1;
+			if (OwnGames == 0 || !DeesGame(O))
+			{
+				LiveOrder.push_back(&O);
+			}
 		}
-		std::vector<double> Weight(Widest, 0.0);
-		std::vector<Option*> LiveOrder;
-		LiveOrder.reserve(Live.size());
-		for (int Id : Order)
+		for (PlanOption* Next : LiveOrder)
 		{
-			Npc& N = W.Roster[static_cast<size_t>(Id)];
-			Rng Q = R.Fork(std::to_string(Id));
-			const bool Backed = N.Backer != -1;
-			Chips Avail = Backed ? std::max<Chips>(N.Bankroll, sim::TierAbi[sim::TierIndex(N.Tier)] * 40) : N.Bankroll;
-			auto Enter = [&](Option& O, Chips Cost, bool Ticket, int Bullets, float Share) {
-				Entry En;
-				En.Npc = Id;
-				En.Ticket = Ticket;
-				En.Staked = Backed && !Ticket;
-				En.Bullets = Bullets;
-				En.Share = Share;
-				O.P.Who.push_back(En);
-				Avail -= Cost;
-			};
-
-			// Live: the room's weekly, the back-room games, a festival on a trip, the big ones. A regular's own game is
-			// decided first (Dee's, on her nights): her regulars are at her table, not at another room's event that day.
-			int LiveToday = 0;
-			LiveOrder.clear();
-			for (Option& O : Live)
+			PlanOption& O = *Next;
+			if (static_cast<int>(O.P.Who.size()) >= O.Cap || LiveToday >= 1 + (Has(O.P.Kinds, KindSatellite) ? 1 : 0))
 			{
-				if (Regular(N, O.P.Id))
-				{
-					LiveOrder.push_back(&O);
-				}
+				continue;
 			}
-			const size_t OwnGames = LiveOrder.size();
-			for (Option& O : Live)
+			const LiveKind Kind = static_cast<LiveKind>(O.P.Kind);
+			const bool Forced = DeesGame(O);
+			const bool OnTrip = !O.P.Series.empty() && N.Trip == O.P.Series && D >= N.TripFrom && D <= N.TripUntil;
+			const std::string Key = TicketKey(O.P);
+			const bool Ticket = !Key.empty() && N.Tickets.count(Key) > 0;
+			bool Go = false;
+			Chips Cost = O.P.BuyIn;
+			float Share = 1.0f;
+			switch (Kind)
 			{
-				if (OwnGames == 0 || !Regular(N, O.P.Id))
-				{
-					LiveOrder.push_back(&O);
-				}
-			}
-			for (Option* Next : LiveOrder)
+			case LiveKind::Local:
 			{
-				Option& O = *Next;
-				if (static_cast<int>(O.P.Who.size()) >= O.Cap || LiveToday >= 1 + (Has(O.P.Kinds, KindSatellite) ? 1 : 0))
+				const bool Embercrest = live::IsEmbercrest(O.P.Id);
+				if (Embercrest && (N.From == Origin::Cast || N.Rival))
 				{
-					continue;
-				}
-				const LiveKind Kind = static_cast<LiveKind>(O.P.Kind);
-				const bool Forced = Regular(N, O.P.Id);
-				const bool OnTrip = !O.P.Series.empty() && N.Trip == O.P.Series && D >= N.TripFrom && D <= N.TripUntil;
-				const std::string Key = TicketKey(O.P);
-				const bool Ticket = !Key.empty() && N.Tickets.count(Key) > 0;
-				bool Go = false;
-				Chips Cost = O.P.BuyIn;
-				float Share = 1.0f;
-				switch (Kind)
-				{
-				case LiveKind::Local:
-				{
-					const bool Embercrest = live::IsEmbercrest(O.P.Id);
-					if (Embercrest && (N.From == Origin::Cast || N.Rival))
-					{
-						// The room's faces have their games (live::Habit) and play them when the money's there: a broke
-						// week keeps even Mrs. Park at home.
-						const int H = live::Habit(N.Name, live::FindOccurrence(O.P.Id));
-						const double Want = H >= 2 ? 0.7 : H == 1 ? 0.18 : 0.0;
-						Go = Want > 0.0 && O.P.BuyIn * 4 <= Avail && Q.Chance(Want);
-						break;
-					}
-					if (Embercrest && RoomRegular[static_cast<size_t>(N.Id)] != 0 && N.TripUntil < D)
-					{
-						// The room's regulars have their nights (live::RegularHabit), when the money's there.
-						const int H = live::RegularHabit(N.Name, live::FindOccurrence(O.P.Id));
-						const double Want = H >= 2 ? 0.8 : H == 1 ? 0.2 : 0.02;
-						Go = O.P.BuyIn * 3 <= std::max(Avail, N.Income * 2) && Q.Chance(Want);
-						break;
-					}
-					if (O.Where != N.Home || N.Live < LiveLevel::Local || (Embercrest && N.Country != "US") || N.TripUntil >= D)
-					{
-						break;
-					}
-					// The Embercrest runs most days: a local picks a night or two a week.
-					const double Want = (N.OnlineShare < 0.7f ? 0.35 : 0.06) * (N.Schedule == Plan::Weekends ? 1.5 : 1.0) * (Embercrest ? 0.12 : 1.0);
-					Go = Q.Chance(Want) && O.P.BuyIn * 10 <= std::max(Avail, N.Income * 4);
+					// The room's faces have their games (live::Habit) and play them when the money's there: a broke
+					// week keeps even Mrs. Park at home.
+					const int H = live::Habit(N.Name, live::FindOccurrence(O.P.Id));
+					const double Want = H >= 2 ? 0.7 : H == 1 ? 0.18 : 0.0;
+					Go = Want > 0.0 && O.P.BuyIn * 4 <= Avail && Q.Chance(Want);
 					break;
 				}
-				case LiveKind::Underground:
+				if (Embercrest && S.RoomRegular[static_cast<size_t>(N.Id)] != 0 && N.TripUntil < D)
 				{
-					if (Forced)
-					{
-						Go = true;
-						break;
-					}
-					if (O.Where != N.Home || N.Live < LiveLevel::Local || N.TripUntil >= D)
-					{
-						break;
-					}
-					const double Rep = static_cast<double>(N.RepOf(Rep::Underground));
-					const bool Invite = O.P.Stakes < 1000 || Rep >= 25.0 || N.Is == Identity::HighStakesGambler;
-					const bool Fits = O.P.Stakes * 150 <= Avail;
-					const double Want = N.Name == "Rick" ? 0.8 : (N.TraitOf(Trait::Risk) > 0.6f ? 0.04 + Rep / 400.0 : 0.005);
-					Go = Invite && Fits && Q.Chance(Want);
-					Cost = O.P.Stakes * 100;
+					// The room's regulars have their nights (live::RegularHabit), when the money's there.
+					const int H = live::RegularHabit(N.Name, live::FindOccurrence(O.P.Id));
+					const double Want = H >= 2 ? 0.8 : H == 1 ? 0.2 : 0.02;
+					Go = O.P.BuyIn * 3 <= std::max(Avail, N.Income * 2) && Q.Chance(Want);
 					break;
 				}
-				case LiveKind::Summit:
+				if (O.Where != N.Home || N.Live < LiveLevel::Local || (Embercrest && N.Country != "US") || N.TripUntil >= D)
 				{
-					if (O.Invited.count(Id) == 0)
-					{
-						break;
-					}
-					// Most of a $1M seat is sold to backers: they keep what they could afford.
-					Share = static_cast<float>(sim::Clamp(static_cast<double>(N.Bankroll) * 0.25 / static_cast<double>(O.P.BuyIn), 0.05, 1.0));
+					break;
+				}
+				// The Embercrest runs most days: a local picks a night or two a week.
+				const double Want = (N.OnlineShare < 0.7f ? 0.35 : 0.06) * (N.Schedule == Plan::Weekends ? 1.5 : 1.0) * (Embercrest ? 0.12 : 1.0);
+				Go = Q.Chance(Want) && O.P.BuyIn * 10 <= std::max(Avail, N.Income * 4);
+				break;
+			}
+			case LiveKind::Underground:
+			{
+				if (Forced)
+				{
+					Go = true;
+					break;
+				}
+				if (O.Where != N.Home || N.Live < LiveLevel::Local || N.TripUntil >= D)
+				{
+					break;
+				}
+				const double Rep = static_cast<double>(N.RepOf(Rep::Underground));
+				const bool Invite = O.P.Stakes < 1000 || Rep >= 25.0 || N.Is == Identity::HighStakesGambler;
+				const bool Fits = O.P.Stakes * 150 <= Avail;
+				const double Want = N.Name == "Rick" ? 0.8 : (N.TraitOf(Trait::Risk) > 0.6f ? 0.04 + Rep / 400.0 : 0.005);
+				Go = Invite && Fits && Q.Chance(Want);
+				Cost = O.P.Stakes * 100;
+				break;
+			}
+			case LiveKind::Summit:
+			{
+				if (O.Invited.count(Id) == 0)
+				{
+					break;
+				}
+				// Most of a $1M seat is sold to backers: they keep what they could afford.
+				Share = static_cast<float>(sim::Clamp(static_cast<double>(N.Bankroll) * 0.25 / static_cast<double>(O.P.BuyIn), 0.05, 1.0));
+				Cost = static_cast<Chips>(static_cast<double>(O.P.BuyIn) * static_cast<double>(Share));
+				Go = Q.Chance(0.92);
+				break;
+			}
+			default:
+			{
+				if (!OnTrip && !(Ticket && Kind == LiveKind::ChampionshipMain && N.TripUntil >= D))
+				{
+					break;
+				}
+				if (Ticket && TicketKey(O.P) == Key)
+				{
+					Go = true;
+					Cost = 0;
+					break;
+				}
+				// Live players stretch further than online ones (and furthest for a Main Event), but nobody plays a
+				// $10,000 event on $2,000.
+				const double Stretch = O.P.Major || O.P.Kind == static_cast<int>(LiveKind::ChampionshipMain) ? std::max(5.0, Need(N) * 0.08) : std::max(12.0, Need(N) * 0.3);
+				const bool Affordable = static_cast<double>(O.P.BuyIn) * Stretch <= static_cast<double>(Avail + N.Income * 26);
+				const double Want = O.P.Major || O.P.Kind == static_cast<int>(LiveKind::ChampionshipMain) ? 0.95 : Has(O.P.Kinds, KindSatellite) ? 0.35 : 0.5;
+				Go = Affordable && Q.Chance(Want);
+				if (!Go && O.P.Kind == static_cast<int>(LiveKind::ChampionshipMain) && Q.Chance(0.9))
+				{
+					// They flew out for it: savings, or a piece sold to friends and backers.
+					const Chips Own = N.Professional ? Avail / 4 : std::max(Avail / 3, N.Income * 104);
+					Share = static_cast<float>(sim::Clamp(static_cast<double>(Own) / static_cast<double>(O.P.BuyIn), 0.1, 1.0));
 					Cost = static_cast<Chips>(static_cast<double>(O.P.BuyIn) * static_cast<double>(Share));
-					Go = Q.Chance(0.92);
-					break;
+					Go = true;
 				}
-				default:
+				break;
+			}
+			}
+			if (Go && (Cost <= Avail || Backed || Cost == 0 || N.Income * 8 >= Cost))
+			{
+				if (Ticket && Cost == 0)
 				{
-					if (!OnTrip && !(Ticket && Kind == LiveKind::ChampionshipMain && N.TripUntil >= D))
+					if (--Mine->Tickets[Key] <= 0)
 					{
-						break;
-					}
-					if (Ticket && TicketKey(O.P) == Key)
-					{
-						Go = true;
-						Cost = 0;
-						break;
-					}
-					// Live players stretch further than online ones (and furthest for a Main Event), but nobody plays a
-					// $10,000 event on $2,000.
-					const double Stretch = O.P.Major || O.P.Kind == static_cast<int>(LiveKind::ChampionshipMain) ? std::max(5.0, Need(N) * 0.08) : std::max(12.0, Need(N) * 0.3);
-					const bool Affordable = static_cast<double>(O.P.BuyIn) * Stretch <= static_cast<double>(Avail + N.Income * 26);
-					const double Want = O.P.Major || O.P.Kind == static_cast<int>(LiveKind::ChampionshipMain) ? 0.95 : Has(O.P.Kinds, KindSatellite) ? 0.35 : 0.5;
-					Go = Affordable && Q.Chance(Want);
-					if (!Go && O.P.Kind == static_cast<int>(LiveKind::ChampionshipMain) && Q.Chance(0.9))
-					{
-						// They flew out for it: savings, or a piece sold to friends and backers.
-						const Chips Own = N.Professional ? Avail / 4 : std::max(Avail / 3, N.Income * 104);
-						Share = static_cast<float>(sim::Clamp(static_cast<double>(Own) / static_cast<double>(O.P.BuyIn), 0.1, 1.0));
-						Cost = static_cast<Chips>(static_cast<double>(O.P.BuyIn) * static_cast<double>(Share));
-						Go = true;
-					}
-					break;
-				}
-				}
-				if (Go && (Cost <= Avail || Backed || Cost == 0 || N.Income * 8 >= Cost))
-				{
-					if (Ticket && Cost == 0)
-					{
-						if (--N.Tickets[Key] <= 0)
-						{
-							N.Tickets.erase(Key);
-						}
-					}
-					Enter(O, Cost, Ticket && Cost == 0, 1, Share);
-					++LiveToday;
-				}
-			}
-
-			// Online: how much they play today, at what buy-ins, in which formats, on the sites they play (update 2 §5.9).
-			const int Mask = N.Sites & Open;
-			const std::vector<Option*>& List = Mask == 0 ? HomeList : ListFor(Mask);
-			if (Weight.size() < List.size())
-			{
-				Weight.resize(List.size(), 0.0);
-			}
-			int Count = OnlineCount(N, D, (SeriesOn & Mask) != 0, Q);
-			if (Mask == 0)
-			{
-				continue; // no lobby of theirs is open today
-			}
-			// Seats won in satellites get used first.
-			if (!N.Tickets.empty())
-			{
-				for (Option* Next : List)
-				{
-					Option& O = *Next;
-					auto T = N.Tickets.find(net::ForEvent(O.Template).TicketOf(O.Template));
-					if (T != N.Tickets.end() && static_cast<int>(O.P.Who.size()) < O.Cap)
-					{
-						Enter(O, 0, true, 1, 1.0f);
-						if (--T->second <= 0)
-						{
-							N.Tickets.erase(T);
-						}
-						--Count;
-						if (N.Tickets.empty())
-						{
-							break;
-						}
+						Mine->Tickets.erase(Key);
 					}
 				}
-			}
-			if (Count <= 0 || List.empty())
-			{
-				continue;
-			}
-			const double Comfort = static_cast<double>(Sim::Comfort(N));
-			const int Tier = sim::TierIndex(N.Tier);
-			double Target = sim::Clamp(Comfort, static_cast<double>(sim::TierLow[Tier]), static_cast<double>(sim::TierHigh[Tier]));
-			Target *= grow::BuyInScale(N, Day); // Update 4 (§3.9, §6 PA-23): the wealthy amateur's stakes (1.0 until G2)
-			const double Risk = static_cast<double>(N.TraitOf(Trait::Risk));
-			double Shot = 1.6 + 2.5 * Risk;
-			if (N.Mood == Momentum::Heater || N.Mood == Momentum::Confident || N.Mood == Momentum::Breakout)
-			{
-				Shot *= 1.5;
-			}
-			if (N.Mood == Momentum::Downswing || N.Mood == Momentum::MajorDownswing || N.Mood == Momentum::Rebuilding)
-			{
-				Target *= N.TraitOf(Trait::Discipline) > 0.5f ? 0.8 : 1.0;
-				Shot *= N.TraitOf(Trait::Discipline) > 0.5f ? 0.7 : 1.3; // the disciplined tighten up; the rest chase it
-			}
-			const double MaxBuy = std::min(Target * Shot, static_cast<double>(Avail) * (0.04 + 0.2 * Risk));
-			const double MinBuy = Target / (3.0 + 4.0 * static_cast<double>(N.TraitOf(Trait::Patience)));
-			if (MaxBuy < MinBuy || MaxBuy < 25.0)
-			{
-				continue;
-			}
-			const double LogTarget = std::log(Target);
-			// The candidates: buy-ins in range (the options are sorted by buy-in).
-			const auto Lo = std::lower_bound(List.begin(), List.end(), MinBuy, [](const Option* O, double V) { return static_cast<double>(O->P.BuyIn) < V; });
-			const auto Hi = std::upper_bound(List.begin(), List.end(), MaxBuy, [](double V, const Option* O) { return V < static_cast<double>(O->P.BuyIn); });
-			const size_t First = static_cast<size_t>(Lo - List.begin());
-			const size_t Last = static_cast<size_t>(Hi - List.begin());
-			if (First >= Last)
-			{
-				continue;
-			}
-			double Total = 0.0;
-			const bool Nights = N.Schedule == Plan::Nights;
-			const bool MajorsOnly = N.Schedule == Plan::MajorsOnly;
-			const bool Skilled = N.Overall() >= sim::SkilledOverall;
-			for (size_t K = First; K < Last; ++K)
-			{
-				Option& O = *List[K];
-				double Wt = 0.0;
-				if (static_cast<int>(O.P.Who.size()) < O.Cap)
-				{
-					const double Dl = O.LogBuy - LogTarget;
-					Wt = std::exp(-Dl * Dl / (2.0 * 0.75 * 0.75));
-					if (Nights && !(O.Minute >= 17 * 60 || O.Minute < 3 * 60))
-					{
-						Wt *= 0.15;
-					}
-					const int Kn = O.P.Kinds;
-					if (Has(Kn, KindBounty))
-					{
-						Wt *= (N.Formats & LikeBounty) ? 2.2 : 0.8;
-					}
-					if (Has(Kn, KindMystery))
-					{
-						Wt *= (N.Formats & LikeMystery) ? 2.0 : 1.0;
-					}
-					if (Has(Kn, KindSatellite))
-					{
-						// Nobody keeps winning seats they already hold.
-						const bool Holding = N.Tickets.count(O.P.Ticket) > 0 || (!O.Final.empty() && N.Tickets.count(O.Final) > 0);
-						Wt *= Holding ? 0.0 : (N.Formats & LikeSatellite) ? 2.0 : 0.3;
-					}
-					if (Has(Kn, KindTurbo) || Has(Kn, KindHyper))
-					{
-						Wt *= (N.Formats & LikeTurbo) ? 2.0 : 1.0 - 0.6 * static_cast<double>(N.TraitOf(Trait::Patience));
-					}
-					if (Has(Kn, KindDeep))
-					{
-						Wt *= (N.Formats & LikeDeep) ? 2.0 : 1.0;
-					}
-					if (Has(Kn, KindOmaha))
-					{
-						Wt *= (N.Formats & LikeOmaha) ? 3.0 : 0.08;
-					}
-					Wt *= O.Featured ? 1.3 : 1.0;
-					Wt *= O.Weekly ? 2.2 : 1.0;
-					Wt *= !O.P.Series.empty() ? (N.Schedule == Plan::SeriesFocus ? 3.0 : 1.6) : 1.0;
-					Wt *= O.P.Major ? 1.5 : 1.0;
-					if (MajorsOnly && !(O.Weekly || O.P.Major || !O.P.Series.empty()))
-					{
-						Wt *= 0.05;
-					}
-					if (O.Site != net::SiteId::RiverLine)
-					{
-						// A rival (§5.9): as busy as its traffic; the skilled like Ignite's soft fields and an overlay; Mid and
-						// High players like RunItTwice's majors.
-						Wt *= Traffic[static_cast<size_t>(O.Site)];
-						Wt *= Skilled && O.Site == net::SiteId::Ignite ? sim::SkilledIgnite : 1.0;
-						Wt *= Skilled && O.Overlay ? sim::SkilledOverlay : 1.0;
-						Wt *= O.Site == net::SiteId::RunItTwice && Tier >= static_cast<int>(net::Tier::Mid) && (O.Weekly || O.P.Major || !O.P.Series.empty())
-							? sim::RunItTwiceMajors
-							: 1.0;
-					}
-				}
-				Weight[K] = Wt;
-				Total += Wt;
-			}
-			for (int Pick = 0; Pick < Count && Total > 1e-9; ++Pick)
-			{
-				double X = Q.Next() * Total;
-				size_t Chosen = Last;
-				for (size_t K = First; K < Last; ++K)
-				{
-					if (Weight[K] <= 0.0)
-					{
-						continue;
-					}
-					Chosen = K;
-					X -= Weight[K];
-					if (X < 0.0)
-					{
-						break;
-					}
-				}
-				if (Chosen >= Last)
-				{
-					break;
-				}
-				Option& O = *List[Chosen];
-				Total -= Weight[Chosen];
-				Weight[Chosen] = 0.0;
-				int Bullets = 1;
-				if (Has(O.P.Kinds, KindReEntry))
-				{
-					Bullets += Q.Chance(0.12 + 0.45 * Risk) ? 1 : 0;
-					Bullets += Risk > 0.7 && Q.Chance(0.3) ? 1 : 0;
-				}
-				const Chips Cost = O.P.BuyIn * Bullets;
-				if (Cost > Avail && !Backed)
-				{
-					continue;
-				}
-				Enter(O, Cost, false, Bullets, 1.0f);
-			}
-			for (size_t K = First; K < Last; ++K)
-			{
-				Weight[K] = 0.0;
+				Enter(O, Cost, Ticket && Cost == 0, 1, Share);
+				++LiveToday;
 			}
 		}
 
-		// Into the queue: every event someone the world follows is playing (the player may already be in one).
-		std::vector<std::vector<Option>*> Lists = {&Online};
-		for (std::vector<Option>& L : Rivals)
+		// Online: how much they play today, at what buy-ins, in which formats, on the sites they play (update 2 §5.9).
+		const int Mask = N.Sites & S.Open;
+		const std::vector<uint32_t>& List = Mask == 0 ? S.HomeList : PlanList(S, Mask);
+		if (S.Weight.size() < List.size())
 		{
-			Lists.push_back(&L);
+			S.Weight.resize(List.size(), 0.0);
 		}
-		Lists.push_back(&Live);
-		for (std::vector<Option>* Each : Lists)
+		int Count = OnlineCount(N, D, (S.SeriesOn & Mask) != 0, Q);
+		if (Mask == 0)
 		{
-			for (Option& O : *Each)
+			continue; // no lobby of theirs is open today
+		}
+		// Seats won in satellites get used first.
+		if (!N.Tickets.empty())
+		{
+			for (const uint32_t Ref : List)
 			{
-				if (O.P.Who.empty())
+				PlanOption& O = SimPlanOpt(S, Ref);
+				auto T = Mine->Tickets.find(net::ForEvent(O.Template).TicketOf(O.Template));
+				if (T != Mine->Tickets.end() && static_cast<int>(O.P.Who.size()) < O.Cap)
 				{
-					continue;
-				}
-				auto Already = std::find_if(W.Queue.begin(), W.Queue.end(), [&](const Pending& Q) { return Q.Id == O.P.Id; });
-				if (Already == W.Queue.end())
-				{
-					W.Queue.push_back(std::move(O.P));
-					continue;
-				}
-				for (const Entry& E : O.P.Who)
-				{
-					if (std::none_of(Already->Who.begin(), Already->Who.end(), [&](const Entry& X) { return X.Npc == E.Npc; }))
+					Enter(O, 0, true, 1, 1.0f);
+					if (--T->second <= 0)
 					{
-						Already->Who.push_back(E);
+						Mine->Tickets.erase(T);
 					}
+					--Count;
+					if (Mine->Tickets.empty())
+					{
+						break;
+					}
+				}
+			}
+		}
+		if (Count <= 0 || List.empty())
+		{
+			continue;
+		}
+		const double Comfort = static_cast<double>(Sim::Comfort(N));
+		const int Tier = sim::TierIndex(N.Tier);
+		double Target = sim::Clamp(Comfort, static_cast<double>(sim::TierLow[Tier]), static_cast<double>(sim::TierHigh[Tier]));
+		Target *= grow::BuyInScale(N, Day); // Update 4 (§3.9, §6 PA-23): the wealthy amateur's stakes (1.0 until G2)
+		const double Risk = static_cast<double>(N.TraitOf(Trait::Risk));
+		double Shot = 1.6 + 2.5 * Risk;
+		if (N.Mood == Momentum::Heater || N.Mood == Momentum::Confident || N.Mood == Momentum::Breakout)
+		{
+			Shot *= 1.5;
+		}
+		if (N.Mood == Momentum::Downswing || N.Mood == Momentum::MajorDownswing || N.Mood == Momentum::Rebuilding)
+		{
+			Target *= N.TraitOf(Trait::Discipline) > 0.5f ? 0.8 : 1.0;
+			Shot *= N.TraitOf(Trait::Discipline) > 0.5f ? 0.7 : 1.3; // the disciplined tighten up; the rest chase it
+		}
+		const double MaxBuy = std::min(Target * Shot, static_cast<double>(Avail) * (0.04 + 0.2 * Risk));
+		const double MinBuy = Target / (3.0 + 4.0 * static_cast<double>(N.TraitOf(Trait::Patience)));
+		if (MaxBuy < MinBuy || MaxBuy < 25.0)
+		{
+			continue;
+		}
+		const double LogTarget = std::log(Target);
+		// The candidates: buy-ins in range (the options are sorted by buy-in).
+		const auto Lo = std::lower_bound(List.begin(), List.end(), MinBuy, [&S](uint32_t Ref, double V) { return static_cast<double>(SimPlanOpt(S, Ref).P.BuyIn) < V; });
+		const auto Hi = std::upper_bound(List.begin(), List.end(), MaxBuy, [&S](double V, uint32_t Ref) { return V < static_cast<double>(SimPlanOpt(S, Ref).P.BuyIn); });
+		const size_t First = static_cast<size_t>(Lo - List.begin());
+		const size_t Last = static_cast<size_t>(Hi - List.begin());
+		if (First >= Last)
+		{
+			continue;
+		}
+		double Total = 0.0;
+		const bool Nights = N.Schedule == Plan::Nights;
+		const bool MajorsOnly = N.Schedule == Plan::MajorsOnly;
+		const bool Skilled = N.Overall() >= sim::SkilledOverall;
+		std::vector<double>& Weight = S.Weight;
+		for (size_t K = First; K < Last; ++K)
+		{
+			PlanOption& O = SimPlanOpt(S, List[K]);
+			double Wt = 0.0;
+			if (static_cast<int>(O.P.Who.size()) < O.Cap)
+			{
+				const double Dl = O.LogBuy - LogTarget;
+				Wt = std::exp(-Dl * Dl / (2.0 * 0.75 * 0.75));
+				if (Nights && !(O.Minute >= 17 * 60 || O.Minute < 3 * 60))
+				{
+					Wt *= 0.15;
+				}
+				const int Kn = O.P.Kinds;
+				if (Has(Kn, KindBounty))
+				{
+					Wt *= (N.Formats & LikeBounty) ? 2.2 : 0.8;
+				}
+				if (Has(Kn, KindMystery))
+				{
+					Wt *= (N.Formats & LikeMystery) ? 2.0 : 1.0;
+				}
+				if (Has(Kn, KindSatellite))
+				{
+					// Nobody keeps winning seats they already hold.
+					const bool Holding = N.Tickets.count(O.P.Ticket) > 0 || (!O.Final.empty() && N.Tickets.count(O.Final) > 0);
+					Wt *= Holding ? 0.0 : (N.Formats & LikeSatellite) ? 2.0 : 0.3;
+				}
+				if (Has(Kn, KindTurbo) || Has(Kn, KindHyper))
+				{
+					Wt *= (N.Formats & LikeTurbo) ? 2.0 : 1.0 - 0.6 * static_cast<double>(N.TraitOf(Trait::Patience));
+				}
+				if (Has(Kn, KindDeep))
+				{
+					Wt *= (N.Formats & LikeDeep) ? 2.0 : 1.0;
+				}
+				if (Has(Kn, KindOmaha))
+				{
+					Wt *= (N.Formats & LikeOmaha) ? 3.0 : 0.08;
+				}
+				Wt *= O.Featured ? 1.3 : 1.0;
+				Wt *= O.Weekly ? 2.2 : 1.0;
+				Wt *= !O.P.Series.empty() ? (N.Schedule == Plan::SeriesFocus ? 3.0 : 1.6) : 1.0;
+				Wt *= O.P.Major ? 1.5 : 1.0;
+				if (MajorsOnly && !(O.Weekly || O.P.Major || !O.P.Series.empty()))
+				{
+					Wt *= 0.05;
+				}
+				if (O.Site != net::SiteId::RiverLine)
+				{
+					// A rival (§5.9): as busy as its traffic; the skilled like Ignite's soft fields and an overlay; Mid and
+					// High players like RunItTwice's majors.
+					Wt *= S.Traffic[static_cast<size_t>(O.Site)];
+					Wt *= Skilled && O.Site == net::SiteId::Ignite ? sim::SkilledIgnite : 1.0;
+					Wt *= Skilled && O.Overlay ? sim::SkilledOverlay : 1.0;
+					Wt *= O.Site == net::SiteId::RunItTwice && Tier >= static_cast<int>(net::Tier::Mid) && (O.Weekly || O.P.Major || !O.P.Series.empty())
+						? sim::RunItTwiceMajors
+						: 1.0;
+				}
+			}
+			Weight[K] = Wt;
+			Total += Wt;
+		}
+		for (int Pick = 0; Pick < Count && Total > 1e-9; ++Pick)
+		{
+			double X = Q.Next() * Total;
+			size_t Chosen = Last;
+			for (size_t K = First; K < Last; ++K)
+			{
+				if (Weight[K] <= 0.0)
+				{
+					continue;
+				}
+				Chosen = K;
+				X -= Weight[K];
+				if (X < 0.0)
+				{
+					break;
+				}
+			}
+			if (Chosen >= Last)
+			{
+				break;
+			}
+			PlanOption& O = SimPlanOpt(S, List[Chosen]);
+			Total -= Weight[Chosen];
+			Weight[Chosen] = 0.0;
+			int Bullets = 1;
+			if (Has(O.P.Kinds, KindReEntry))
+			{
+				Bullets += Q.Chance(0.12 + 0.45 * Risk) ? 1 : 0;
+				Bullets += Risk > 0.7 && Q.Chance(0.3) ? 1 : 0;
+			}
+			const Chips Cost = O.P.BuyIn * Bullets;
+			if (Cost > Avail && !Backed)
+			{
+				continue;
+			}
+			Enter(O, Cost, false, Bullets, 1.0f);
+		}
+		for (size_t K = First; K < Last; ++K)
+		{
+			Weight[K] = 0.0;
+		}
+	}
+}
+
+void Sim::PlanEnd(World& W)
+{
+	PlanState* OpenPlan = W.Turn.Plan.Get();
+	if (!OpenPlan)
+	{
+		return;
+	}
+	PlanState& S = *OpenPlan;
+	// Into the queue: every event someone the world follows is playing (the player may already be in one).
+	std::vector<std::vector<PlanOption>*> Lists = {&S.Online};
+	for (std::vector<PlanOption>& L : S.Rivals)
+	{
+		Lists.push_back(&L);
+	}
+	Lists.push_back(&S.Live);
+	std::vector<Pending>& Queue = W.Queue.Mut();
+	for (std::vector<PlanOption>* Each : Lists)
+	{
+		for (PlanOption& O : *Each)
+		{
+			if (O.P.Who.empty())
+			{
+				continue;
+			}
+			auto Already = std::find_if(Queue.begin(), Queue.end(), [&](const Pending& Q) { return Q.Id == O.P.Id; });
+			if (Already == Queue.end())
+			{
+				Queue.push_back(std::move(O.P));
+				continue;
+			}
+			for (const Entry& E : O.P.Who)
+			{
+				if (std::none_of(Already->Who.begin(), Already->Who.end(), [&](const Entry& X) { return X.Npc == E.Npc; }))
+				{
+					Already->Who.push_back(E);
 				}
 			}
 		}
 	}
-	std::stable_sort(W.Queue.begin(), W.Queue.end(), [](const Pending& A, const Pending& B) { return A.End < B.End; });
+	W.Turn.Plan.Close();
+}
+
+void Sim::PlanSort(World& W)
+{
+	// The queue in end order. A queue already in that order is left as it is (a stable sort of it is the same order), so a slice
+	// whose day was planned long ago neither sorts nor clones a queue a snapshot shares (PA-34).
+	const std::vector<Pending>& Q = W.Queue.Get();
+	if (!std::is_sorted(Q.begin(), Q.end(), SimQueueOrder))
+	{
+		std::vector<Pending>& M = W.Queue.Mut();
+		std::stable_sort(M.begin(), M.end(), SimQueueOrder);
+	}
 }
 
 // ------------------------------------------------------------------ results
@@ -1196,7 +1379,7 @@ void Sim::Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, C
 	// Money: their own, or a backer's (makeup first, then the profit is split).
 	if (E.Staked && N.Backer != -1)
 	{
-		Npc* B = N.Backer >= 0 ? &W.Roster[static_cast<size_t>(N.Backer)] : nullptr;
+		Npc* B = N.Backer >= 0 ? &W.Edit(N.Backer) : nullptr;
 		if (B)
 		{
 			B->Bankroll -= Paid;
@@ -1532,7 +1715,7 @@ void Sim::Resolve(World& W, Pending& P)
 		const double Hours = 3.0 + static_cast<double>(R.Int(6));
 		for (const Entry& E : P.Who)
 		{
-			Npc& N = W.Roster[static_cast<size_t>(E.Npc)];
+			Npc& N = W.Edit(E.Npc);
 			const double Edge = sim::Clamp(Score(N, P.Kinds) - P.Strength, -MaxEdge, MaxEdge);
 			const double Bb = R.Gauss(25.0 * Edge * Hours, 75.0 * std::sqrt(Hours));
 			Chips Net = static_cast<Chips>(std::llround(Bb * static_cast<double>(P.Stakes)));
@@ -1595,7 +1778,7 @@ void Sim::Resolve(World& W, Pending& P)
 			Taken.insert(E.Known);
 			continue;
 		}
-		const Npc& N = W.Roster[static_cast<size_t>(E.Npc)];
+		const Npc& N = W.People()[static_cast<size_t>(E.Npc)];
 		const double Edge = sim::Clamp(Score(N, P.Kinds) - P.Strength, -MaxEdge, MaxEdge);
 		const double A = std::exp(-EdgeScale * P.Luck * Edge);
 		double Q = 1.0;
@@ -1631,7 +1814,7 @@ void Sim::Resolve(World& W, Pending& P)
 	for (size_t I = 0; I < P.Who.size(); ++I)
 	{
 		const Entry& E = P.Who[I];
-		Npc& N = W.Roster[static_cast<size_t>(E.Npc)];
+		Npc& N = W.Edit(E.Npc);
 		const int Pl = Place[I];
 		Chips Prize = Pl >= 1 && static_cast<size_t>(Pl - 1) < Pay.size() ? Pay[static_cast<size_t>(Pl - 1)] : 0;
 		if (Bounty && Pl > 0)
@@ -1723,7 +1906,7 @@ void Sim::Resolve(World& W, Pending& P)
 			E.Npc = Id;
 			// Big live fields are full of satellite qualifiers.
 			E.Ticket = !P.Online && P.BuyIn >= 500000 && R.Chance(0.3);
-			Npc& Found = W.Roster[static_cast<size_t>(Id)];
+			Npc& Found = W.Edit(Id);
 			Apply(W, Found, P, E, 1, Wn.Prize, false);
 			Res.FinalTable.front().Player = Id;
 			Res.FinalTable.front().Name.clear();
@@ -1739,7 +1922,7 @@ void Sim::Resolve(World& W, Pending& P)
 	const int Second = Res.FinalTable.size() > 1 ? Res.FinalTable[1].Player : -2;
 	if (Winner >= 0)
 	{
-		const Npc& N = W.Roster[static_cast<size_t>(Winner)];
+		const Npc& N = W.Edit(Winner); // (Post changes them below: their page the world's own before the reference is taken)
 		const Chips Prize = Res.FinalTable.front().Prize;
 		const bool Report = P.Major || P.Bracelet || P.Ring || (!P.Series.empty() && P.Online) || Prize >= (P.Online ? 250000 : 1000000);
 		if (Report)
@@ -1858,7 +2041,7 @@ void Sim::RefreshField(World& W)
 	// so does everyone else they learned with. Who happens to sit at a level doesn't change the crowd there.
 	double Sum = 0.0;
 	int Count = 0;
-	for (const Npc& N : W.Roster)
+	for (const Npc& N : W.People())
 	{
 		if (N.Playing())
 		{
@@ -1882,7 +2065,7 @@ std::vector<int> Sim::BoardRanks(const World& W, net::Board B, double At)
 
 std::vector<int> Sim::BoardRanks(const World& W, net::SiteId S, net::Board B, double At)
 {
-	const size_t N = W.Roster.size();
+	const size_t N = W.People().size();
 	if (S != net::SiteId::RiverLine)
 	{
 		// A rival's board holds only the people with a record there (its sparse map): rank those, in the order the full
@@ -1910,23 +2093,24 @@ std::vector<int> Sim::BoardRanks(const World& W, net::SiteId S, net::Board B, do
 		}
 		return Rk;
 	}
+	// Update 4 (SPEC v1.7 §6 PA-33): only the values on the board are sorted. They take the first places of the full stable sort
+	// (most first, ties by id, as the ids go in ascending), so their ranks are the same; everyone else is 0, as it was.
 	std::vector<double> V(N, 0.0);
+	std::vector<int> Order;
 	for (size_t I = 0; I < N; ++I)
 	{
 		V[I] = SiteValue(W, S, B, static_cast<int>(I), At);
-	}
-	std::vector<int> Order(N);
-	for (size_t I = 0; I < N; ++I)
-	{
-		Order[I] = static_cast<int>(I);
+		if (V[I] > 0.0)
+		{
+			Order.push_back(static_cast<int>(I));
+		}
 	}
 	std::stable_sort(Order.begin(), Order.end(), [&](int A, int C) { return V[static_cast<size_t>(A)] > V[static_cast<size_t>(C)]; });
 	std::vector<int> Rk(N, 0);
-	for (size_t K = 0; K < N; ++K)
+	for (size_t K = 0; K < Order.size(); ++K)
 	{
 		// Nothing on the board is no rank at all (update 2 §3.6): a row that gets on it tomorrow reads NEW, not "+1,499".
-		const size_t I = static_cast<size_t>(Order[K]);
-		Rk[I] = V[I] > 0.0 ? static_cast<int>(K) + 1 : 0;
+		Rk[static_cast<size_t>(Order[K])] = static_cast<int>(K) + 1;
 	}
 	return Rk;
 }
@@ -1998,7 +2182,7 @@ void Sim::PlanTrips(World& W, int Day, Rng& R)
 	{
 		return;
 	}
-	for (Npc& N : W.Roster)
+	for (Npc& N : W.EditAll())
 	{
 		if (!N.Playing() || N.TripUntil >= Day || N.Live < LiveLevel::Local)
 		{
@@ -2357,8 +2541,8 @@ void Sim::Broadcast(World& W, Npc& N, int Day, Rng& R)
 			}
 		}
 	}
-	story::SponsorOnResults(W, N, Day); // Update 4 (§3.16 R3, §6 PA-23): sponsors on results (no-op until G2)
-	// Some stop: no growth, bad results, burnout.
+	// Some stop: no growth, bad results, burnout. (Update 4, LEAD_CALLS Q-2: story::SponsorOnResults moved to NewWeek, right after
+	// Broadcast, so it reaches every professional.)
 	if (N.Followers < 2000 && Day - N.Joined > 60 && R.Chance(0.012 + (N.Mood == Momentum::Burnout ? 0.03 : 0.0)))
 	{
 		N.Streams = false;
@@ -2393,7 +2577,7 @@ void Sim::Lifecycle(World& W, Npc& N, int Day, Rng& R)
 				int Backer = -2;
 				for (const Tie& T : N.Ties)
 				{
-					const Npc& O = W.Roster[static_cast<size_t>(T.Other)];
+					const Npc& O = W.People()[static_cast<size_t>(T.Other)];
 					const std::ptrdiff_t Backing = std::count_if(O.Ties.begin(), O.Ties.end(), [](const Tie& X) { return X.Kind == TieKind::Backer; });
 					if ((T.Kind == TieKind::Friend || T.Kind == TieKind::TrainingPartner) && O.Playing() && O.Bankroll > sim::TierAbi[sim::TierIndex(N.Tier)] * 400 && Backing < 3)
 					{
@@ -2406,7 +2590,7 @@ void Sim::Lifecycle(World& W, Npc& N, int Day, Rng& R)
 				N.Makeup = 0;
 				N.BackedSince = Day;
 				N.Bankroll = std::max(N.Bankroll, N.Living * 4); // a little to live on while it runs
-				Sim::Post(W, At, EventKind::Backed, N.Id, Backer >= 0 ? W.Roster[static_cast<size_t>(Backer)].Name : "", 0, 0, Backer >= 0 ? Backer : -1);
+				Sim::Post(W, At, EventKind::Backed, N.Id, Backer >= 0 ? W.People()[static_cast<size_t>(Backer)].Name : "", 0, 0, Backer >= 0 ? Backer : -1);
 				if (Backer >= 0)
 				{
 					Bind(W, Backer, N.Id, TieKind::Backer, 0.6f, Day);
@@ -2524,7 +2708,7 @@ void Sim::Lifecycle(World& W, Npc& N, int Day, Rng& R)
 		const Chips Abi = sim::TierAbi[sim::TierIndex(N.Tier)];
 		const bool Over = Day - N.BackedSince >= 182;
 		const bool Free = N.Makeup == 0 && (N.Bankroll >= Abi * 80 || Over);
-		const bool Dropped = N.Makeup > Abi * 400 || (Over && N.Makeup > 0) || (N.Backer >= 0 && !W.Roster[static_cast<size_t>(N.Backer)].Playing());
+		const bool Dropped = N.Makeup > Abi * 400 || (Over && N.Makeup > 0) || (N.Backer >= 0 && !W.People()[static_cast<size_t>(N.Backer)].Playing());
 		if (Free || Dropped)
 		{
 			for (Tie& T : N.Ties)
@@ -2537,7 +2721,7 @@ void Sim::Lifecycle(World& W, Npc& N, int Day, Rng& R)
 			}
 			if (N.Backer >= 0)
 			{
-				for (Tie& T : W.Roster[static_cast<size_t>(N.Backer)].Ties)
+				for (Tie& T : W.Edit(N.Backer).Ties)
 				{
 					if (T.Other == N.Id && T.Kind == TieKind::Backer)
 					{
@@ -2554,7 +2738,7 @@ void Sim::Lifecycle(World& W, Npc& N, int Day, Rng& R)
 void Sim::Bind(World& W, int A, int B, TieKind K, float Strength, int Day)
 {
 	{
-		Npc& N = W.Roster[static_cast<size_t>(A)];
+		Npc& N = W.Edit(A);
 		for (Tie& T : N.Ties)
 		{
 			if (T.Other == B)
@@ -2610,10 +2794,12 @@ void Sim::Connect(World& W, int Day, Rng& R)
 	}
 	W.WeekPairs.clear();
 	// The social ones find training partners, travel partners, stream collabs.
-	const int N = static_cast<int>(W.Roster.size());
+	const int N = static_cast<int>(W.People().size());
 	for (int I = 0; I < N; ++I)
 	{
-		const Npc& A = W.Roster[static_cast<size_t>(I)];
+		const Npc& A = W.People()[static_cast<size_t>(I)];
+		const PageWatch WatchA(W, I); // (A is read until its tie is added, never after: AddTie may clone its page)
+		(void)WatchA;
 		if (!A.Playing() || A.TraitOf(Trait::Sociability) < 0.55f || !R.Chance(0.012))
 		{
 			continue;
@@ -2621,8 +2807,9 @@ void Sim::Connect(World& W, int Day, Rng& R)
 		// Someone at their level, from their part of the world.
 		for (int Try = 0; Try < 12; ++Try)
 		{
+			SS_ASSERT(WatchA.Same());
 			const int J = R.Int(N);
-			const Npc& B = W.Roster[static_cast<size_t>(J)];
+			const Npc& B = W.People()[static_cast<size_t>(J)];
 			if (J == I || !B.Playing() || B.Home != A.Home || std::abs(B.Tier - A.Tier) > 1)
 			{
 				continue;
@@ -2683,7 +2870,7 @@ void Sim::Newcomers(World& W, int Day, Rng& R)
 void Sim::TeamRiverLine(World& W, int Day)
 {
 	int Pros = 0;
-	for (Npc& N : W.Roster)
+	for (Npc& N : W.EditAll())
 	{
 		if (N.Pro && (!N.Playing() || N.RepOf(Rep::Overall) < 15.0f) && Day - N.Left > 60)
 		{
@@ -2719,10 +2906,10 @@ void Sim::TeamRiverLine(World& W, int Day)
 	while (Pros < 10)
 	{
 		int Best = -1;
-		for (const Npc& N : W.Roster)
+		for (const Npc& N : W.People())
 		{
 			if (!N.Pro && N.Playing() && N.Professional && N.Sponsor.empty() && N.RepOf(Rep::Overall) >= 35.0f && (!Blank || SignsOnResults(N, SeasonRank)) &&
-				(Best < 0 || N.RepOf(Rep::Overall) > W.Roster[static_cast<size_t>(Best)].RepOf(Rep::Overall)))
+				(Best < 0 || N.RepOf(Rep::Overall) > W.People()[static_cast<size_t>(Best)].RepOf(Rep::Overall)))
 			{
 				Best = N.Id;
 			}
@@ -2731,7 +2918,7 @@ void Sim::TeamRiverLine(World& W, int Day)
 		{
 			break;
 		}
-		Npc& N = W.Roster[static_cast<size_t>(Best)];
+		Npc& N = W.Edit(Best);
 		N.Pro = true;
 		N.Sponsor = "Team RiverLine";
 		N.Income += TeamWeekly();
@@ -2901,6 +3088,27 @@ void Sim::TurnPro(World& W, Npc& N, int Day, Rng& R)
 
 void Sim::NewDay(World& W, int Day)
 {
+	// The day's turn as its pieces, in today's order (a held turn runs these same pieces as its units, §3.7 R2; §6 PA-35).
+	NewDayOpen(W, Day);
+	if (W.Turn.MonthTurned)
+	{
+		NewMonth(W, Day);
+	}
+	if (NewDayWeek(W, Day))
+	{
+		NewWeek(W, Day);
+	}
+	NewDayCalendar(W, Day);
+	// Update 4 (§3.2, §6 PA-23): the Scene Book's posting, after the calendar turns (no-op until G2).
+	scene::Day(W, Day);
+	NewDayPeople(W, Day, 0, static_cast<int>(W.People().size()));
+	NewDayClose(W, Day);
+	Ranks(W);
+	story::Day(W, Day); // Update 4 (§3.15, §6 PA-23): the Director's urgent pass (no-op until G2)
+}
+
+void Sim::NewDayOpen(World& W, int Day)
+{
 	// Update 4 (SPEC v1.7 §2.5.2 rule 1, §6 PA-23): a festival's race opens on its FirstDay (a no-op until G1).
 	FestDay(W, Day);
 	const int Yr = world::YearOf(Day);
@@ -2913,32 +3121,44 @@ void Sim::NewDay(World& W, int Day)
 	if (Turned)
 	{
 		W.Month = Month;
-		NewMonth(W, Day);
 	}
+	W.Turn.MonthTurned = Turned;
+}
+
+bool Sim::NewDayWeek(World& W, int Day)
+{
 	if (net::Weekday(Day) == 0 && Day != W.Week)
 	{
 		W.Week = Day;
-		NewWeek(W, Day);
+		return true;
 	}
-	if (Turned)
+	return false;
+}
+
+void Sim::NewDayCalendar(World& W, int Day)
+{
+	if (W.Turn.MonthTurned)
 	{
 		// The 1st's Verified review, on the month's first morning (after a Monday's turn of the week).
 		Review(W, Day);
 	}
+	int Y = 0;
+	int M = 0;
+	int D = 0;
+	CivilDate(Day, Y, M, D);
+	if (M == 7 && D == 15)
 	{
-		int Y = 0;
-		int M = 0;
-		int D = 0;
-		CivilDate(Day, Y, M, D);
-		if (M == 7 && D == 15)
-		{
-			HallOfFame(W, Day);
-		}
+		HallOfFame(W, Day);
 	}
-	// Update 4 (§3.2, §6 PA-23): the Scene Book's posting, after the calendar turns (no-op until G2).
-	scene::Day(W, Day);
-	for (Npc& N : W.Roster)
+}
+
+void Sim::NewDayPeople(World& W, int Day, int From, int To)
+{
+	const int Stop = std::min(To, static_cast<int>(W.People().size()));
+	W.Roster.Unshare(static_cast<size_t>(std::max(0, From)), static_cast<size_t>(std::max(0, Stop)));
+	for (int Id = std::max(0, From); Id < Stop; ++Id)
 	{
+		Npc& N = W.Edit(Id);
 		// Rest: a day off does more than a normal one; a long downswing wears on people too.
 		double Rest = N.LastDay < Day - 1 ? 0.05 : 0.012;
 		if (N.Mood == Momentum::MajorDownswing)
@@ -2964,6 +3184,10 @@ void Sim::NewDay(World& W, int Day)
 			N.Trip.clear();
 		}
 	}
+}
+
+void Sim::NewDayClose(World& W, int Day)
+{
 	// Results the screens can still ask for: a week of everything, a year of the big ones.
 	const double Now = static_cast<double>(Day) * 1440.0;
 	for (auto It = W.ResultEnds.begin(); It != W.ResultEnds.end();)
@@ -2999,16 +3223,30 @@ void Sim::NewDay(World& W, int Day)
 	SitesDay(W, Day);
 	// A fresh world's board report reads yesterday's ranks against today's, so it goes before they move.
 	BoardReport(W, Day);
-	Ranks(W);
-	story::Day(W, Day); // Update 4 (§3.15, §6 PA-23): the Director's urgent pass (no-op until G2)
 }
 
 void Sim::NewWeek(World& W, int Day)
 {
+	NewWeekOpen(W, Day);
+	NewWeekPeople(W, Day, 0, static_cast<int>(W.People().size()));
+	NewWeekClose(W, Day);
+}
+
+void Sim::NewWeekOpen(World& W, int Day)
+{
 	Rng R(Seeded(W, "week", std::to_string(Day)));
-	for (Npc& N : W.Roster)
+	R.GetState(W.Turn.WeekRng.data());
+}
+
+void Sim::NewWeekPeople(World& W, int Day, int From, int To)
+{
+	Rng R = SimTurnRng(W.Turn.WeekRng);
+	const int Stop = std::min(To, static_cast<int>(W.People().size()));
+	W.Roster.Unshare(static_cast<size_t>(std::max(0, From)), static_cast<size_t>(std::max(0, Stop)));
+	for (int Id = std::max(0, From); Id < Stop; ++Id)
 	{
-		Rng Q = R.Fork(std::to_string(N.Id));
+		Npc& N = W.Edit(Id);
+		Rng Q = SimPlanFork(R, N.Id); // R.Fork(std::to_string(N.Id)), without the strings
 		// The week's form on the boards.
 		for (size_t K = 0; K + 1 < N.Weekly.size(); ++K)
 		{
@@ -3035,17 +3273,27 @@ void Sim::NewWeek(World& W, int Day)
 			AddFame(N, Rep::HighStakes, 0.15);
 		}
 		Broadcast(W, N, Day, Q);
+		// Update 4 (§3.16 R3, §6 PA-23; LEAD_CALLS Q-2): sponsors on results, for every professional, not only the streamers Broadcast
+		// keeps (no-op until G2).
+		story::SponsorOnResults(W, N, Day);
 		Lifecycle(W, N, Day, Q);
 		Reputation(N);
 		N.WeekNet = 0;
 		N.WeekEvents = 0;
 		N.WeekKinds = {};
 	}
+	R.GetState(W.Turn.WeekRng.data());
+}
+
+void Sim::NewWeekClose(World& W, int Day)
+{
+	Rng R = SimTurnRng(W.Turn.WeekRng);
 	Connect(W, Day, R);
 	PlanTrips(W, Day, R);
 	// Update 4 (SPEC v1.7 §3.3 R1, §6 PA-23): the keeper's weekly step takes Newcomers' slot from G2; in Phase A it runs today's
 	// Newcomers, the week's last draws from R.
 	scene::Week(W, Day, R);
+	R.GetState(W.Turn.WeekRng.data());
 	RefreshField(W);
 	W.DiscoveredThisWeek = 0;
 	// The circuit's standings post on Mondays.
@@ -3058,9 +3306,26 @@ void Sim::NewWeek(World& W, int Day)
 
 void Sim::NewMonth(World& W, int Day)
 {
+	NewMonthOpen(W, Day);
+	NewMonthPeople(W, Day, 0, static_cast<int>(W.People().size()));
+	NewMonthClose(W, Day);
+}
+
+void Sim::NewMonthOpen(World& W, int Day)
+{
 	Rng R(Seeded(W, "month", std::to_string(Day)));
-	for (Npc& N : W.Roster)
+	R.GetState(W.Turn.MonthRng.data());
+}
+
+void Sim::NewMonthPeople(World& W, int Day, int From, int To)
+{
+	// TurnPro's R is the month's one stream, carried from range to range (TurnCarry::MonthRng), so a sliced month draws as a whole one.
+	Rng R = SimTurnRng(W.Turn.MonthRng);
+	const int Stop = std::min(To, static_cast<int>(W.People().size()));
+	W.Roster.Unshare(static_cast<size_t>(std::max(0, From)), static_cast<size_t>(std::max(0, Stop)));
+	for (int Id = std::max(0, From); Id < Stop; ++Id)
 	{
+		Npc& N = W.Edit(Id);
 		if (N.Playing())
 		{
 			W.Flow[4] += sim::Dollars(CashOut(N));
@@ -3078,6 +3343,11 @@ void Sim::NewMonth(World& W, int Day)
 		}
 		N.Ties.erase(std::remove_if(N.Ties.begin(), N.Ties.end(), [](const Tie& T) { return T.Strength < 0.05f; }), N.Ties.end());
 	}
+	R.GetState(W.Turn.MonthRng.data());
+}
+
+void Sim::NewMonthClose(World& W, int Day)
+{
 	scene::Month(W, Day); // Update 4 (§3.6 R3, §6 PA-23): the quick fade (no-op until G2)
 	TeamRiverLine(W, Day);
 	// The rival sites (update 2 §5.9): the regulars who rose to their stakes open accounts, and the site teams sign.
@@ -3120,7 +3390,7 @@ void Sim::Fade(World& W, Npc& N)
 	// Nobody keeps a tie to someone who's gone.
 	for (const Tie& T : N.Ties)
 	{
-		if (Npc* O = T.Other >= 0 && static_cast<size_t>(T.Other) < W.Roster.size() ? &W.Roster[static_cast<size_t>(T.Other)] : nullptr)
+		if (Npc* O = T.Other >= 0 && static_cast<size_t>(T.Other) < W.People().size() ? &W.Edit(T.Other) : nullptr)
 		{
 			O->Ties.erase(std::remove_if(O->Ties.begin(), O->Ties.end(), [&](const Tie& X) { return X.Other == N.Id; }), O->Ties.end());
 		}
@@ -3139,7 +3409,7 @@ void Sim::NewYear(World& W, int Calendar, int Day)
 	double Top = 0.0;
 	int BestLive = -2;
 	double TopLive = 0.0;
-	for (const Npc& N : W.Roster)
+	for (const Npc& N : W.People())
 	{
 		// Player of the Year is RiverLine's title: its points only (update 2 §5.8; a rival's points stay on its own boards).
 		const double Points = N.ThisSeason.Year == Last ? SiteValue(W, net::SiteId::RiverLine, net::Board::Season, N.Id, At) : 0.0;
@@ -3173,20 +3443,20 @@ void Sim::NewYear(World& W, int Calendar, int Day)
 		H.Year = Last;
 		H.Title = Title;
 		H.Npc = Who;
-		H.Name = Who >= 0 ? W.Roster[static_cast<size_t>(Who)].Name : W.HeroName;
+		H.Name = Who >= 0 ? W.People()[static_cast<size_t>(Who)].Name : W.HeroName;
 		H.Entries = static_cast<int>(Points);
 		H.At = At;
 		W.Titles.push_back(H);
 		if (Who >= 0)
 		{
 			Post(W, At, EventKind::PlayerOfYear, Who, Title, 0, static_cast<int>(Points));
-			AddFame(W.Roster[static_cast<size_t>(Who)], Rep::Online, 12.0);
+			AddFame(W.Edit(Who), Rep::Online, 12.0);
 		}
 	};
 	Crown(Best, "Player of the Year", Top);
 	Crown(BestLive, "Live Player of the Year", TopLive);
 	SitesNewYear(W);
-	for (Npc& N : W.Roster)
+	for (Npc& N : W.EditAll())
 	{
 		N.ThisSeason = Season();
 		N.ThisSeason.Year = Calendar;
@@ -3266,7 +3536,7 @@ void Sim::Standings(World& W, int Year, bool Ranked)
 		{
 			Board.push_back({W.HeroCircuit, -1});
 		}
-		for (const Npc& N : W.Roster)
+		for (const Npc& N : W.People())
 		{
 			if (!N.Faded && N.CircuitPoints > 0.0)
 			{
@@ -3276,7 +3546,7 @@ void Sim::Standings(World& W, int Year, bool Ranked)
 		std::sort(Board.begin(), Board.end(), [](const std::pair<double, int>& A, const std::pair<double, int>& B) { return A.first > B.first || (A.first == B.first && A.second < B.second); });
 		for (size_t K = 0; K < Board.size() && Tier(K) != CardNone; ++K)
 		{
-			int& Best = Board[K].second < 0 ? W.HeroCardTop : W.Roster[static_cast<size_t>(Board[K].second)].CardBest;
+			int& Best = Board[K].second < 0 ? W.HeroCardTop : W.Edit(Board[K].second).CardBest;
 			Best = std::max(Best, static_cast<int>(Tier(K)));
 		}
 	}
@@ -3291,7 +3561,7 @@ void Sim::Standings(World& W, int Year, bool Ranked)
 		}
 	};
 	Titled(W.HeroTrophies, W.HeroCardTop);
-	for (Npc& N : W.Roster)
+	for (Npc& N : W.EditAll())
 	{
 		if (!N.Faded)
 		{
@@ -3303,7 +3573,7 @@ void Sim::Standings(World& W, int Year, bool Ranked)
 void Sim::Review(World& W, int Day)
 {
 	const int Key = sim::MonthKey(Day);
-	for (Npc& N : W.Roster)
+	for (Npc& N : W.EditAll())
 	{
 		N.Verified = !N.Faded && VerifiedRecord(N.Stats, N.Professional, Day - N.LastDay);
 		if (N.Verified)
@@ -3318,7 +3588,7 @@ void Sim::HallOfFame(World& W, int Day)
 {
 	const int Year = YearOf(Day);
 	std::vector<std::pair<double, int>> Class;
-	for (const Npc& N : W.Roster)
+	for (const Npc& N : W.People())
 	{
 		if (W.HallEligible(N.Id, Year))
 		{
@@ -3350,14 +3620,14 @@ void Sim::HallOfFame(World& W, int Day)
 		H.Year = Year;
 		H.Title = HallOfFameTitle;
 		H.Npc = In.second;
-		H.Name = In.second >= 0 ? W.Roster[static_cast<size_t>(In.second)].Name : W.HeroName;
-		H.Prize = In.second >= 0 ? W.Roster[static_cast<size_t>(In.second)].CareerWon() : W.HeroBook.Prizes;
+		H.Name = In.second >= 0 ? W.People()[static_cast<size_t>(In.second)].Name : W.HeroName;
+		H.Prize = In.second >= 0 ? W.People()[static_cast<size_t>(In.second)].CareerWon() : W.HeroBook.Prizes;
 		H.Entries = static_cast<int>(std::lround(In.first));
 		H.At = At;
 		W.Titles.push_back(H);
 		if (In.second >= 0)
 		{
-			Npc& N = W.Roster[static_cast<size_t>(In.second)];
+			Npc& N = W.Edit(In.second);
 			Post(W, At, EventKind::HallOfFame, N.Id, HallOfFameTitle, H.Prize, Year);
 			// The whole poker world hears about it.
 			AddFame(N, Rep::Live, 6.0);
@@ -3383,7 +3653,7 @@ void Sim::SeedRoomHistory(World& W, int Today)
 	// table on her nights. Nights without results: nobody is on the wall for them (Wins stay 0; the wall only ever shows
 	// what was played).
 	std::vector<int> Who = W.EmbercrestRegulars();
-	for (const Npc& N : W.Roster)
+	for (const Npc& N : W.People())
 	{
 		if (N.From == Origin::Local || N.From == Origin::Cast || N.Rival)
 		{
@@ -3392,7 +3662,7 @@ void Sim::SeedRoomHistory(World& W, int Today)
 	}
 	std::sort(Who.begin(), Who.end());
 	Who.erase(std::unique(Who.begin(), Who.end()), Who.end());
-	Who.erase(std::remove_if(Who.begin(), Who.end(), [&](int Id) { const Npc& N = W.Roster[static_cast<size_t>(Id)]; return N.Faded || N.Room.Events > 0; }), Who.end());
+	Who.erase(std::remove_if(Who.begin(), Who.end(), [&](int Id) { const Npc& N = W.People()[static_cast<size_t>(Id)]; return N.Faded || N.Room.Events > 0; }), Who.end());
 	const int Walk = 120;
 	for (int D = Today - Walk; D < Today; ++D)
 	{
@@ -3401,7 +3671,7 @@ void Sim::SeedRoomHistory(World& W, int Today)
 		const std::string Dees = "dees@" + std::to_string(D);
 		for (int Id : Who)
 		{
-			Npc& N = W.Roster[static_cast<size_t>(Id)];
+			Npc& N = W.Edit(Id);
 			const bool Habits = N.From == Origin::Cast || N.Rival;
 			if (Habits && (Wd == 1 || Wd == 3 || Wd == 5) && Regular(N, Dees))
 			{
@@ -3438,7 +3708,7 @@ void Sim::SeedChampions(World& W)
 		}
 		return It->second;
 	};
-	for (Npc& N : W.Roster)
+	for (Npc& N : W.EditAll())
 	{
 		Ledger& Lv = N.Totals[static_cast<size_t>(Venue::Live)];
 		if (N.From != Origin::Founding || N.Rival || N.Faded || N.Live < LiveLevel::Regional || Lv.Events < 10 ||
@@ -3979,7 +4249,7 @@ void Sim::OpenSites(World& W, int Today, bool Load)
 	}
 	// Everyone's accounts as of today. A team pro plays the team's site alone ("plays only on", §1.9 #11).
 	const std::string RunItTwiceTeam = WorldSitesTeamName(net::SiteId::RunItTwice);
-	for (Npc& N : W.Roster)
+	for (Npc& N : W.EditAll())
 	{
 		if (N.Faded)
 		{
@@ -4015,7 +4285,7 @@ void Sim::SitesDay(World& W, int Day, bool News)
 	const std::string RunItTwiceTeam = WorldSitesTeamName(net::SiteId::RunItTwice);
 	// (Never before the doors opened: a launch forced mid-day, LaunchNow, opens at its minute, not this morning.)
 	const double Joined = std::max(At, W.SiteLaunches.find(net::SiteId::Ignite)->second);
-	for (Npc& N : W.Roster)
+	for (Npc& N : W.EditAll())
 	{
 		if (N.Faded || (N.Sites & Bit) != 0 || N.Pro || N.Sponsor == RunItTwiceTeam || N.OnlineShare < sim::IgniteShare || N.Tier > static_cast<int>(net::Tier::Low))
 		{
@@ -4045,6 +4315,7 @@ bool Sim::LaunchNow(World& W, net::SiteId S)
 	// From this minute, not this morning: its lobby has no past before the doors opened (U5). Its news now; Ignite's first
 	// month of joiners counts from today (the days already planned keep the strangers they have).
 	W.SiteLaunches[S] = W.Now;
+	ForgetHeadliners(W); // (no revision moves here: the Headliners kept would be the closed site's)
 	Post(W, W.Now, EventKind::SiteLaunched, -1, net::KeyOf(S), 0, 0);
 	W.Log.back().Flags |= SiteFlags(S);
 	SitesDay(W, Today, false);
@@ -4062,7 +4333,7 @@ void Sim::SitesMonth(World& W, int Day)
 	}
 	const double At = static_cast<double>(Day) * 1440.0;
 	const std::string RunItTwiceTeam = WorldSitesTeamName(net::SiteId::RunItTwice);
-	for (Npc& N : W.Roster)
+	for (Npc& N : W.EditAll())
 	{
 		if (N.Faded || !N.Playing() || (N.Sites & Bit) != 0 || N.Pro || N.Sponsor == RunItTwiceTeam || (N.Sites & SiteBit(net::SiteId::RiverLine)) == 0 ||
 			N.OnlineShare < sim::RunItTwiceShare)
@@ -4098,7 +4369,7 @@ void Sim::SiteTeams(World& W, int Day, bool Founding)
 		const std::string Team = WorldSitesTeamName(Site);
 		const Chips Weekly = WorldSitesTeamWeekly(Site);
 		int Pros = 0;
-		for (Npc& N : W.Roster)
+		for (Npc& N : W.EditAll())
 		{
 			if (N.Sponsor != Team)
 			{
@@ -4130,7 +4401,7 @@ void Sim::SiteTeams(World& W, int Day, bool Founding)
 			// The site signs the best professional who plays there and has no deal of their own.
 			int Best = -1;
 			double Top = 0.0;
-			for (const Npc& N : W.Roster)
+			for (const Npc& N : W.People())
 			{
 				// (Never the player's rival: RiverLine's night-shift crusher, who sits at the player's every RiverLine table, Session's
 				// RivalPlaysOn. A rival site's "plays only on" would take him off RiverLine and still seat him there.)
@@ -4153,7 +4424,7 @@ void Sim::SiteTeams(World& W, int Day, bool Founding)
 			{
 				break;
 			}
-			Npc& N = W.Roster[static_cast<size_t>(Best)];
+			Npc& N = W.Edit(Best);
 			N.Sponsor = Team;
 			N.Income += Weekly;
 			N.Sites = static_cast<uint8_t>(SiteBit(Site)); // the team plays only on its site (§1.9 #11)
@@ -4462,6 +4733,19 @@ std::vector<int> SiteTeamNow(const World& W, net::SiteId Site)
 
 std::vector<Headliner> Headliners(const World& W, double At, int Count)
 {
+	return Sim::HeadlinerPicks(W, At, Count);
+}
+
+std::vector<Headliner> Sim::HeadlinerPicks(const World& W, double At, int Count)
+{
+	// Update 4 (SPEC v1.7 §6 PA-33): the picks are a pure function of the saved world and At (WorldLeague.h), and everything they read
+	// moves the world's revisions (a result, a turn) or forgets them (a launch, a load), so they are kept while the revisions and
+	// the clock stand: the month's six, picked once instead of on every draw.
+	World::HeadlinerCache& Kept = W.Headlined;
+	if (Kept.Valid && Kept.Rev == W.Rev && Kept.HeroRev == W.HeroRev && Kept.At == At && Kept.Count == Count)
+	{
+		return Kept.Picks;
+	}
 	std::vector<Headliner> Out;
 	const double Launched = W.SiteLaunched(net::SiteId::Ignite);
 	if (Count <= 0 || Launched < 0.0 || Launched > At)
@@ -4518,6 +4802,12 @@ std::vector<Headliner> Headliners(const World& W, double At, int Count)
 	{
 		Out.resize(static_cast<size_t>(Count));
 	}
+	Kept.Valid = true;
+	Kept.Rev = W.Rev;
+	Kept.HeroRev = W.HeroRev;
+	Kept.At = At;
+	Kept.Count = Count;
+	Kept.Picks = Out;
 	return Out;
 }
 } // namespace world

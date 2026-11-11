@@ -7,16 +7,24 @@
 #include "ShortStack/Game/WorldCrowd.h"
 #include "ShortStack/Game/WorldFest.h"
 #include "ShortStack/Game/WorldGrowth.h"
+#include "ShortStack/Game/WorldLeague.h"
 #include "ShortStack/Game/WorldScene.h"
 #include "ShortStack/Game/WorldStory.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <iosfwd>
+#include <iterator>
 #include <limits>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <set>
 #include <string>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace ss
@@ -514,6 +522,70 @@ enum CardTier : int
 	CardBlack = 3,
 };
 
+/**
+ * Update 4 (SPEC v1.7 §6 PA-33): the seats someone won in satellites (event template id -> seats), a flat vector kept in key order.
+ * std::map's interface for what the world does with it (count, find, operator[], erase, iteration in key order) and the same order,
+ * but nothrow-movable, so an Npc moves instead of copying when its page or a vector of them grows (MSVC's std::map moves can throw).
+ */
+class TicketBook
+{
+public:
+	using value_type = std::pair<std::string, int>;
+	using iterator = std::vector<value_type>::iterator;
+	using const_iterator = std::vector<value_type>::const_iterator;
+
+	bool empty() const noexcept { return Items.empty(); }
+	size_t size() const noexcept { return Items.size(); }
+	iterator begin() noexcept { return Items.begin(); }
+	iterator end() noexcept { return Items.end(); }
+	const_iterator begin() const noexcept { return Items.begin(); }
+	const_iterator end() const noexcept { return Items.end(); }
+	iterator find(const std::string& Key)
+	{
+		const iterator It = Lower(Key);
+		return It != Items.end() && It->first == Key ? It : Items.end();
+	}
+	const_iterator find(const std::string& Key) const
+	{
+		const const_iterator It = Lower(Key);
+		return It != Items.end() && It->first == Key ? It : Items.end();
+	}
+	size_t count(const std::string& Key) const { return find(Key) != end() ? 1u : 0u; }
+	/** The seats for Key, inserted at 0 in its place when absent (as std::map's). */
+	int& operator[](const std::string& Key)
+	{
+		iterator It = Lower(Key);
+		if (It == Items.end() || It->first != Key)
+		{
+			It = Items.insert(It, value_type(Key, 0));
+		}
+		return It->second;
+	}
+	iterator erase(const_iterator It) { return Items.erase(It); }
+	size_t erase(const std::string& Key)
+	{
+		const const_iterator It = find(Key);
+		if (It == Items.end())
+		{
+			return 0;
+		}
+		Items.erase(It);
+		return 1;
+	}
+	void clear() noexcept { Items.clear(); }
+
+private:
+	iterator Lower(const std::string& Key)
+	{
+		return std::lower_bound(Items.begin(), Items.end(), Key, [](const value_type& A, const std::string& K) { return A.first < K; });
+	}
+	const_iterator Lower(const std::string& Key) const
+	{
+		return std::lower_bound(Items.begin(), Items.end(), Key, [](const value_type& A, const std::string& K) { return A.first < K; });
+	}
+	std::vector<value_type> Items; // ascending by key, each key once
+};
+
 struct Npc
 {
 	int Id = 0;
@@ -599,7 +671,7 @@ struct Npc
 	std::vector<Award> Awards; // every bracelet and ring, oldest first
 	Tracker Stats;             // the stats page
 	std::vector<Tie> Ties;
-	std::map<std::string, int> Tickets; // event template id -> seats won
+	TicketBook Tickets; // event template id -> seats won (Update 4, §6 PA-33: a flat vector in key order, was std::map)
 	// What the badges read (next_segment_spec §5): public facts, worked out by the world's own calendar.
 	RoomRecord Room;           // the Embercrest
 	double CircuitPoints = 0.0; // this season: net::Points from live events Regional and up (satellites aside)
@@ -1076,6 +1148,447 @@ constexpr const char CrowdDay[] = "day";
 constexpr const char QCrowd[] = "qcrowd";     // a pending event's crowd entries (G4)
 } // namespace u4line
 
+// ------------------------------------------------------------------ Update 4: the paged roster and the shared snapshot
+
+/**
+ * Update 4 (SPEC v1.7 §6 PA-34; A2): one page of the roster, the people with ids Page x Size to Page x Size + Size - 1. A page is
+ * shared between a World and its copies (the save's snapshot, WorldPreview's copy) until one of them changes someone on it: that one
+ * clones the page first (copy-on-write), so a snapshot costs a pointer per page and the clones land in the world's own slices.
+ */
+struct RosterPage
+{
+	static constexpr size_t Size = 64;
+	std::vector<Npc> People; // reserved to Size when the page is made: it never reallocates, so references into it stay put
+	uint32_t Gen = 0;        // the clone generation: a clone gets its source's + 1 (the debug check of a reference held across an Edit)
+};
+
+/**
+ * Update 4 (§6 PA-34): World's roster, in pages of RosterPage::Size. The const interface is a random-access view (People(): size,
+ * operator[], begin/end), so every reader compiles as it did over std::vector. Writes go through Edit(id) (one person: its page cloned
+ * first when shared) or EditAll() (the whole roster: every shared page cloned once, up front, then a plain walk). The non-const
+ * operator[] is Edit (a writer not yet converted stays correct, only slower). Copies share pages; moves copy (a moved-from roster
+ * stays whole). Clones() counts page clones (the held turn counts them against TurnBudgetMs, §3.7 R4).
+ */
+class PagedRoster
+{
+public:
+	class const_iterator
+	{
+	public:
+		using iterator_category = std::random_access_iterator_tag;
+		using value_type = Npc;
+		using difference_type = std::ptrdiff_t;
+		using pointer = const Npc*;
+		using reference = const Npc&;
+		const_iterator() = default;
+		const_iterator(const PagedRoster* R, size_t I) : Of(R), At(I) {}
+		reference operator*() const { return (*Of)[At]; }
+		pointer operator->() const { return &(*Of)[At]; }
+		reference operator[](difference_type K) const { return (*Of)[static_cast<size_t>(static_cast<difference_type>(At) + K)]; }
+		const_iterator& operator++()
+		{
+			++At;
+			return *this;
+		}
+		const_iterator operator++(int)
+		{
+			const const_iterator T = *this;
+			++At;
+			return T;
+		}
+		const_iterator& operator--()
+		{
+			--At;
+			return *this;
+		}
+		const_iterator operator--(int)
+		{
+			const const_iterator T = *this;
+			--At;
+			return T;
+		}
+		const_iterator& operator+=(difference_type K)
+		{
+			At = static_cast<size_t>(static_cast<difference_type>(At) + K);
+			return *this;
+		}
+		const_iterator& operator-=(difference_type K)
+		{
+			At = static_cast<size_t>(static_cast<difference_type>(At) - K);
+			return *this;
+		}
+		friend const_iterator operator+(const_iterator It, difference_type K) { return It += K; }
+		friend const_iterator operator+(difference_type K, const_iterator It) { return It += K; }
+		friend const_iterator operator-(const_iterator It, difference_type K) { return It -= K; }
+		friend difference_type operator-(const const_iterator& A, const const_iterator& B)
+		{
+			return static_cast<difference_type>(A.At) - static_cast<difference_type>(B.At);
+		}
+		friend bool operator==(const const_iterator& A, const const_iterator& B) { return A.At == B.At; }
+		friend bool operator!=(const const_iterator& A, const const_iterator& B) { return A.At != B.At; }
+		friend bool operator<(const const_iterator& A, const const_iterator& B) { return A.At < B.At; }
+		friend bool operator>(const const_iterator& A, const const_iterator& B) { return A.At > B.At; }
+		friend bool operator<=(const const_iterator& A, const const_iterator& B) { return A.At <= B.At; }
+		friend bool operator>=(const const_iterator& A, const const_iterator& B) { return A.At >= B.At; }
+
+	private:
+		const PagedRoster* Of = nullptr;
+		size_t At = 0;
+	};
+	/** The whole roster to change (EditAll): every page already the world's own when the walk starts. */
+	class Walk
+	{
+	public:
+		class iterator
+		{
+		public:
+			iterator(PagedRoster* R, size_t I) : Of(R), At(I) {}
+			Npc& operator*() const
+			{
+				SS_ASSERT(Of->Pages[At / RosterPage::Size].use_count() == 1); // a walk never writes a frozen (shared) page
+				return Of->Pages[At / RosterPage::Size]->People[At % RosterPage::Size];
+			}
+			iterator& operator++()
+			{
+				++At;
+				return *this;
+			}
+			friend bool operator!=(const iterator& A, const iterator& B) { return A.At != B.At; }
+			friend bool operator==(const iterator& A, const iterator& B) { return A.At == B.At; }
+
+		private:
+			PagedRoster* Of;
+			size_t At;
+		};
+		explicit Walk(PagedRoster* R) : Of(R) {}
+		iterator begin() const { return iterator(Of, 0); }
+		iterator end() const { return iterator(Of, Of->Count); }
+
+	private:
+		PagedRoster* Of;
+	};
+
+	PagedRoster() = default;
+	PagedRoster(const PagedRoster&) = default;
+	PagedRoster& operator=(const PagedRoster&) = default;
+
+	size_t size() const noexcept { return Count; }
+	bool empty() const noexcept { return Count == 0; }
+	const Npc& operator[](size_t I) const { return Pages[I / RosterPage::Size]->People[I % RosterPage::Size]; }
+	Npc& operator[](size_t I) { return Edit(I); }
+	const Npc& back() const { return (*this)[Count - 1]; }
+	const_iterator begin() const { return const_iterator(this, 0); }
+	const_iterator end() const { return const_iterator(this, Count); }
+	/** One person to change: their page cloned first when another World shares it. */
+	Npc& Edit(size_t I) { return Own(I / RosterPage::Size).People[I % RosterPage::Size]; }
+	/** Every page the world's own (each shared one cloned once), then a walk over everyone. */
+	SHORTSTACKCORE_API Walk EditAll();
+	/** The pages holding ids [From, To) the world's own (a range split's walk, §6 PA-35). */
+	SHORTSTACKCORE_API void Unshare(size_t From, size_t To);
+	SHORTSTACKCORE_API void push_back(Npc&& N);
+	/** Grows with default people (a load's ids arrive in any order) or drops the last ones. */
+	SHORTSTACKCORE_API void resize(size_t N);
+	void reserve(size_t N) { Pages.reserve((N + RosterPage::Size - 1) / RosterPage::Size); }
+	void clear() noexcept
+	{
+		Pages.clear();
+		Count = 0;
+	}
+	/** Pages this roster cloned since it was made (copied with it). */
+	uint64_t Clones() const noexcept { return CloneCount; }
+	/** Debug and tests: a person's page generation, and whether another World shares the page right now. */
+	uint32_t PageGen(size_t I) const { return Pages[I / RosterPage::Size]->Gen; }
+	bool PageShared(size_t I) const { return Pages[I / RosterPage::Size].use_count() > 1; }
+
+private:
+	RosterPage& Own(size_t Page)
+	{
+		if (Pages[Page].use_count() != 1)
+		{
+			Clone(Page);
+		}
+		return *Pages[Page];
+	}
+	SHORTSTACKCORE_API void Clone(size_t Page);
+	std::vector<std::shared_ptr<RosterPage>> Pages;
+	size_t Count = 0;
+	uint64_t CloneCount = 0;
+};
+
+/**
+ * Update 4 (§6 PA-34): a container a World shares copy-on-write with its copies (the snapshot): copying shares it, the first change
+ * after a copy clones it (Mut(), the non-const members of CowVec and CowMap). Moves copy (a moved-from World stays usable). The whole
+ * container is one unit: a clone happens only while a copy is alive, and the save's snapshot lives only until its text is written.
+ */
+template <typename C>
+class CowBox
+{
+public:
+	CowBox() : P(std::make_shared<C>()) {}
+	CowBox(const CowBox&) = default;
+	CowBox& operator=(const CowBox&) = default;
+	const C& Get() const noexcept { return *P; }
+	C& Mut()
+	{
+		if (P.use_count() != 1)
+		{
+			P = std::make_shared<C>(*P);
+		}
+		return *P;
+	}
+	operator const C&() const noexcept { return *P; }
+	operator C&() { return Mut(); }
+	bool Shared() const noexcept { return P.use_count() > 1; }
+
+protected:
+	std::shared_ptr<C> P;
+};
+
+/** A shared std::vector (CowBox): reads as one; every non-const member clones a shared vector first. */
+template <typename T>
+class CowVec : public CowBox<std::vector<T>>
+{
+public:
+	using value_type = T;
+	using iterator = typename std::vector<T>::iterator;
+	using const_iterator = typename std::vector<T>::const_iterator;
+	size_t size() const noexcept { return this->Get().size(); }
+	bool empty() const noexcept { return this->Get().empty(); }
+	const T& operator[](size_t I) const { return this->Get()[I]; }
+	T& operator[](size_t I) { return this->Mut()[I]; }
+	const_iterator begin() const { return this->Get().begin(); }
+	const_iterator end() const { return this->Get().end(); }
+	iterator begin() { return this->Mut().begin(); }
+	iterator end() { return this->Mut().end(); }
+	const T& front() const { return this->Get().front(); }
+	const T& back() const { return this->Get().back(); }
+	T& front() { return this->Mut().front(); }
+	T& back() { return this->Mut().back(); }
+	void push_back(const T& V) { this->Mut().push_back(V); }
+	void push_back(T&& V) { this->Mut().push_back(std::move(V)); }
+	iterator erase(const_iterator It) { return this->Mut().erase(It); }
+	iterator erase(const_iterator First, const_iterator Last) { return this->Mut().erase(First, Last); }
+	void clear() { this->Mut().clear(); }
+	void reserve(size_t N) { this->Mut().reserve(N); }
+};
+
+/** A shared std::map (CowBox): reads as one; every non-const member clones a shared map first. */
+template <typename K, typename V>
+class CowMap : public CowBox<std::map<K, V>>
+{
+public:
+	using iterator = typename std::map<K, V>::iterator;
+	using const_iterator = typename std::map<K, V>::const_iterator;
+	size_t size() const noexcept { return this->Get().size(); }
+	bool empty() const noexcept { return this->Get().empty(); }
+	size_t count(const K& Key) const { return this->Get().count(Key); }
+	const_iterator find(const K& Key) const { return this->Get().find(Key); }
+	iterator find(const K& Key) { return this->Mut().find(Key); }
+	const_iterator begin() const { return this->Get().begin(); }
+	const_iterator end() const { return this->Get().end(); }
+	iterator begin() { return this->Mut().begin(); }
+	iterator end() { return this->Mut().end(); }
+	V& operator[](const K& Key) { return this->Mut()[Key]; }
+	size_t erase(const K& Key) { return this->Mut().erase(Key); }
+	iterator erase(const_iterator It) { return this->Mut().erase(It); }
+	iterator erase(iterator It) { return this->Mut().erase(It); }
+	template <typename... A>
+	std::pair<iterator, bool> emplace(A&&... Args)
+	{
+		return this->Mut().emplace(std::forward<A>(Args)...);
+	}
+	void clear() { this->Mut().clear(); }
+};
+
+/**
+ * Update 4 (§6 PA-34): a world state's stamp {Rev, HeroRev, Clock}, as World::SnapshotStamp gives it (a snapshot's is its source's
+ * at the copy). The session keeps this, not the snapshot (so a snapshot dies once its text is written), the saver keys its cached
+ * world text by it, and a save waiting its turn carries it. Serial is the world's own, unique in this process to each Create and each
+ * load (0: no world), so two careers' worlds never share a key.
+ */
+struct WorldStamp
+{
+	int Rev = -1;
+	int HeroRev = -1;
+	double Clock = -1.0;
+	uint64_t Serial = 0;
+	bool Valid() const noexcept { return Serial != 0; }
+	friend bool operator==(const WorldStamp& A, const WorldStamp& B) noexcept
+	{
+		return A.Serial == B.Serial && A.Rev == B.Rev && A.HeroRev == B.HeroRev && A.Clock == B.Clock;
+	}
+	friend bool operator!=(const WorldStamp& A, const WorldStamp& B) noexcept { return !(A == B); }
+};
+
+/**
+ * Update 4 (§6 PA-34, §6.2 "One UBT"): SaveData::WorldText, the world's save text, shared and immutable: copying a SaveData (the
+ * saver's waiting save, the card room's hand-offs) shares one buffer. It reads as a const std::string (and converts to one);
+ * appending (SaveData::Parse) and World::Write(SharedText&) change it copy-on-write, so a copy someone kept never changes.
+ */
+class SharedText
+{
+public:
+	SharedText() = default;
+	SharedText(const std::string& S) : P(std::make_shared<std::string>(S)) {}
+	SharedText(std::string&& S) : P(std::make_shared<std::string>(std::move(S))) {}
+	SharedText(const char* S) : P(std::make_shared<std::string>(S)) {}
+	SharedText(const SharedText&) = default;
+	SharedText& operator=(const SharedText&) = default;
+	SharedText& operator=(const std::string& S)
+	{
+		P = std::make_shared<std::string>(S);
+		return *this;
+	}
+	SharedText& operator=(std::string&& S)
+	{
+		P = std::make_shared<std::string>(std::move(S));
+		return *this;
+	}
+	const std::string& Str() const noexcept { return P ? *P : Empty(); }
+	operator const std::string&() const noexcept { return Str(); }
+	bool empty() const noexcept { return Str().empty(); }
+	size_t size() const noexcept { return Str().size(); }
+	const char* data() const noexcept { return Str().data(); }
+	const char* c_str() const noexcept { return Str().c_str(); }
+	char back() const { return Str().back(); }
+	char operator[](size_t I) const { return Str()[I]; }
+	size_t find(const std::string& S, size_t From = 0) const { return Str().find(S, From); }
+	size_t find(char C, size_t From = 0) const { return Str().find(C, From); }
+	/** The text to change: a shared buffer is copied first (copy-on-write). */
+	std::string& Edit()
+	{
+		if (!P)
+		{
+			P = std::make_shared<std::string>();
+		}
+		else if (P.use_count() != 1)
+		{
+			P = std::make_shared<std::string>(*P);
+		}
+		return *P;
+	}
+	SharedText& operator+=(const std::string& S)
+	{
+		Edit() += S;
+		return *this;
+	}
+	SharedText& operator+=(const char* S)
+	{
+		Edit() += S;
+		return *this;
+	}
+	SharedText& operator+=(char C)
+	{
+		Edit() += C;
+		return *this;
+	}
+	void clear() noexcept { P.reset(); }
+	void swap(SharedText& O) noexcept { P.swap(O.P); }
+	friend bool operator==(const SharedText& A, const SharedText& B) { return A.Str() == B.Str(); }
+	friend bool operator!=(const SharedText& A, const SharedText& B) { return A.Str() != B.Str(); }
+	friend bool operator==(const SharedText& A, const std::string& B) { return A.Str() == B; }
+	friend bool operator!=(const SharedText& A, const std::string& B) { return A.Str() != B; }
+
+private:
+	static const std::string& Empty()
+	{
+		static const std::string WorldTextEmpty;
+		return WorldTextEmpty;
+	}
+	std::shared_ptr<std::string> P; // null: empty
+};
+SHORTSTACKCORE_API std::ostream& operator<<(std::ostream& Out, const SharedText& T);
+
+/** Update 4 (§6 PA-34): a snapshot's View(), rebuilt from its pages the first time something asks (never copied into it). */
+struct SnapshotRows
+{
+	std::mutex Lock;
+	bool Built = false;
+	std::vector<net::Player> Rows;
+};
+
+/** Update 4 (§6 PA-35; A2): PlanDay's hoisted state while a plan is open (G/WorldSim.h), held by World through a deep-copying box, so
+ *  World stays copyable mid-plan (WorldPreview's copy) and a copy never shares a plan with its source. */
+struct PlanState;
+class PlanBox
+{
+public:
+	SHORTSTACKCORE_API PlanBox();
+	SHORTSTACKCORE_API PlanBox(const PlanBox& O);
+	SHORTSTACKCORE_API PlanBox& operator=(const PlanBox& O);
+	SHORTSTACKCORE_API ~PlanBox();
+	PlanState* Get() const noexcept { return P.get(); }
+	/** A fresh plan (an open one dropped). */
+	SHORTSTACKCORE_API PlanState& Open();
+	SHORTSTACKCORE_API void Close() noexcept;
+
+private:
+	std::unique_ptr<PlanState> P;
+};
+
+/**
+ * Update 4 (§6 PA-35; A2): what a turn carries between its units (the range splits in G/WorldSim.h): the open day plan, whether the
+ * month turned at this midnight, and the month's and the week's Rng states (TurnPro's R is the month's, carried across slices).
+ * Index-based and copyable: no pointer or iterator into World.
+ */
+struct TurnCarry
+{
+	PlanBox Plan;
+	bool MonthTurned = false;
+	std::array<uint32_t, 4> MonthRng{};
+	std::array<uint32_t, 4> WeekRng{};
+};
+
+/** Update 4 (SPEC v1.7 §3.19.2; LEAD_CALLS Q-5): the card's STORY tab (W-ui's at G2, cached by (id, World::Rev) in
+ *  G/WorldProfile4.cpp). Empty in Phase A. */
+struct StoryView
+{
+	int Npc = -1;
+	int TpiNow = 0;                         // the TPI line's rank (0: unranked)
+	std::vector<std::pair<int, int>> Graph; // (day, rank): the ranks the TPI published (First, the monthly rankings, Prev, Now)
+	std::vector<std::string> SoFar;         // THE STORY SO FAR (3-6 lines)
+	std::string YouAndThem;                 // YOU AND THEM, and the notes line
+};
+/** Update 4 (§3.19.1; Q-5): the Notebook's tabs (append-only). */
+enum class NotebookTab : uint8_t
+{
+	Following,
+	SinceYouLooked,
+	NamesToWatch,
+	Risers,
+	FirstYears,
+	Scene,
+	You,
+	Count,
+};
+/** Update 4 (§3.19.1; Q-5): one row of a Notebook tab: who, a rank, a day, the line. */
+struct NotebookRow
+{
+	int Npc = -1;
+	int Rank = 0;
+	int Day = 0;
+	std::string Text;
+};
+/** Update 4 (§3.19.1; Q-5): a Notebook tab's rows (W-ui's at G2). Empty in Phase A. */
+struct NotebookView
+{
+	NotebookTab Tab = NotebookTab::Following;
+	std::vector<NotebookRow> Rows;
+};
+/** Update 4 (§3.19.1 THE SCENE; Q-5): the scene chart's data (W-ui's at G2; S-crowd adds the crowd at G4). Empty in Phase A. */
+struct SceneChartView
+{
+	struct Point
+	{
+		int Day = 0;
+		int Scene = 0;   // the regulars on the scene
+		int Playing = 0; // PLAYING (the area beneath)
+	};
+	std::vector<Point> Points;
+	std::vector<std::pair<int, int>> CameFor; // CAME FOR: (moment id, arrivals), most first
+	int Since = 0;                            // "+{M} since you started"
+};
+
 class World
 {
 public:
@@ -1089,6 +1602,25 @@ public:
 	/** How this world began. */
 	Start Began() const { return Mode; }
 	bool Ready() const { return Created; }
+	/**
+	 * Update 4 (SPEC v1.7 §6 PA-34): a frozen copy of the world for a background save. It shares the roster's pages and the big
+	 * containers (copy-on-write: whatever the world changes afterwards is cloned on the world's side), never copies View()'s rows (it
+	 * rebuilds them from its pages if anything asks), and carries its stamp (SnapshotStamp). Null before Create or a load. The caller
+	 * keeps the stamp, not the pointer, so the snapshot dies once its text is written (FCareerSaver drops it after Write).
+	 */
+	SHORTSTACKCORE_API std::shared_ptr<const World> Snapshot();
+	/** This world state's stamp (a snapshot's equals its source's when it was taken; Serial 0 before Create or a load). */
+	WorldStamp SnapshotStamp() const
+	{
+		WorldStamp S;
+		S.Rev = Rev;
+		S.HeroRev = HeroRev;
+		S.Clock = Now;
+		S.Serial = Instance;
+		return S;
+	}
+	/** Roster pages this world cloned since it was made or loaded (a copy shared them; §3.7 R4's structural checks read it). */
+	uint64_t PageClones() const { return Roster.Clones(); }
 	/** Changes when something involving the player happens (the session saves the world then, not every frame). */
 	int HeroRevision() const { return HeroRev; }
 	uint32_t Seed() const { return WorldSeed; }
@@ -1103,12 +1635,20 @@ public:
 	SHORTSTACKCORE_API void Simulate(int DayCount);
 
 	// People.
-	const std::vector<Npc>& People() const { return Roster; }
+	/** Everyone, by id (Update 4, §6 PA-34: a random-access view over the roster's pages; read as the vector it was). */
+	const PagedRoster& People() const { return Roster; }
 	SHORTSTACKCORE_API int Find(const std::string& Name) const;
 	const Npc* Get(int Id) const { return Id >= 0 && Id < static_cast<int>(Roster.size()) ? &Roster[static_cast<size_t>(Id)] : nullptr; }
 	/** The network's view of everyone (net::Player rows, the same indices): what the RiverLine screens show. */
-	const std::vector<net::Player>& View() const { return Rows; }
+	const std::vector<net::Player>& View() const { return SnapRows ? SnapshotView() : Rows; }
 	SHORTSTACKCORE_API int ActiveCount() const;
+	/**
+	 * Update 4 (SPEC v1.7 §6 PA-33; LEAD_CALLS Q-5): whether a name is anyone's in the roster, case-insensitively (every Npc's name,
+	 * any status, lowercased byte by byte as handles::Field's set does; Sim::Add and the load keep the index current). The session's
+	 * naming asks this through handles::Field's predicate instead of building a set of every name per register, and checks the
+	 * player's and the rival's names itself (A1's call sites), so the answers are the set's exactly.
+	 */
+	SHORTSTACKCORE_API bool NameUsed(const std::string& Name) const;
 
 	// Events.
 	/** The result of a finished event this world played (nullptr: not one of its events). */
@@ -1271,6 +1811,31 @@ public:
 	/** A frame's budget for the world's turn (§3.7 R1, PA-35): unlimited in Phase A (a turn runs whole, as today); 2.0 ms wherever a
 	 *  Session runs from G2. Not saved. */
 	double TurnBudgetMs = std::numeric_limits<double>::infinity();
+	// ---- Update 4 (LEAD_CALLS Q-5): the functions the gate sections name, declared before the freeze. Each stub answers empty, none
+	// or false; the owner and the section beside each. Display reads never drain the hold (§3.7 R3); the others will.
+	/** The card's STORY tab (§3.19.2; W-ui, G2: cached by (id, Rev) in G/WorldProfile4.cpp). Display read. Phase A: empty. */
+	SHORTSTACKCORE_API const StoryView& StoryOf(int Npc) const;
+	/** One Notebook tab (§3.19.1; W-ui, G2). Display read. Phase A: empty. */
+	SHORTSTACKCORE_API const NotebookView& NotebookOf(NotebookTab Tab) const;
+	/** THE SCENE's chart, YOUR FIRST MONTH and the year card from one pass (§3.19.1; W-ui, G2; S-crowd at G4). Display read. Phase A:
+	 *  empty. */
+	SHORTSTACKCORE_API const SceneChartView& SceneChart() const;
+	/** Someone's TPI record (§3.13; -1: the player's), null while unranked or before the TPI opens (W-story, G2). Display read. Phase A:
+	 *  null. */
+	SHORTSTACKCORE_API const TpiRec* TpiOf(int Npc) const;
+	/** The seating rule's chosen people from an event's registrations Who, in seat order: a familiar face, then a came-for-you or fresh
+	 *  face (§3.17 R2; W-table, G2). Drains. Phase A: none (the session keeps today's fresh-faces block). */
+	SHORTSTACKCORE_API std::vector<int> SeatCandidates(const std::vector<int>& Who, int Today);
+	/** The player's cash folded into the TPI, once per event id (§3.13 R3; W-story, G2: called inside HeroFinished). Phase A: no-op. */
+	SHORTSTACKCORE_API void HeroTpiCash(const std::string& EventId, int Place, Chips Prize);
+	/** The crowd names a dealt field's unnamed seats (§5.5 R1; S-crowd, G4): for each seat in order, its rolled archetype in
+	 *  RestArchetypes (ai::Archetype as int), the crowd member's serial or 0 (left for handles::Field). Drains. Phase A: all 0. */
+	SHORTSTACKCORE_API std::vector<uint32_t> CrowdForField(const std::string& EventId, net::SiteId Site, int Tier, const std::vector<int>& RestArchetypes);
+	/** A modelled big-field seat named from the crowd's snapshot at registration (§5.5 R5; S-crowd, G4): the member's serial (a
+	 *  CrowdEntry added), 0 for none. Phase A: 0. */
+	SHORTSTACKCORE_API uint32_t CrowdNameForSeat(const std::string& EventId, int Index, int Archetype, net::SiteId Site, int Tier);
+	/** The full record a crowd serial was promoted to (§5.7 R4; S-promote, G4), -1 for none. Phase A: -1. */
+	SHORTSTACKCORE_API int FindBySerial(uint32_t Serial) const;
 	/** The player's name, as the world knows it (honors, headlines). */
 	std::string HeroName;
 	/** The bracelets and rings the player has won, oldest first. */
@@ -1382,6 +1947,8 @@ public:
 
 	// Save.
 	SHORTSTACKCORE_API void Write(std::string& Out) const;
+	/** The same, appended to a save's shared text (SaveData::WorldText; copy-on-write). */
+	SHORTSTACKCORE_API void Write(SharedText& Out) const;
 	/** One save line split on tabs (the "world" prefix included); false when it isn't a world line. */
 	SHORTSTACKCORE_API bool Read(const std::vector<std::string>& Fields);
 	/** After the last line: rebuilds what isn't saved (indexes, the network view). */
@@ -1404,24 +1971,25 @@ private:
 	int Rev = 0;
 	int HeroRev = 0;
 	int Founding = 0; // the network's regulars, at the start of the roster
-	std::vector<Npc> Roster;
-	/** Update 4 (SPEC v1.7 §6 PA-34; A2's pages of 64 in A-2): the roster's writers. Edit(id) for one person (an index writer),
-	 *  EditAll() for the whole-roster mutating loops (a page walk). Phase A: pass-throughs over today's vector. */
-	Npc& Edit(int Id) { return Roster[static_cast<size_t>(Id)]; }
-	std::vector<Npc>& EditAll() { return Roster; }
-	std::map<std::string, int> ByName;
-	std::vector<net::Player> Rows;
-	std::vector<Pending> Queue; // planned events, by end time
-	std::map<std::string, net::EventResult> Results; // the last few days' final tables
-	std::map<std::string, double> ResultEnds;
-	std::map<std::string, Cancellation> Cancelled; // events called off (kept as long as the results)
+	PagedRoster Roster; // Update 4 (§6 PA-34): pages of 64, shared copy-on-write with copies (People() reads, Edit/EditAll write)
+	/** Update 4 (SPEC v1.7 §6 PA-34; A2): the roster's writers. Edit(id) for one person (an index writer: its page cloned first when
+	 *  a copy shares it), EditAll() for the whole-roster mutating loops (a page walk: every shared page cloned once, up front). */
+	Npc& Edit(int Id) { return Roster.Edit(static_cast<size_t>(Id)); }
+	PagedRoster::Walk EditAll() { return Roster.EditAll(); }
+	CowMap<std::string, int> ByName; // Update 4 (§6 PA-34): shared with copies (copy-on-write)
+	std::vector<net::Player> Rows;   // never shared: View() hands out references (a snapshot rebuilds its own, SnapRows)
+	CowVec<Pending> Queue; // planned events, by end time (Update 4, §6 PA-34: shared with copies, copy-on-write, with its Who vectors)
+	CowMap<std::string, net::EventResult> Results; // the last few days' final tables (shared with copies, copy-on-write)
+	CowMap<std::string, double> ResultEnds;             // (shared with copies, copy-on-write, as Results)
+	CowMap<std::string, Cancellation> Cancelled; // events called off (kept as long as the results; shared, copy-on-write)
 	struct Placed
 	{
 		int Npc = -1;
 		int Place = 0;
 		Chips Prize = 0;
 	};
-	std::map<std::string, std::vector<Placed>> FieldPlaces; // the player's live events: where the people the world follows finished
+	CowMap<std::string, std::vector<Placed>> FieldPlaces; // the player's live events: where the people the world follows finished (shared,
+	                                                     // copy-on-write)
 	std::vector<WorldEvent> Log;  // newest last (capped)
 	std::vector<Honor> Titles;    // forever
 	std::map<int, Bond> HeroBonds;
@@ -1485,7 +2053,24 @@ private:
 	DeeTip Tip;                           // G2: Dee's tip
 	std::vector<int> Regulars;            // G2: the pinned Embercrest regulars (64; world\tregulars); empty: today's sort (PA-52)
 	CrowdBook Crowd;                      // G4: the crowd (world\tcrowd)
+	// Update 4 (§6 PA-33-PA-35; A2): the lowercased name index (NameUsed), a snapshot's own rows and stamp, the turn's carried state
+	// (the range splits, G/WorldSim.h) and the monthly Headliners cache. None of it is saved; the index is rebuilt at load.
+	CowBox<std::unordered_set<std::string>> NamesLower; // every roster name, lowercased (Sim::Add, Finish)
+	std::shared_ptr<SnapshotRows> SnapRows;             // a snapshot's View() (null: this world's own Rows)
+	uint64_t Instance = 0;                              // WorldStamp::Serial: set by Create and by a load (copies keep it)
+	TurnCarry Turn;                                     // between a turn's units (index-based, copyable)
+	CrowdDayWeights CrowdToday;                         // G4: the crowd's day (world\tcrowd\tday; §5.3 R4); empty until G4
+	struct HeadlinerCache
+	{
+		bool Valid = false;
+		int Rev = -1, HeroRev = -1; // the revisions they were picked at
+		double At = -1.0;           // and the clock
+		int Count = 0;
+		std::vector<Headliner> Picks;
+	};
+	mutable HeadlinerCache Headlined;                   // Headliners (G/WorldSim.cpp): the month's picks, reused until the world moves
 
+	SHORTSTACKCORE_API const std::vector<net::Player>& SnapshotView() const;
 	void Refresh(int Id);
 	void RefreshAll();
 };

@@ -26,5 +26,11 @@ int Sim::Promote(World& /*W*/, int /*Crowd*/, int /*Day*/, PromoteWhy /*Why*/)
 	// Phase A: the crowd is empty (G4: the full record built from the crowd record, its history carried, §5.7).
 	return -1;
 }
+
+int World::FindBySerial(uint32_t /*Serial*/) const
+{
+	// Phase A (LEAD_CALLS Q-5): nobody was promoted from the crowd (G4: S-promote's lookup, §5.7 R4).
+	return -1;
+}
 } // namespace world
 } // namespace ss
