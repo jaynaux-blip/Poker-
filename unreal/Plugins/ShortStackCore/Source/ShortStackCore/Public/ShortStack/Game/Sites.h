@@ -77,6 +77,10 @@ struct InviteGate
 	int MinEvents2 = 0;
 	Chips MinAbi100_2 = 0;
 	int IgniteLevel = 0;
+	// Update 4 (SPEC v1.7 §2.10, §6 PA-8; appended): the Festival Pass, paid online events needed while the site's festival is
+	// Announced, in Buildup or Live, from the festival's second edition (its first edition needs only the two rents); -1 = no Pass
+	// (today, every site). F-world sets Ignite's and RunItTwice's to fest::kPassEvents (20) in Sites.cpp at G1.
+	int FestivalEvents = -1;
 };
 /** One site: its brand, its palette (pal:: order, 16 tokens), rake, traffic, fields, cashier, gate and launch. */
 struct SiteDef

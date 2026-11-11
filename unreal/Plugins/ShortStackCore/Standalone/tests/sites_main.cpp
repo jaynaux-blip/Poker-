@@ -38,6 +38,7 @@
 #include "ShortStack/AI/Profiles.h"
 #include "ShortStack/Equity.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Handles.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Lobby.h"
 #include "ShortStack/Game/Network.h"
@@ -274,30 +275,51 @@ std::string SitesHex(uint64_t H)
 	return B;
 }
 
+/** The FNV hash RiverLinePinned takes of a network's first Count templates (ids, series, tickets, buy-in, FeeOf, guarantee, field
+ *  and shape), shared with the rival prefixes' pins (Update 4 Phase A) so every pin hashes the same fields. */
+uint64_t SitesTemplatesFnv(const net::Network& N, size_t Count)
+{
+	uint64_t Templates = 1469598103934665603ull;
+	for (size_t I = 0; I < Count && I < N.Templates().size(); ++I)
+	{
+		const net::EventTemplate& T = N.Templates()[I];
+		Templates = SitesFnv(Templates, T.Id + "|" + T.Series + "|" + T.Ticket + "|" + std::to_string(T.BuyInCents) + "|" + std::to_string(net::FeeOf(T.BuyInCents)) + "|" +
+			std::to_string(T.GtdCents) + "|" + std::to_string(T.Field) + "|" + std::to_string(static_cast<int>(T.Fmt)) + "|" + std::to_string(T.StartMinute) + "|" +
+			std::to_string(T.EveryMinutes) + "|" + std::to_string(T.LastMinute) + "|" + std::to_string(T.Days) + "|" + std::to_string(T.OnlyDay) + "|" + std::to_string(T.TableSize) + "|" +
+			std::to_string(T.StartStack) + "|" + std::to_string(T.LateRegMinutes) + "|" + std::to_string(T.SeatValueCents) + "\n");
+	}
+	return Templates;
+}
+
+/** Update 4 (SPEC v1.7 §2.2.4, §6 PA-7): RiverLine's templates before G1's appended block. RiverLinePinned hashes only these and
+ *  their instances and listings; RiverLineFestivalPinned everything from here on. */
+constexpr int SitesRiverLinePrefix = 8453;
+
 /**
  * RiverLine pinned (review of A3): RiverLineUnchanged compares RiverLine with itself in one process, so a change that moves
  * it the same way everywhere (a template id, an instance id or seed, a fee, a field, a pool) passes it. These are 5bc7d44's
  * numbers, from before the registry existed: every template's ids, buy-in, FeeOf, guarantee, field and shape; every
  * instance's id, seed, entries and pool for 414 days from two weeks before Night One; three weeks of listings (fee,
  * guarantee, entrants, pace, tables). RiverLine's schedule never changes (U9), so these never move. Integers and ids only.
+ * Update 4 (SPEC v1.7 §2.2.4, Phase A): over the first 8,453 templates and only the instances and listings whose template is
+ * among them, so G1's appended RiverLine block (84 templates, RiverLineFestivalPinned's) moves none of the three constants or
+ * counts. Restated while nothing is appended, so it is proven against today's tree first.
  */
 void RiverLinePinned()
 {
 	const net::Network& N = net::Shared();
-	uint64_t Templates = 1469598103934665603ull;
-	for (const net::EventTemplate& T : N.Templates())
-	{
-		Templates = SitesFnv(Templates, T.Id + "|" + T.Series + "|" + T.Ticket + "|" + std::to_string(T.BuyInCents) + "|" + std::to_string(net::FeeOf(T.BuyInCents)) + "|" +
-			std::to_string(T.GtdCents) + "|" + std::to_string(T.Field) + "|" + std::to_string(static_cast<int>(T.Fmt)) + "|" + std::to_string(T.StartMinute) + "|" +
-			std::to_string(T.EveryMinutes) + "|" + std::to_string(T.LastMinute) + "|" + std::to_string(T.Days) + "|" + std::to_string(T.OnlyDay) + "|" + std::to_string(T.TableSize) + "|" +
-			std::to_string(T.StartStack) + "|" + std::to_string(T.LateRegMinutes) + "|" + std::to_string(T.SeatValueCents) + "\n");
-	}
+	const size_t Prefix = std::min(N.Templates().size(), static_cast<size_t>(SitesRiverLinePrefix));
+	const uint64_t Templates = SitesTemplatesFnv(N, Prefix);
 	uint64_t Instances = 1469598103934665603ull;
 	int Count = 0;
 	for (int Day = -14; Day < 400; ++Day)
 	{
 		for (const net::EventInstance& E : N.Window(Day * 1440.0, (Day + 1) * 1440.0))
 		{
+			if (E.Template >= SitesRiverLinePrefix)
+			{
+				continue;
+			}
 			Instances = SitesFnv(Instances, E.Id + "|" + std::to_string(E.Template) + "|" + std::to_string(E.Seed) + "|" + std::to_string(E.Entries) + "|" + std::to_string(E.Pool) + "\n");
 			++Count;
 		}
@@ -306,18 +328,79 @@ void RiverLinePinned()
 	int Listed = 0;
 	for (const net::EventInstance& E : N.Window(0.0, 21 * 1440.0))
 	{
+		if (E.Template >= SitesRiverLinePrefix)
+		{
+			continue;
+		}
 		const ss::LobbyEvent L = N.Listing(E, nullptr, 7);
 		Listings = SitesFnv(Listings, L.Spec.Id + "|" + std::to_string(L.Spec.BuyInCents) + "|" + std::to_string(L.Spec.FeeCents) + "|" + std::to_string(L.Spec.GuaranteeCents) + "|" +
 			std::to_string(L.Spec.Entrants) + "|" + std::to_string(static_cast<int>(L.Spec.SecondsPerHand)) + "|" + L.Spec.Population + "|" + std::to_string(L.Spec.BountyCents) + "|" +
 			std::to_string(L.Spec.SeatValueCents) + "|" + L.GuaranteeLabel + "\n");
 		++Listed;
 	}
-	Expect(N.Templates().size() == 8453 && Templates == 0x38f22b3af5ae3e70ull,
-		"RiverLine's 8,453 templates are 5bc7d44's (ids, buy-ins, fees, guarantees, fields): " + std::to_string(N.Templates().size()) + " " + SitesHex(Templates));
+	Expect(Prefix == 8453 && Templates == 0x38f22b3af5ae3e70ull,
+		"RiverLine's first 8,453 templates are 5bc7d44's (ids, buy-ins, fees, guarantees, fields): " + std::to_string(Prefix) + " of " + std::to_string(N.Templates().size()) + " " +
+			SitesHex(Templates));
 	Expect(Count == 76862 && Instances == 0x79186cad5d88a08bull,
-		"RiverLine's 76,862 instances over 414 days are 5bc7d44's (ids, seeds, entries, pools): " + std::to_string(Count) + " " + SitesHex(Instances));
+		"RiverLine's 76,862 instances of them over 414 days are 5bc7d44's (ids, seeds, entries, pools): " + std::to_string(Count) + " " + SitesHex(Instances));
 	Expect(Listed == 3965 && Listings == 0x87b94ae6f0cbea6bull,
-		"RiverLine's 3,965 listings over three weeks are 5bc7d44's (fees, guarantees, pace, tables): " + std::to_string(Listed) + " " + SitesHex(Listings));
+		"RiverLine's 3,965 listings of them over three weeks are 5bc7d44's (fees, guarantees, pace, tables): " + std::to_string(Listed) + " " + SitesHex(Listings));
+}
+
+/**
+ * Update 4 (SPEC v1.7 §2.2.4, §6 PA-7): RiverLine's appended templates, from index 8,453 on (G1's 84 satellites into Ring Rush's
+ * and the Championship Online's Mains; Summer Slam's 42 at G3) and their instances over days -14 to 1,095, with RiverLinePinned's
+ * fields. Empty in Phase A, when nothing is appended: F-net writes its constants at G1 (84 templates).
+ */
+void RiverLineFestivalPinned()
+{
+}
+
+/** Update 4 (SPEC v1.7 §2.15.1, §6 PA-7): the rivals' templates before G1's festivals, taken on Phase A's tree (A-1). */
+constexpr int SitesIgnitePrefix = 783;
+constexpr int SitesRunItTwicePrefix = 1521;
+constexpr uint64_t SitesIgnitePrefixFnv = 0x4658347bd97f6bfcull;
+constexpr uint64_t SitesRunItTwicePrefixFnv = 0x4e4bb2627a9641d9ull;
+
+/**
+ * Update 4 (SPEC v1.7 §2.3.1, §2.15.1, §6 PA-7): the rival prefixes FestTemplatesAppended (festivals_main.cpp, F-net) keeps
+ * unchanged once BuildFestivals appends the six festivals last in BuildSite: Ignite's first 783 and RunItTwice's first 1,521
+ * templates hash (RiverLinePinned's fields) to these constants. In Phase A they are every rival template.
+ */
+void RivalPrefixPinned()
+{
+	const net::Network& Ig = net::Site(net::SiteId::Ignite);
+	const net::Network& Rt = net::Site(net::SiteId::RunItTwice);
+	const uint64_t IgFnv = SitesTemplatesFnv(Ig, SitesIgnitePrefix);
+	const uint64_t RtFnv = SitesTemplatesFnv(Rt, SitesRunItTwicePrefix);
+	Expect(Ig.Templates().size() >= static_cast<size_t>(SitesIgnitePrefix) && IgFnv == SitesIgnitePrefixFnv,
+		"Ignite's first 783 templates are Phase A's (ids, buy-ins, fees, guarantees, fields): " + std::to_string(Ig.Templates().size()) + " " + SitesHex(IgFnv));
+	Expect(Rt.Templates().size() >= static_cast<size_t>(SitesRunItTwicePrefix) && RtFnv == SitesRunItTwicePrefixFnv,
+		"RunItTwice's first 1,521 templates are Phase A's (ids, buy-ins, fees, guarantees, fields): " + std::to_string(Rt.Templates().size()) + " " + SitesHex(RtFnv));
+}
+
+/**
+ * Update 4 (SPEC v1.7 §1.2 item 1, §6 PA-1): the real-player handle screen. 20,000 handles::Make names (one in eight with Pro's
+ * understated names), countries drawn as the network draws them, none holding a real person's name (Trademarks.h's kNameScan, on
+ * the handle with case and separators dropped). From G2 every handle drawn at run time is checked against the same list; G4 adds
+ * handles::MakeWide's sample once it has a body.
+ */
+void HandlesScreened()
+{
+	ss::Rng R("u4-phase-a-handles");
+	int Hits = 0;
+	std::string Seen;
+	for (int I = 0; I < 20000; ++I)
+	{
+		const std::string Country = ss::handles::PickCountry(R);
+		const std::string Name = ss::handles::Make(R, Country, I % 8 == 0);
+		if (const char* Hit = trademarks::FindHandle(Name))
+		{
+			++Hits;
+			Seen += Seen.size() < 400 ? Name + " (" + Hit + ") " : std::string();
+		}
+	}
+	Expect(Hits == 0, "no real player's name among 20,000 handles::Make handles" + (Hits == 0 ? std::string() : ": " + std::to_string(Hits) + " hits, " + Seen));
 }
 
 // ------------------------------------------------------------------ the rake hook
@@ -4335,6 +4418,10 @@ int main(int Argc, char** Argv)
 	}
 	RiverLineUnchanged();
 	RiverLinePinned();
+	// Update 4 Phase A (SPEC v1.7 §6 PA-7, PA-1): the pins G1's appends keep, and the real-player handle screen.
+	RiverLineFestivalPinned();
+	RivalPrefixPinned();
+	HandlesScreened();
 	RakeHook();
 	Routing();
 	RoutedCallSites();

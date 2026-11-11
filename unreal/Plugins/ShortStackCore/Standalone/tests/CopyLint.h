@@ -27,6 +27,12 @@ constexpr size_t TableTalk = 84; // table talk, dealer calls, the rail
 constexpr size_t Pa = 200;       // the floor on the PA
 constexpr size_t MailSubject = 200;
 constexpr size_t LetterBody = 600;
+// Update 4 (update 4 SPEC v1.7 §1.2 item 10, §3.20, §6 PA-1; rev-plan M13): the lengths its copy checks hold beside the four above.
+constexpr size_t kTextMax = 160;      // Dee's and bonded people's texts (the phone's lock-screen rule; festival texts <= 84 where the phone's lint requires it)
+constexpr size_t kHeadTitleMax = 120; // a headline's title
+constexpr size_t kHeadBodyMax = 200;  // a headline's body
+constexpr size_t kJourneyMax = 120;   // a JOURNEY line
+constexpr size_t kWatchWhyMax = 90;   // a Names to Watch reason
 
 /** The common template variables and a sample of realistic length for each. */
 inline std::map<std::string, std::string> Samples()

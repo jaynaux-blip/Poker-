@@ -405,6 +405,10 @@ void Network::BuildSite()
 			AllSeries.push_back(Sr);
 		}
 	}
+
+	// Update 4 (SPEC v1.7 §2.3.1, §6 PA-4): the rival festivals, last, so every template above keeps its index (G/NetworkFestival.cpp,
+	// F-net; adds nothing until G1).
+	BuildFestivals();
 }
 } // namespace net
 } // namespace ss

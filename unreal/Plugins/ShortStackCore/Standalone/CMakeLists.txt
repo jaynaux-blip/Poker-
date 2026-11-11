@@ -195,6 +195,36 @@ target_link_libraries(kast_ui_test PRIVATE ShortStackCore)
 target_compile_definitions(kast_ui_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
 add_test(NAME kast_ui COMMAND kast_ui_test)
 
+# Update 4 (update 4 SPEC v1.7 §6 PA-48, §8.1): four suites of its own, registered in Phase A with empty mains; each track's checks
+# go in its own file, called from its suite's main. Caps (each suite's default run alone, its spec budget): festivals <= 30 s
+# (Festival Season's core: festivals_main.cpp F-net, festivals_world.cpp F-world), world_u4 <= 45 s (the world at Update 4's scale:
+# world_u4_main.cpp the lead's and A3's slice harness, _scene W-arrive, _growth W-growth, _story W-story, u4_session.cpp W-table
+# then S-crowd, _crowd S-crowd, _promote S-promote, _scale S-scale; slow modes long, big3k and big outside ctest), big_field <= 30 s
+# (bigfield_main.cpp B-engine, bigfield_session.cpp B-session; slow mode long) and u4_ui <= 60 s (Update 4's screens apart from
+# riverline_ui and rivals_ui: u4_ui_main.cpp the kit, _fest F-hubs, _look F-look, _world W-ui, _bigfield B-ui, _crowd S-ui). The
+# core's new files (Festival.cpp, NetworkFestival.cpp and the rest) come in through CORE_SOURCES' glob, as Unreal's module globs them.
+add_executable(festivals_test tests/festivals_main.cpp tests/festivals_world.cpp)
+target_link_libraries(festivals_test PRIVATE ShortStackCore)
+target_compile_definitions(festivals_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
+add_test(NAME festivals COMMAND festivals_test)
+
+add_executable(world_u4_test tests/world_u4_main.cpp tests/world_u4_scene.cpp tests/world_u4_growth.cpp tests/world_u4_story.cpp
+  tests/world_u4_crowd.cpp tests/world_u4_promote.cpp tests/world_u4_scale.cpp tests/u4_session.cpp)
+target_link_libraries(world_u4_test PRIVATE ShortStackCore)
+target_compile_definitions(world_u4_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
+add_test(NAME world_u4 COMMAND world_u4_test)
+
+add_executable(big_field_test tests/bigfield_main.cpp tests/bigfield_session.cpp)
+target_link_libraries(big_field_test PRIVATE ShortStackCore)
+target_compile_definitions(big_field_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
+add_test(NAME big_field COMMAND big_field_test)
+
+add_executable(u4_ui_test tests/u4_ui_main.cpp tests/u4_ui_fest.cpp tests/u4_ui_look.cpp tests/u4_ui_world.cpp tests/u4_ui_bigfield.cpp
+  tests/u4_ui_crowd.cpp)
+target_link_libraries(u4_ui_test PRIVATE ShortStackCore)
+target_compile_definitions(u4_ui_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
+add_test(NAME u4_ui COMMAND u4_ui_test)
+
 # Update 4 Phase 0 (update 4 SPEC §6.1, §8.1; the lead's call P-4, durable/update4/LEAD_CALLS.md): every suite has a real
 # TIMEOUT, max(its spec budget, 2.0 x its median run alone, 10 s), rounded up to a whole second. The spec budget is SPEC §8.1's
 # cap for the four suites it lists (night_one_session 125 s, riverline_ui 75 s, rivals_ui 60 s, living_world 45 s), otherwise
@@ -230,6 +260,12 @@ set_tests_properties(rivals_ui PROPERTIES TIMEOUT 80)
 set_tests_properties(rerun_ui PROPERTIES TIMEOUT 60)
 set_tests_properties(kast_growth PROPERTIES TIMEOUT 60)
 set_tests_properties(kast_ui PROPERTIES TIMEOUT 60)
+# Update 4 Phase A (SPEC v1.7 §6 PA-48, §8.1; the lead's P-4): the four new suites by the same rule. With empty mains their medians
+# are about 0 s, so each TIMEOUT is its cap; re-measured at every gate's integration as their checks land.
+set_tests_properties(festivals PROPERTIES TIMEOUT 30)
+set_tests_properties(world_u4 PROPERTIES TIMEOUT 45)
+set_tests_properties(big_field PROPERTIES TIMEOUT 30)
+set_tests_properties(u4_ui PROPERTIES TIMEOUT 60)
 
 # Not a suite: core-styles' chart compiler (update 2 SPEC §2.4.2, §2.4.4), Tests/charts/*.txt into AI/ChartTables.cpp.
 add_executable(chartgen tools/chartgen/chartgen_main.cpp)
@@ -241,6 +277,12 @@ target_compile_definitions(chartgen PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
 # code's. It uses only what the session had then, so it builds against either.
 add_executable(fixture_tool tests/fixture_tool.cpp)
 target_link_libraries(fixture_tool PRIVATE ShortStackCore)
+
+# Not a suite: the big field's calibration tool (update 4 SPEC v1.7 §4.1, §6.5 S-shadow, §6 PA-48; B-engine's from G2): it writes
+# E/FieldModelCalib.inc and Tests/bigfield/dealt_<id>.txt. Registered in Phase A, doing nothing.
+add_executable(bigfield_calib tests/bigfield_calib.cpp)
+target_link_libraries(bigfield_calib PRIVATE ShortStackCore)
+target_compile_definitions(bigfield_calib PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
 
 # Not a suite either, and opt-in (-DSS_UNITY_PROBE=ON): the whole core pasted into one translation unit, in path order and
 # in reverse, the way Unreal's unity blobs paste files together. A file's private names used through a namespace-scope

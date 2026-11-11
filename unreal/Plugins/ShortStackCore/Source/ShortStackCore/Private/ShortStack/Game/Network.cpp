@@ -383,6 +383,11 @@ void Network::Index()
 	{
 		std::stable_sort(It.second.begin(), It.second.end(), [this](int A, int B) { return Temps[static_cast<size_t>(A)].OnlyDay < Temps[static_cast<size_t>(B)].OnlyDay; });
 	}
+	// Update 4 (SPEC v1.7 §2.1.2, §6 PA-4): FindSeries' index. emplace keeps the first series of an id, as the scan it replaces did.
+	for (size_t I = 0; I < AllSeries.size(); ++I)
+	{
+		SeriesIndex.emplace(AllSeries[I].Id, static_cast<int>(I));
+	}
 }
 
 const EventTemplate* Network::FindTemplate(const std::string& Id) const
@@ -930,14 +935,15 @@ int Network::FindPlayer(const std::string& Name) const
 
 const SeriesInfo* Network::FindSeries(const std::string& Id) const
 {
-	for (const SeriesInfo& S : AllSeries)
-	{
-		if (S.Id == Id)
-		{
-			return &S;
-		}
-	}
-	return nullptr;
+	// Update 4 (§6 PA-4): through Index()'s SeriesIndex (a lobby row asks up to three times); the same series the scan found.
+	const auto It = SeriesIndex.find(Id);
+	return It == SeriesIndex.end() ? nullptr : &AllSeries[static_cast<size_t>(It->second)];
+}
+
+std::string Network::NameOf(const EventInstance& E) const
+{
+	// Update 4 (SPEC v1.7 §2.3.2, §6 PA-4): the template's name until G1 (GRIT's runs, F-net).
+	return TemplateOf(E).Name;
 }
 
 const SeriesInfo* Network::CurrentSeries(double Now) const
@@ -990,7 +996,8 @@ EventInstance Network::Make(int TemplateIndex, double Start) const
 			Field = std::max(Field, 1.2 * static_cast<double>(T.GtdCents) / static_cast<double>(Contribution));
 		}
 		E.Entries = std::max(8, static_cast<int>(std::round(Field * Factor)));
-		E.Pool = T.BuyInCents == 0 ? T.GtdCents : std::max(T.GtdCents, Contribution * static_cast<Chips>(E.Entries));
+		// Update 4 (SPEC v1.7 §2.4.1, §6 PA-5): added money on top of the pool (0 on every template until G1's festival Mains).
+		E.Pool = (T.BuyInCents == 0 ? T.GtdCents : std::max(T.GtdCents, Contribution * static_cast<Chips>(E.Entries))) + T.AddedCents;
 	}
 	// RiverLine's Flip Frenzy flips all-in from the first hand, so it runs a quarter of a normal event (U9: as it was). A rival's
 	// Flip & Run plays as a short-stacked eight-handed hyper (core-sites), so it takes a hyper's full time: at a quarter the
@@ -1119,8 +1126,11 @@ LiveState Network::Live(const EventInstance& E, double Now) const
 		L.Pool = std::max(T.GtdCents, static_cast<Chips>(0));
 		return L;
 	}
-	const Chips PerEntry = T.BuyInCents == 0 ? 0 : E.Pool / std::max(1, E.Entries);
-	auto PoolFor = [&](int Entries) { return T.BuyInCents == 0 ? E.Pool : std::max(T.GtdCents, PerEntry * static_cast<Chips>(Entries)); };
+	// Update 4 (SPEC v1.7 §2.4.1, §6 PA-5): the field's share comes from the pool less its added money, which is paid on top and is
+	// never an overlay (AddedCents is 0 until G1, so Base is E.Pool).
+	const Chips Base = E.Pool - T.AddedCents;
+	const Chips PerEntry = T.BuyInCents == 0 ? 0 : Base / std::max(1, E.Entries);
+	auto PoolFor = [&](int Entries) { return T.BuyInCents == 0 ? E.Pool : std::max(T.GtdCents, PerEntry * static_cast<Chips>(Entries)) + T.AddedCents; };
 	if (Since < 0.0)
 	{
 		// Registration builds slowly, then rushes in the last hour.
@@ -1304,6 +1314,9 @@ const EventResult& Network::Deterministic(const EventInstance& E) const
 
 void Network::Prewarm(double Now) const
 {
+	// Update 4 (SPEC v1.7 §2.4.5, §6 PA-4): every site's largest fields by day, for fest::RecordOf (G/NetworkFestival.cpp; a no-op
+	// until G1, and never DayCache).
+	FillDayMax(Now);
 	// With a living world, only the network's own past needs working out; a fresh start (update 2 §3.3 F7) has none, and
 	// neither has a rival (§5.8: no regulars, no past).
 	if ((Living && Living->Began() == world::Start::Blank) || People.empty())
@@ -1359,6 +1372,10 @@ LobbyEvent Network::Listing(const EventInstance& E, std::string* Lock, int Unloc
 		Sp.Population = !Seated.empty() ? Seated : Tr == Tier::Freeroll ? "freeroll" : Tr == Tier::Micro ? "micro" : Tr == Tier::Low ? "low" : "high";
 		Sp.Speed = T.Speed;
 		Sp.TableSize = T.TableSize;
+		// Update 4 (SPEC v1.7 §2.4.1, §6 PA-5): the template's added money and prize curve reach the engine (0 and Standard until G1).
+		// GuaranteeLabel stays as it is: it is in RiverLinePinned's listing hash.
+		Sp.AddedCents = T.AddedCents;
+		Sp.Curve = T.Curve;
 		if (T.Fmt == Format::Bounty || T.Fmt == Format::Mystery)
 		{
 			// Half of the prize part of the buy-in goes on heads; the guarantee covers both halves.
@@ -2042,6 +2059,12 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 			const NewsKind K = Win ? NewsKind::BigWin : Record ? NewsKind::Record : NewsKind::People;
 			Post(It->At, K, Title, Body, Tag, It->Amount, It->Npc);
 		}
+	}
+	// Update 4 (SPEC v1.7 §3.15, §3.19, §6 PA-10): the world's own posts on this site's page (G2's RISING and NEW FACES, W-story),
+	// after its log's. A no-op until G2.
+	if (Living)
+	{
+		Living->NewsExtras(NetSite, Now, Items);
 	}
 	// The player's own milestones (when no result of theirs made the news).
 	const bool HeroNews = std::any_of(Items.begin(), Items.end(), [](const NewsItem& It) { return It.Kind == NewsKind::Hero; });

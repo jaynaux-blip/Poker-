@@ -120,6 +120,9 @@ struct EventTemplate
 	bool Bracelet = false; // the winner gets a Championship bracelet (The Championship Online)
 	bool Ring = false;     // the winner gets a Grand Circuit ring (Ring Rush)
 	std::string Ticket;    // the seat it takes ("" = its own id; every year's RCOP Main takes "rcop-main")
+	// Update 4 (SPEC v1.7 §2.4.1, §6 PA-3), appended: 0 and Standard on every template until G1's festival Mains.
+	Chips AddedCents = 0;                      // site money on top of the pool (R6 pool money; not a promotion, not governed: W6)
+	PayoutCurve Curve = PayoutCurve::Standard; // ShortStack/Structure.h (§2.4.3)
 };
 
 struct EventInstance
@@ -221,6 +224,8 @@ enum Unlock : int
 	UnlockBounty = 1,    // first cash
 	UnlockSatellite = 2, // first final table
 	UnlockSixMax = 4,    // first title
+	// Update 4 (SPEC v1.7 §4.2, §6 PA-9): fields over 3,000; Session::Unlocks() doesn't set it until G3.
+	UnlockBigField = 8,
 };
 /** Leaderboard points for a finish (the network's formula: field size, buy-in and place). */
 SHORTSTACKCORE_API double Points(int Place, int Entries, Chips BuyInCents);
@@ -267,6 +272,17 @@ struct SeriesInfo
 	std::string MainEvent; // template id
 	int Bracelets = 0;     // events that award a bracelet
 	int Rings = 0;         // events that award a ring
+	// Update 4 (SPEC v1.7 §2.1.2, §6 PA-2), appended: in memory, never saved, in no pinned hash. Every series keeps these defaults
+	// until G1 (F-net sets them).
+	bool Festival = false;   // one of the ten brands (§2.1.3)
+	std::string Brand;       // "rcop", "ring", "tco", "slam", "feign", "push", "writ", "grit", "pennant", "reign"; "" for a series
+	int Draw = 0;            // the Scene Book's pull: §3.2.1's table is the one list (rcop 110, pennant 50, reign 45 ... writ 14, and the
+	                         // plain series). F-net sets every series' value at G1 (inert until G2's Scene Book reads it).
+	bool Flagship = false;   // a Main that can start a Summer (DESIGN §5.3; read from G2): rcop and slam only
+	bool HighRoller = false; // the high-roller arrival mix (§3.2.1): writ and Top Floor Series; F-net sets it at G1 (§12.1 I-3)
+	std::string Title;       // the full title, printed on the hub banner and the strip's popover only (§2.11 N17-N19): "Pier's Upbeat
+	                         // Summer Hold'em" (push), "The Winter RunItTwice" (writ), "The Grinders' RunItTwice" (grit); "" otherwise
+	                         // (FEIGN, PENNANT and REIGN have none)
 };
 
 enum class NewsKind : int
@@ -327,6 +343,12 @@ public:
 	const std::vector<EventTemplate>& Templates() const { return Temps; }
 	const std::vector<SeriesInfo>& Series() const { return AllSeries; }
 	const EventTemplate& TemplateOf(const EventInstance& E) const { return Temps[static_cast<size_t>(E.Template)]; }
+	/**
+	 * Update 4 (SPEC v1.7 §2.3.2, §6 PA-4): an instance's name, the one every reader of a festival instance's name reads (from G1:
+	 * the listing and News, the world's Pending::Name, the lobby rows, THE BOARD, the hub and results lines). TemplateOf(E).Name
+	 * until G1, when F-net inserts GRIT's run ("GRIT 07-L") from the instance's start minute.
+	 */
+	SHORTSTACKCORE_API std::string NameOf(const EventInstance& E) const;
 	/** A template by id (nullptr when there is none). */
 	SHORTSTACKCORE_API const EventTemplate* FindTemplate(const std::string& Id) const;
 	/** The ticket an event takes (a satellite seat into it): its own id, or "rcop-main" for every year's RCOP Main. */
@@ -437,6 +459,18 @@ private:
 	void BuildSite();
 	std::shared_ptr<const SiteDef> Rules; // never null; shared, so a Network still copies
 	SiteId NetSite = SiteId::RiverLine;
+	// Update 4 (SPEC v1.7 §2.1.2, §2.4.5, §6 PA-4; frozen after Phase A).
+	/** Series id -> AllSeries index (the first series with that id), filled in Index(): FindSeries reads it (it was a linear scan). */
+	std::map<std::string, int> SeriesIndex;
+	/** The rival festivals (G/NetworkFestival.cpp, F-net): rival sites only, called last in BuildSite. Adds nothing until G1. */
+	void BuildFestivals();
+	/**
+	 * The largest field that started each day on this site (4 B a day; fest::RecordOf, §2.4.5), filled by a non-caching walk
+	 * (Recurring + OnDay[Day] through Make, never DayCache): FillDayMax, called from Prewarm up to Now. G/NetworkFestival.cpp;
+	 * empty and unread until G1.
+	 */
+	mutable std::vector<int> DayMax;
+	void FillDayMax(double Now) const;
 };
 
 /** The network every screen shows (built on first use): RiverLine's. net::Site and net::ForEvent (Sites.h) reach the others. */

@@ -663,6 +663,12 @@ bool World::Headline(const WorldEvent& E, std::string& Title, std::string& Body,
 	}
 }
 
+void World::NewsExtras(net::SiteId /*Site*/, double /*Now*/, std::vector<net::NewsItem>& /*Items*/) const
+{
+	// Update 4 (SPEC v1.7 §6 PA-10): Network::News calls this after its world-log blocks. A no-op until G2 (W-story's RISING and
+	// NEW FACES posts; the body may move to W-story's own file with the stub).
+}
+
 std::string World::Describe(int Id) const
 {
 	const Npc* P = Get(Id);

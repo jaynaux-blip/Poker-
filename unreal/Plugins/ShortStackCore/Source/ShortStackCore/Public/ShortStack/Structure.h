@@ -18,6 +18,17 @@ struct Level
 SHORTSTACKCORE_API const std::vector<Level>& StandardLevels();
 
 /**
+ * Update 4 (SPEC v1.7 §2.4.3, §6 PA-11): a prize table's shape. Standard is PayoutTable exactly; Main is the festival Mains'
+ * written curve (G1; nothing sets it before). Never saved. Declared with A-1's first commit (PA-3 appends it to
+ * net::EventTemplate); PayoutFor, PaidPlaces and the payout:: constants come with PA-11.
+ */
+enum class PayoutCurve : uint8_t
+{
+	Standard = 0,
+	Main = 1,
+};
+
+/**
  * Payout table in cents: about 15% of the field paid, power-law prizes, a
  * min-cash floor and banded places after 9th. Sums exactly to the pool.
  */

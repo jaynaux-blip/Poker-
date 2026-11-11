@@ -1,5 +1,6 @@
 #include "SitesDetail.h"
 
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Rep.h"
@@ -530,11 +531,16 @@ bool GateMet(net::SiteId S, const rep::Public& P, int RentsPaid, double World, i
 	// at a $5.50 last-100 average) and an Ignite Level path (RunItTwice: Level 20), on top of every Update 2 path; zero is none.
 	const bool Volume2 = D.Gate.MinEvents2 > 0 && std::max(P.OnlineEvents, P.Paid100) >= D.Gate.MinEvents2 && P.Abi100 >= D.Gate.MinAbi100_2;
 	const bool LevelPath = D.Gate.IgniteLevel > 0 && IgniteLevel >= D.Gate.IgniteLevel;
+	// Update 4 (SPEC v1.7 §2.10, §6 PA-8): the Festival Pass, after the launch and the two rents above, for festival weeks only (the
+	// site's festival Announced, in Buildup or Live). FestivalEvents is -1 on every site until G1, so the path stays closed and
+	// PassFestival isn't asked.
+	const fest::Festival* PassFest = D.Gate.FestivalEvents >= 0 ? fest::PassFestival(S, World) : nullptr;
+	const bool Pass = PassFest && std::max(P.OnlineEvents, P.Paid100) >= fest::PassNeeds(*PassFest, D.Gate);
 	if (Why)
 	{
-		*Why = Volume ? 0 : Title ? 1 : Partner ? 2 : Volume2 ? 3 : LevelPath ? 4 : 2;
+		*Why = Volume ? 0 : Title ? 1 : Partner ? 2 : Volume2 ? 3 : LevelPath ? 4 : Pass ? 5 : 2;
 	}
-	return Volume || Title || Partner || Volume2 || LevelPath;
+	return Volume || Title || Partner || Volume2 || LevelPath || Pass;
 }
 
 int IgniteLevelOf(const life::State& L)
@@ -640,8 +646,9 @@ void Invite(Book& B, life::State& L, net::SiteId S, double World, int Why, bool 
 	Found->At = World;
 	Found->State = Second ? 3 : 0;
 	const std::string Key = std::string(Second ? "invite2:" : "invite:") + net::KeyOf(S);
-	// The reason is GateMet's (0 to 4); anything else (ss.Site.Invite past every gate passes -1) says hello and claims nothing.
-	const std::string Reason = Why >= 0 && Why <= 4 ? "why:" + std::to_string(Why) : std::string("why:hello");
+	// The reason is GateMet's (0 to 5: Update 4's Festival Pass is 5, §2.10, whose letter G1 writes); anything else (ss.Site.Invite
+	// past every gate passes -1) says hello and claims nothing.
+	const std::string Reason = Why >= 0 && Why <= 5 ? "why:" + std::to_string(Why) : std::string("why:hello");
 	const std::vector<std::pair<std::string, std::string>> Vars = {{"Why", SiteText(Reason)}};
 	PostLetter(L, S, World, LetterInvite, FillCopy(SiteText(Key + ":subject"), Vars), FillCopy(SiteText(Key), Vars));
 	L.Update2LinesRead |= life::U2Sites;

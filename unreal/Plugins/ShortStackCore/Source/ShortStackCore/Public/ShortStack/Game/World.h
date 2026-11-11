@@ -1168,6 +1168,9 @@ public:
 	// never make a headline.
 	SHORTSTACKCORE_API Profile ProfileOf(int Npc) const;
 	SHORTSTACKCORE_API bool Headline(const WorldEvent& E, std::string& Title, std::string& Body, std::string& Tag) const;
+	/** Update 4 (SPEC v1.7 §3.15, §3.19, §6 PA-10): the world's own posts on Site's News page (G2: W-story's RISING and NEW FACES),
+	 *  appended to Items by Network::News after its world-log blocks. A no-op until G2. */
+	SHORTSTACKCORE_API void NewsExtras(net::SiteId Site, double Now, std::vector<net::NewsItem>& Items) const;
 
 	// Debug.
 	SHORTSTACKCORE_API std::string Describe(int Npc) const;

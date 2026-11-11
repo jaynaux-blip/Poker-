@@ -1,0 +1,23 @@
+// Update 4, Festival Season (SPEC v1.7 §2.3, §2.4.5): the rival festivals' templates and the record field's day maxima, Network's
+// side of fest::. F-net's file from G1: the plans (const NetSitesFestival IgniteFestivals[], RunItTwiceFestivals[]; FEIGN, PUSH and
+// PENNANT on Ignite, WRIT, GRIT and REIGN on RunItTwice, each appended last so every sibling template keeps its index), their
+// numbered events, headliners and satellites, Added and the Main curve; DayMax's non-caching walk for fest::RecordOf.
+//
+// Phase A (§6 PA-4, the lead): both members are declared and called, and do nothing. BuildFestivals runs last in BuildSite and
+// appends no template or series (every rival keeps its 783 and 1,521 templates); FillDayMax runs first in Prewarm and leaves DayMax
+// empty (nothing reads it before G1).
+#include "ShortStack/Game/Network.h"
+
+namespace ss
+{
+namespace net
+{
+void Network::BuildFestivals()
+{
+}
+
+void Network::FillDayMax(double /*Now*/) const
+{
+}
+} // namespace net
+} // namespace ss

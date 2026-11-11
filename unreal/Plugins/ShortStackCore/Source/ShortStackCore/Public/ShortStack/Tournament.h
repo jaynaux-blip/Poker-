@@ -44,6 +44,10 @@ struct TournamentSpec
 	// Breaks (C++ only, the live rooms): after every BreakEvery levels the room takes BreakMinutes off, no hands dealt.
 	int BreakEvery = 0;
 	double BreakMinutes = 0.0;
+	// Update 4 (SPEC v1.7 §2.4.1, §6 PA-12's first two, landed with PA-5's listing fills): site money added to the prize pool
+	// and the prize table's shape (C++ only; 0 and Standard keep the shared behavior). Nothing sets or reads them before G1.
+	Chips AddedCents = 0;
+	PayoutCurve Curve = PayoutCurve::Standard;
 };
 
 struct TPlayer
