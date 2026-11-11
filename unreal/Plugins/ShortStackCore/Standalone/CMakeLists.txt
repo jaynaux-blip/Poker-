@@ -195,14 +195,19 @@ target_link_libraries(kast_ui_test PRIVATE ShortStackCore)
 target_compile_definitions(kast_ui_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
 add_test(NAME kast_ui COMMAND kast_ui_test)
 
-# Update 4 Phase 0 (update 4 SPEC §6.1, §8.1): every suite has a real TIMEOUT, max(its cap, 2.0 x its median run alone),
-# rounded up to a whole second. The caps: night_one_session 125 s, riverline_ui 75 s, rivals_ui 60 s, living_world 45 s; the
-# other suites have none, so theirs is 2.0 x the median. The medians are Phase 0's, three runs of each suite alone on a quiet
-# PC at 8db6d21 (night_one_session 115.9 s, riverline_ui 69.1 s, living_world 35.6 s, rivals_ui 39.9 s). 2.0x, not 1.5x: under
-# the build's own -j 3 a suite can take about 1.5x its time alone. A suite that times out fails. Nobody raises a TIMEOUT
-# without the lead; a suite whose run alone grows past its cap moves checks into its slow mode or splits.
-set_tests_properties(golden_vectors PROPERTIES TIMEOUT 2)
-set_tests_properties(engine_invariants PROPERTIES TIMEOUT 6)
+# Update 4 Phase 0 (update 4 SPEC §6.1, §8.1; the lead's call P-4, durable/update4/LEAD_CALLS.md): every suite has a real
+# TIMEOUT, max(its spec budget, 2.0 x its median run alone, 10 s), rounded up to a whole second. The spec budget is SPEC §8.1's
+# cap for the four suites it lists (night_one_session 125 s, riverline_ui 75 s, rivals_ui 60 s, living_world 45 s), otherwise
+# the default-run budget the suite's own spec set: monkey_play 120 s and pro_badges 90 s (update 2 SPEC §6.7), and those in the
+# comments above (ai_styles 30 s, video_channel 20 s, rival_sites 30 s, site_play 30 s, rerun_algo 30 s, rerun_content 20 s,
+# rerun_ui 60 s, kast_growth 60 s, kast_ui 60 s); the other nine suites have none. The medians are Phase 0's, three runs of each
+# suite alone on a quiet PC at 8db6d21 (night_one_session 115.9 s, riverline_ui 69.1 s, monkey_play 62.7 s, pro_badges 47.8 s,
+# rivals_ui 39.9 s, living_world 35.6 s); every one is within its budget. 2.0x, not 1.5x: under the build's own -j 3 a suite can
+# take about 1.5x its time alone. The 10 s floor keeps a sub-second suite from failing on a slow start of its process. A suite
+# that times out fails. Nobody raises a TIMEOUT without the lead; a suite whose run alone grows past its budget moves checks
+# into its slow mode or splits.
+set_tests_properties(golden_vectors PROPERTIES TIMEOUT 10)
+set_tests_properties(engine_invariants PROPERTIES TIMEOUT 10)
 set_tests_properties(night_one_session PROPERTIES TIMEOUT 232)
 set_tests_properties(riverline_ui PROPERTIES TIMEOUT 139)
 set_tests_properties(monkey_play PROPERTIES TIMEOUT 126)
@@ -211,20 +216,20 @@ set_tests_properties(synthesized_audio PROPERTIES TIMEOUT 11)
 set_tests_properties(northside_shops PROPERTIES TIMEOUT 35)
 set_tests_properties(northside_shops_ui PROPERTIES TIMEOUT 24)
 set_tests_properties(northside_town PROPERTIES TIMEOUT 23)
-set_tests_properties(staking_backing PROPERTIES TIMEOUT 1)
-set_tests_properties(sponsor_deals PROPERTIES TIMEOUT 1)
+set_tests_properties(staking_backing PROPERTIES TIMEOUT 10)
+set_tests_properties(sponsor_deals PROPERTIES TIMEOUT 10)
 set_tests_properties(card_room PROPERTIES TIMEOUT 17)
 set_tests_properties(pro_badges PROPERTIES TIMEOUT 96)
-set_tests_properties(ai_styles PROPERTIES TIMEOUT 26)
-set_tests_properties(video_channel PROPERTIES TIMEOUT 1)
-set_tests_properties(rival_sites PROPERTIES TIMEOUT 21)
-set_tests_properties(site_play PROPERTIES TIMEOUT 29)
+set_tests_properties(ai_styles PROPERTIES TIMEOUT 30)
+set_tests_properties(video_channel PROPERTIES TIMEOUT 20)
+set_tests_properties(rival_sites PROPERTIES TIMEOUT 30)
+set_tests_properties(site_play PROPERTIES TIMEOUT 30)
 set_tests_properties(rerun_algo PROPERTIES TIMEOUT 39)
-set_tests_properties(rerun_content PROPERTIES TIMEOUT 9)
+set_tests_properties(rerun_content PROPERTIES TIMEOUT 20)
 set_tests_properties(rivals_ui PROPERTIES TIMEOUT 80)
-set_tests_properties(rerun_ui PROPERTIES TIMEOUT 54)
-set_tests_properties(kast_growth PROPERTIES TIMEOUT 34)
-set_tests_properties(kast_ui PROPERTIES TIMEOUT 7)
+set_tests_properties(rerun_ui PROPERTIES TIMEOUT 60)
+set_tests_properties(kast_growth PROPERTIES TIMEOUT 60)
+set_tests_properties(kast_ui PROPERTIES TIMEOUT 60)
 
 # Not a suite: core-styles' chart compiler (update 2 SPEC §2.4.2, §2.4.4), Tests/charts/*.txt into AI/ChartTables.cpp.
 add_executable(chartgen tools/chartgen/chartgen_main.cpp)
