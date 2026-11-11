@@ -4,7 +4,10 @@
 #include "ShortStack/Game/World.h"
 #include "ShortStack/Rng.h"
 
+#include <array>
 #include <cmath>
+#include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -104,12 +107,78 @@ int MonthDay(int Day);
  *  bracelet events (its Main Event aside), in date order. */
 std::vector<LiveEvent> TitleEvents(int Year);
 
+/** Update 4 (§6 PA-33): a name lowercased as handles' Lower does it (World::NameUsed's index; World.cpp). */
+std::string NameLower(const std::string& S);
+/** Update 4 (§6 PA-34): a world's serial (WorldStamp::Serial, one per Create and per load), unique in this process, never 0. */
+uint64_t NextWorldSerial();
+
 /** The world day of a time. */
 inline int DayAt(double Minutes)
 {
 	return static_cast<int>(std::floor(Minutes / 1440.0));
 }
 } // namespace sim
+
+/** An online option or a live event someone could enter today (PlanDay's; moved here with PlanState, Update 4 §6 PA-35). */
+struct PlanOption
+{
+	Pending P;
+	double LogBuy = 0.0;
+	int Minute = 0; // of the day it starts
+	bool Featured = false;
+	bool Weekly = false; // a weekly major (not a daily)
+	bool Underground = false;
+	int Cap = 0;
+	std::string Template; // online template id ("" live)
+	std::string Final;    // satellites: the Main Event the chain of seats ends at
+	LiveLevel Level = LiveLevel::None;
+	Region Where = Region::Americas;
+	std::set<int> Invited; // the Summit
+	net::SiteId Site = net::SiteId::RiverLine; // online: the site it's on (update 2 §5.9)
+	bool Overlay = false;                       // a rival's guarantee its field won't cover (the skilled hunt these)
+	// Update 4 (§6 PA-33, rev-code M8): one of Dee's games ("dees@<day>") and its day, decided once a day, not once a person.
+	bool Dees = false;
+	int DeesDay = 0;
+};
+
+/**
+ * Update 4 (SPEC v1.7 §3.7 R2, §6 PA-35; A2): PlanDay's loop locals for the day being planned, hoisted so a held turn can stop
+ * between people (ranges of its shuffled order) and finish later. Index-based (the lists hold PlanRefs: list << 24 | index, list 0
+ * RiverLine's Online, s a rival's Rivals[s]) and copyable, so World copies mid-plan (WorldPreview, a snapshot) and a copy never
+ * points into its source. World holds it in TurnCarry::Plan while a plan is open.
+ */
+struct PlanState
+{
+	int Day = 0;   // the day being planned (PlanDay's D)
+	int Until = 0; // PlanDay's argument (grow::BuyInScale reads it, as it always has)
+	int Open = 0;  // the sites with a lobby open that day (bits)
+	int SeriesOn = 0;
+	Rng R{std::string()}; // the day's stream: the shuffle, then one fork per person in order
+	std::vector<PlanOption> Online;
+	std::array<std::vector<PlanOption>, static_cast<size_t>(net::SiteId::Count)> Rivals;
+	std::array<double, static_cast<size_t>(net::SiteId::Count)> Traffic{};
+	std::vector<PlanOption> Live;
+	std::vector<uint32_t> HomeList;              // RiverLine's list (refs into Online)
+	std::map<int, std::vector<uint32_t>> Merged; // a rival's members' lists, by their open sites (Sim::PlanList)
+	size_t Widest = 0;
+	std::vector<int> Order;       // the playing people, shuffled
+	std::vector<char> RoomRegular; // by id: the Embercrest's regulars
+	std::vector<double> Weight;    // the online picks' weights (zero between people)
+};
+
+/**
+ * Update 4 (SPEC v1.7 §6 PA-34; rev-code minor 11), the debug page-generation check: a const Npc& taken from People() must not be
+ * held across an Edit that clones its page (it would go on reading the copy another World keeps). A reader that holds someone across
+ * calls that may edit takes a PageWatch and asserts Same() before each use (SS_ASSERT: test and debug builds).
+ */
+struct PageWatch
+{
+	const World& W;
+	size_t Id;
+	uint32_t Gen;
+	PageWatch(const World& InW, int InId) : W(InW), Id(static_cast<size_t>(InId)), Gen(InW.People().PageGen(static_cast<size_t>(InId))) {}
+	bool Same() const { return W.People().PageGen(Id) == Gen; }
+};
 
 /** The simulation: free functions with access to the World's state (friend). */
 struct Sim
@@ -173,13 +242,63 @@ struct Sim
 	static double Habit(const Npc& N);
 
 	// ---- the days (WorldSim.cpp)
+	/**
+	 * Registrations for every day not yet planned up to Day, then the queue in end order. Update 4 (SPEC v1.7 §3.7 R2, §6 PA-35):
+	 * PlanDay(W, Day) is exactly
+	 *     while (PlanBegin(W, Day)) { PlanPeople(W, 0, PlanCount(W)); PlanEnd(W); } PlanSort(W);
+	 * so a held turn may run PlanPeople in ranges [From, To) of the shuffled order (TurnUnit::PlanDay) and PlanEnd + PlanSort as
+	 * TurnUnit::PlanInsert, with the same draws in the same order.
+	 */
 	static void PlanDay(World& W, int Day);
+	/** Opens the next unplanned day up to Day (W.Planned moves to it): its options, its shuffled order (World's TurnCarry::Plan).
+	 *  False when every day up to Day is planned (nothing opened). */
+	static bool PlanBegin(World& W, int Day);
+	/** People in the open plan's order (0 when no plan is open). */
+	static int PlanCount(const World& W);
+	/** Everyone at order positions [From, To) decides (their entries, their seats used). */
+	static void PlanPeople(World& W, int From, int To);
+	/** The open day's entries into the queue (W.Queue), and the plan closed. */
+	static void PlanEnd(World& W);
+	/** The queue in end order (a queue already in order is left alone: a stable sort of it is the same queue). */
+	static void PlanSort(World& W);
+	/** A rival's members' merged list for a set of open sites (PlanState::Merged, built once a day per set). */
+	static const std::vector<uint32_t>& PlanList(PlanState& S, int Mask);
 	static Pending OnlineEvent(World& W, const net::EventInstance& E);
 	static Pending LiveEventOf(World& W, const LiveEvent& E);
 	static void Resolve(World& W, Pending& P);
+	/**
+	 * The midnight turn. Update 4 (§3.7 R2, §6 PA-35): NewDay(W, Day) is exactly
+	 *     NewDayOpen(W, Day);
+	 *     if (W.Turn.MonthTurned) { NewMonthOpen; NewMonthPeople(W, Day, 0, N); NewMonthClose; }       (NewMonth)
+	 *     if (NewDayWeek(W, Day)) { NewWeekOpen; NewWeekPeople(W, Day, 0, N); NewWeekClose; }         (NewWeek)
+	 *     NewDayCalendar(W, Day); scene::Day(W, Day); NewDayPeople(W, Day, 0, N); NewDayClose(W, Day);
+	 *     Ranks(W); story::Day(W, Day);
+	 * with N the roster's size when each loop starts; each People call takes any id range [From, To) in order (the month's and the
+	 * week's Rng carried in W.Turn), so a held turn's units are these pieces.
+	 */
 	static void NewDay(World& W, int Day);
 	static void NewWeek(World& W, int Day);
 	static void NewMonth(World& W, int Day);
+	/** FestDay, the New Year's turn, and whether the month turned (W.Month set; W.Turn.MonthTurned). */
+	static void NewDayOpen(World& W, int Day);
+	/** A Monday not yet turned: W.Week set, true. */
+	static bool NewDayWeek(World& W, int Day);
+	/** The 1st's Verified review (when the month turned) and July 15's Hall of Fame. */
+	static void NewDayCalendar(World& W, int Day);
+	/** NewDay's per-person rest, breaks and trips, ids [From, To). */
+	static void NewDayPeople(World& W, int Day, int From, int To);
+	/** The results and cancellations kept, the rival sites' morning and a fresh world's board report (before Ranks). */
+	static void NewDayClose(World& W, int Day);
+	static void NewWeekOpen(World& W, int Day);
+	static void NewWeekPeople(World& W, int Day, int From, int To);
+	static void NewWeekClose(World& W, int Day);
+	static void NewMonthOpen(World& W, int Day);
+	static void NewMonthPeople(World& W, int Day, int From, int To);
+	static void NewMonthClose(World& W, int Day);
+	/** Ignite's Headliners (WorldLeague.h's Headliners): kept in World::Headlined while the world's revisions and the clock stand. */
+	static std::vector<Headliner> HeadlinerPicks(const World& W, double At, int Count);
+	/** Forgets the Headliners kept (a launch moves Ignite's members without a revision). */
+	static void ForgetHeadliners(const World& W) { W.Headlined = World::HeadlinerCache(); }
 	static void NewYear(World& W, int Calendar, int Day);
 	static double Score(const Npc& N, int Kinds);
 	static void Post(World& W, double At, EventKind K, int Who, const std::string& What, Chips Amount = 0, int Value = 0, int Other = -1);

@@ -57,7 +57,8 @@ private:
 
 	UE::Tasks::FTask InFlight;
 	TOptional<ss::SaveData> Waiting;
-	// The world's text for the last snapshot written (snapshots repeat until the world moves on).
-	std::shared_ptr<const ss::world::World> TextOf;
-	std::string WorldText;
+	// The world's text for the last snapshot written, keyed by its stamp (Update 4, SPEC v1.7 §6 PA-34: the saves of one world state
+	// carry the same stamp, and its snapshot only while one is alive; the text is shared into each save, never copied).
+	ss::world::WorldStamp TextOf;
+	ss::world::SharedText WorldText;
 };

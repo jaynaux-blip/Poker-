@@ -175,6 +175,9 @@ SHORTSTACKCORE_API void Left(World& W, Npc& N, int Today, bool Broke);
 SHORTSTACKCORE_API void Honeymoon(World& W, Npc& N, int Today);
 /** Sim::Broadcast's follower milestones: a streamer's Stream moment (§3.2). */
 SHORTSTACKCORE_API void OnStreamMilestone(World& W, Npc& N, int Today, int Followers);
+/** Update 4 (§3.4; LEAD_CALLS Q-5): whether an event is a Main: online, its template's Main flag (P.Template on the event's site
+ *  network); live, LiveEvent::Main of the live calendar (the flags that feed P.Major). Phase A: false (W-arrive's body at G2). */
+SHORTSTACKCORE_API bool IsMain(const World& W, const Pending& P);
 
 // ---- the keeper (§3.3) and the card.
 /** The scene (X1): people Active or on a Break and not Faded (from G4 the crowd's too). */

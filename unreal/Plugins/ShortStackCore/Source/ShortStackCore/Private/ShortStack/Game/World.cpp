@@ -8,12 +8,35 @@
 #include "WorldSim.h"
 
 #include <algorithm>
+#include <atomic>
+#include <cctype>
 #include <cmath>
+#include <ostream>
+#include <type_traits>
 
 namespace ss
 {
 namespace world
 {
+// Update 4 (SPEC v1.7 §6 PA-33): Npc moves (never copies) when its page or a vector of people grows.
+static_assert(std::is_nothrow_move_constructible<Npc>::value, "Npc is nothrow-movable (TicketBook, not std::map)");
+
+std::string sim::NameLower(const std::string& S)
+{
+	std::string Out = S;
+	for (char& Ch : Out)
+	{
+		Ch = static_cast<char>(std::tolower(static_cast<unsigned char>(Ch)));
+	}
+	return Out;
+}
+
+uint64_t sim::NextWorldSerial()
+{
+	static std::atomic<uint64_t> WorldSerials{0};
+	return ++WorldSerials;
+}
+
 namespace world_detail
 {
 
@@ -273,10 +296,17 @@ int Sim::Add(World& W, Npc&& N)
 	SeedStats(N);
 	N.Id = static_cast<int>(W.Roster.size());
 	W.ByName[N.Name] = N.Id;
+	W.NamesLower.Mut().insert(sim::NameLower(N.Name)); // Update 4 (§6 PA-33): World::NameUsed's index
+	// Update 4 (§6 PA-33): reserve ahead, so a week of arrivals never re-grows the rows one at a time (the roster grows by pages).
+	if (W.Rows.size() == W.Rows.capacity())
+	{
+		W.Rows.reserve(W.Rows.size() + W.Rows.size() / 2 + RosterPage::Size);
+	}
 	W.Roster.push_back(std::move(N));
 	W.Rows.emplace_back();
-	W.Refresh(W.Roster.back().Id);
-	return W.Roster.back().Id;
+	const int Id = W.Roster.back().Id;
+	W.Refresh(Id);
+	return Id;
 }
 
 void Sim::Found(World& W, double Start)
@@ -640,7 +670,7 @@ void Sim::Found(World& W, double Start)
 		N.Began = N.Is = Identity::Streamer;
 		Add(W, std::move(N));
 	}
-	for (Npc& N : W.Roster)
+	for (Npc& N : W.EditAll())
 	{
 		Reputation(N);
 	}
@@ -673,7 +703,7 @@ Npc Sim::Rookie(World& W, Rng& R, int Day)
 	if (Came == Arrival::HomeGame || Came == Arrival::Watched)
 	{
 		std::vector<int> Pool;
-		for (const Npc& O : W.Roster)
+		for (const Npc& O : W.People())
 		{
 			if (!O.Playing())
 			{
@@ -840,6 +870,7 @@ void World::Create(uint32_t InSeed, double StartWorld, Start S)
 {
 	*this = World();
 	Created = true;
+	Instance = sim::NextWorldSerial(); // Update 4 (§6 PA-34): the stamps' serial for this world
 	WorldSeed = InSeed;
 	Now = StartWorld;
 	Origin = StartWorld;
@@ -979,7 +1010,7 @@ void Sim::Wipe(World& W)
 	// A fresh start (update 2 §3.4): the people as an established world built them, every record gone. The world's own
 	// books go too: no honors, no news, no series standings, no Night Shift.
 	const int Today = sim::DayAt(W.Origin);
-	for (Npc& N : W.Roster)
+	for (Npc& N : W.EditAll())
 	{
 		WipeRecord(N, Today);
 	}
@@ -1107,18 +1138,11 @@ int World::ActiveCount() const
 	return N;
 }
 
-void World::Refresh(int Id)
+namespace world_detail
 {
-	if (Id < 0 || Id >= static_cast<int>(Roster.size()))
-	{
-		return;
-	}
-	const Npc& N = Roster[static_cast<size_t>(Id)];
-	if (Rows.size() < Roster.size())
-	{
-		Rows.resize(Roster.size());
-	}
-	net::Player& P = Rows[static_cast<size_t>(Id)];
+/** One person's network row (World::Refresh, and a snapshot's rows built from its pages). */
+void WorldFillRow(const Npc& N, net::Player& P)
+{
 	const Ledger& On = N.Totals[static_cast<size_t>(Venue::Online)];
 	P.Name = N.Name;
 	P.Country = N.Country;
@@ -1140,14 +1164,150 @@ void World::Refresh(int Id)
 	P.SeasonFinalTables = N.ThisSeason.FinalTables;
 	P.Form = N.Weekly;
 }
+} // namespace world_detail
+
+void World::Refresh(int Id)
+{
+	if (Id < 0 || Id >= static_cast<int>(Roster.size()))
+	{
+		return;
+	}
+	if (SnapRows)
+	{
+		// A snapshot copied into a world that changes: its rows become its own first (built from its pages).
+		Rows = SnapshotView();
+		SnapRows.reset();
+	}
+	if (Rows.size() < Roster.size())
+	{
+		Rows.resize(Roster.size());
+	}
+	world_detail::WorldFillRow(People()[static_cast<size_t>(Id)], Rows[static_cast<size_t>(Id)]);
+}
 
 void World::RefreshAll()
 {
+	if (SnapRows)
+	{
+		SnapRows.reset();
+	}
 	Rows.resize(Roster.size());
 	for (size_t I = 0; I < Roster.size(); ++I)
 	{
 		Refresh(static_cast<int>(I));
 	}
+}
+
+// ------------------------------------------------------------------ Update 4: the paged roster and the shared snapshot
+
+PagedRoster::Walk PagedRoster::EditAll()
+{
+	Unshare(0, Count);
+	return Walk(this);
+}
+
+void PagedRoster::Unshare(size_t From, size_t To)
+{
+	if (From >= To || Pages.empty())
+	{
+		return;
+	}
+	const size_t Last = std::min((To - 1) / RosterPage::Size, Pages.size() - 1);
+	for (size_t Page = From / RosterPage::Size; Page <= Last; ++Page)
+	{
+		(void)Own(Page);
+	}
+}
+
+void PagedRoster::Clone(size_t Page)
+{
+	// Copy-on-write: another World (a snapshot, a copy) holds this page, so this roster takes its own copy, with room for a full
+	// page (it never reallocates), one generation on. The other World keeps the old page as it was.
+	const RosterPage& From = *Pages[Page];
+	std::shared_ptr<RosterPage> Copy = std::make_shared<RosterPage>();
+	Copy->People.reserve(RosterPage::Size);
+	Copy->People = From.People;
+	Copy->Gen = From.Gen + 1;
+	Pages[Page] = std::move(Copy);
+	++CloneCount;
+	std::atomic_thread_fence(std::memory_order_acquire);
+	SS_ASSERT(Pages[Page].use_count() == 1); // a page written is never a frozen (shared) one
+}
+
+void PagedRoster::push_back(Npc&& N)
+{
+	if (Count % RosterPage::Size == 0)
+	{
+		std::shared_ptr<RosterPage> Page = std::make_shared<RosterPage>();
+		Page->People.reserve(RosterPage::Size);
+		Pages.push_back(std::move(Page));
+	}
+	RosterPage& Last = Own(Pages.size() - 1);
+	Last.People.push_back(std::move(N));
+	++Count;
+}
+
+void PagedRoster::resize(size_t N)
+{
+	while (Count > N)
+	{
+		RosterPage& Last = Own(Pages.size() - 1);
+		Last.People.pop_back();
+		if (Last.People.empty())
+		{
+			Pages.pop_back();
+		}
+		--Count;
+	}
+	while (Count < N)
+	{
+		push_back(Npc());
+	}
+}
+
+std::shared_ptr<const World> World::Snapshot()
+{
+	if (!Created)
+	{
+		return nullptr;
+	}
+	// The pages and the shared containers go by pointer; View()'s rows stay behind (a snapshot rebuilds its own if asked, so the
+	// world's Rows, which View() hands out by reference, is never swapped out under its readers). The rows are moved aside for the
+	// copy and straight back: the same buffer, so every reference into them stays good.
+	std::vector<net::Player> Kept;
+	Kept.swap(Rows);
+	std::shared_ptr<World> Copy = std::make_shared<World>(*this);
+	Rows.swap(Kept);
+	Copy->SnapRows = std::make_shared<SnapshotRows>();
+	Copy->Headlined = HeadlinerCache();
+	return Copy;
+}
+
+const std::vector<net::Player>& World::SnapshotView() const
+{
+	SnapshotRows& S = *SnapRows;
+	std::lock_guard<std::mutex> Hold(S.Lock);
+	if (!S.Built)
+	{
+		S.Rows.resize(Roster.size());
+		for (size_t I = 0; I < Roster.size(); ++I)
+		{
+			world_detail::WorldFillRow(Roster[I], S.Rows[I]);
+		}
+		S.Built = true;
+	}
+	return S.Rows;
+}
+
+bool World::NameUsed(const std::string& Name) const
+{
+	const std::string L = sim::NameLower(Name);
+	return NamesLower.Get().count(L) > 0 || (!HeroName.empty() && sim::NameLower(HeroName) == L);
+}
+
+std::ostream& operator<<(std::ostream& Out, const SharedText& T)
+{
+	return Out << T.Str();
 }
 } // namespace world
 } // namespace ss

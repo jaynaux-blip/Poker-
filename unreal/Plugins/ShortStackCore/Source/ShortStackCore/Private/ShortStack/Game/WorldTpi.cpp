@@ -50,5 +50,16 @@ void VoiceStory(const World& /*W*/, int /*Npc*/, int& TpiRank, bool& Rising)
 	Rising = false;
 }
 } // namespace story
+
+// Update 4 (LEAD_CALLS Q-5): the TPI's World face, declared before the freeze. Phase A: nobody is ranked.
+const TpiRec* World::TpiOf(int /*Npc*/) const
+{
+	return nullptr;
+}
+
+void World::HeroTpiCash(const std::string& /*EventId*/, int /*Place*/, Chips /*Prize*/)
+{
+	// Phase A: the hero is unranked (G2: the hero's cash folded once per event id, inside HeroFinished).
+}
 } // namespace world
 } // namespace ss

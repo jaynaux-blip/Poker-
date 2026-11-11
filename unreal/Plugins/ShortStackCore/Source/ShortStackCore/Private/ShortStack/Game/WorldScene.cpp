@@ -30,6 +30,12 @@ struct Access
 	static std::vector<int>& Regulars(World& W) { return W.Regulars; }
 };
 
+bool IsMain(const World& /*W*/, const Pending& /*P*/)
+{
+	// Phase A (LEAD_CALLS Q-5): declared before the freeze; no ripple reads it yet (G2's OnResolved).
+	return false;
+}
+
 void Day(World& /*W*/, int /*Today*/)
 {
 	// Phase A: the book hasn't opened (AnchorDay -1): nothing is posted.

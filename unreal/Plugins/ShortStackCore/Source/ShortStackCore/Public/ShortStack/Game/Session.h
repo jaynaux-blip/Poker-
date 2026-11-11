@@ -334,14 +334,22 @@ struct SaveData
 	gear::Owned Gear;
 	gear::LedState Leds;
 	kast::Channel Channel;
-	/** The living world (its own "world" lines, passed through untouched by anything that edits a save). */
-	std::string WorldText;
+	/**
+	 * The living world (its own "world" lines, passed through untouched by anything that edits a save). Update 4 (SPEC v1.7 §6
+	 * PA-34): shared and immutable, so copies of a save share one buffer; it reads as a const std::string.
+	 */
+	world::SharedText WorldText;
 	/**
 	 * For a host that saves in the background (SessionHooks::SavesInBackground): the world as it was at the save,
 	 * frozen, for the host to write into WorldText off the game thread (WorldText is empty then). The same snapshot
 	 * comes back on every save until the world moves on, so its text need only be written once.
 	 */
 	std::shared_ptr<const world::World> WorldSnapshot;
+	/**
+	 * Update 4 (§6 PA-34): the snapshot's stamp (World::SnapshotStamp). The host keys the world text it wrote by this, not by the
+	 * snapshot, and lets the snapshot go once its text is written; a later save of the same stamp may come with no snapshot.
+	 */
+	world::WorldStamp WorldStamp;
 	/** What happened away from the desk for the world to hear about (written by the host, read by the next session). */
 	std::vector<std::string> WorldNotes;
 

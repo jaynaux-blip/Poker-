@@ -17,5 +17,28 @@ void ProfileExtras(const World& /*W*/, const Npc& /*N*/, Profile& /*Pr*/)
 	// Phase A: the card is today's.
 }
 } // namespace story
+
+// Update 4 (LEAD_CALLS Q-5; the gate sections' surfaces, declared before the freeze): display reads, empty in Phase A (W-ui fills
+// them at G2, cached by (id, World::Rev)).
+const StoryView& World::StoryOf(int /*Npc*/) const
+{
+	static const StoryView ProfStoryNone;
+	return ProfStoryNone;
+}
+
+const NotebookView& World::NotebookOf(NotebookTab Tab) const
+{
+	static const NotebookView ProfNotebookNone[static_cast<size_t>(NotebookTab::Count)] = {
+		{NotebookTab::Following, {}}, {NotebookTab::SinceYouLooked, {}}, {NotebookTab::NamesToWatch, {}}, {NotebookTab::Risers, {}},
+		{NotebookTab::FirstYears, {}}, {NotebookTab::Scene, {}}, {NotebookTab::You, {}}};
+	const size_t K = static_cast<size_t>(Tab) < static_cast<size_t>(NotebookTab::Count) ? static_cast<size_t>(Tab) : 0;
+	return ProfNotebookNone[K];
+}
+
+const SceneChartView& World::SceneChart() const
+{
+	static const SceneChartView ProfSceneNone;
+	return ProfSceneNone;
+}
 } // namespace world
 } // namespace ss
