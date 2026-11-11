@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <iosfwd>
@@ -1310,6 +1311,7 @@ private:
 		{
 			Clone(Page);
 		}
+		std::atomic_thread_fence(std::memory_order_acquire); // use_count() reads relaxed: the saver's release happens before our writes (Q-14)
 		return *Pages[Page];
 	}
 	SHORTSTACKCORE_API void Clone(size_t Page);
@@ -1337,6 +1339,7 @@ public:
 		{
 			P = std::make_shared<C>(*P);
 		}
+		std::atomic_thread_fence(std::memory_order_acquire); // use_count() reads relaxed: the saver's release happens before our writes (Q-14)
 		return *P;
 	}
 	operator const C&() const noexcept { return *P; }

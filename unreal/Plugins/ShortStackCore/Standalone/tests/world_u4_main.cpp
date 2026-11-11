@@ -10,12 +10,19 @@
 // harness below, world-only and session-wide, and Phase A's turn checks (SegTurn): slice invariance at 0.5, 2 and unlimited ms (and
 // 0: one unit a call) over a run from Sun Jan 3 to Tue Feb 2, 2027 (crossing Monday, Feb 1, 2027), a copy taken mid-hold,
 // save-during-hold and texts-during-hold in their Phase A form, the HoldGuard, the structural turn checks, and PA-33's two caches.
+// The lead's fixes after A-2 (pa-fix, LEAD_CALLS Q-10): turn_actions calls the session's draining user actions during a hold, and
+// turn_session asks for a save on every held frame (§3.7 R5's session form).
 //   world_u4_test                    the checks (ctest)
 //   world_u4_test turn-session       the session-wide slice checks alone, whether or not this build wires them (see kTurnSessionWired)
+//   world_u4_test turn-actions       turn_actions alone
 #include "u4_seat_harness.h"
 
 #include "ShortStack/Game/Live.h"
+#include "ShortStack/Game/Lobby.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/SitePlay.h"
+#include "ShortStack/Game/Talk.h"
+#include "ShortStack/Game/Video.h"
 #include "ShortStack/Game/World.h"
 
 #include <algorithm>
@@ -931,7 +938,9 @@ void SegTurn()
 
 /** The session-wide slice checks (§3.7, §6.6): a new career over 28 days (Mon Oct 12 and 19, 2026, the month's turn on Nov 1) at
  *  0.5 ms equals the unlimited one: its phone, in order, and its save. With the HoldGuard armed (a test build aborts on any
- *  undrained World call), it is also the session's drain audit. */
+ *  undrained World call), it is also the session's drain audit. The 0.5 ms run asks for a save on every frame that ends holding
+ *  (§3.7 R5's session form, the lead's Q-10): each waits for the hold's end, so none writes a half-turned world (Write's and
+ *  Snapshot's guards). */
 void SegTurnSession()
 {
 	const auto T0 = std::chrono::steady_clock::now();
@@ -943,15 +952,310 @@ void SegTurnSession()
 	{
 		TurnSessionPlan Q = P;
 		Q.BudgetMs = Budget;
+		int Asked = 0;
+		Q.Frame = [&Asked](ss::Session& S, int) {
+			if (S.Living().Holding())
+			{
+				++Asked;
+				S.Save();
+			}
+		};
 		const TurnSessionRun R = TurnSession(Q);
 		const std::string At = " at " + TurnBudgetName(Budget);
-		std::printf("  turn_session%s: %d held frames, %d units, %d holds, %d drains, %d guard trips\n", At.c_str(), R.HeldFrames, R.Stats.Units, R.Stats.Holds,
-			R.Stats.Drains, R.Stats.GuardTrips);
+		std::printf("  turn_session%s: %d held frames, %d units, %d holds, %d drains, %d guard trips, %d saves asked for while holding\n", At.c_str(), R.HeldFrames,
+			R.Stats.Units, R.Stats.Holds, R.Stats.Drains, R.Stats.GuardTrips, Asked);
 		Expect(R.HeldFrames > 0, "turn_session" + At + ": the session's world holds");
+		Expect(Asked == R.HeldFrames, "turn_session" + At + ": a save is asked for on every held frame (" + std::to_string(Asked) + " of " + std::to_string(R.HeldFrames) + ")");
 		Expect(R.Texts == Unlimited.Texts, "turn_session" + At + ": the phone gets the same texts in the same order");
 		Expect(R.Save == Unlimited.Save, "turn_session" + At + ": the same save at the end");
 	}
 	std::printf("  turn_session: %.1fs\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
+}
+
+// ------------------------------------------------------------------ turn_actions (the lead's Q-10)
+
+/** The HoldGuard's sink while turn_actions calls an action on the held session: the guarded World methods the call reached. */
+std::vector<std::string> TurnActionTrips;
+
+void TurnActionTrip(const char* Method)
+{
+	TurnActionTrips.push_back(Method);
+}
+
+/** One of the session's draining user actions (§3.7 R3's drain-on-touch, A1's drains at e27ea47): its name, the drain it reaches,
+ *  whether the call finishes a held turn (NewCareer's world is a new one, so its drain never has a turn to finish), what it needs
+ *  first (the same on both sessions, never the world), the call, whose answer is compared, when it can reach its drain (null:
+ *  always) and whether it waits for every action listed before it. */
+struct TurnActionCase
+{
+	const char* Name;
+	const char* Drain;
+	bool Drains;
+	std::function<void(ss::Session&)> Prep;
+	std::function<std::string(ss::Session&)> Call;
+	std::function<bool(const ss::Session&)> Ready = nullptr;
+	bool AfterTheRest = false;
+};
+
+/** The 27 drains in the session's user actions (a2-check's count; each function's DrainWorld() at e27ea47), by how turn_actions
+ *  reaches them. Called during a hold, one a hold (21 calls, 21 drains):
+ *    PawnSell G/SessionShops.cpp:1416, PawnLoan :1490; CounterDeal G/SessionSponsor.cpp:234, AskForRaise :259, DebugSponsor :402;
+ *    ListAction G/SessionStake.cpp:326, ProposeSwap :351; Heard G/SessionTown.cpp:93, Lend :191; ChooseIdea G/SessionVideo3.cpp:521;
+ *    SettleEdit G/SessionVideo.cpp:1049, DebugVideo :1395; DebugBadge G/SessionBadges.cpp:289; DebugSitePlay G/SessionSitePlay.cpp:440,
+ *    CallOut :250; DebugSite G/SessionSites.cpp:298; DebugWorld G/SessionWorld.cpp:21; GoToGame G/Session.cpp:4213, GoToLive :4241,
+ *    RegisterEvent :2021, NewCareer :1662 (after ResetSave's new world: never a turn to finish).
+ *  Not callable during a hold (6 drains): ResolveAbandonedLive G/Session.cpp:4395 runs only in the constructor, after StartWorld's
+ *  HoldWhole; BuildSeats :2245, ReportToWorld :6233, VideoNoteHand G/SessionVideo.cpp:807 and SitePlayHand G/SessionSitePlay.cpp:347,
+ *  :358 run in Session::Update's hand loop (TableStep, after WorldStep), the per-frame path turn_session and session_test audit with
+ *  the guard armed. */
+std::vector<TurnActionCase> TurnActionCases()
+{
+	const auto None = [](ss::Session&) {};
+	return {
+		{"PawnSell", "G/SessionShops.cpp:1416", true, None, [](ss::Session& S) { return S.PawnSell("gear:turn-actions"); }},
+		{"PawnLoan", "G/SessionShops.cpp:1490", true, None, [](ss::Session& S) { return S.PawnLoan("gear:turn-actions"); }},
+		{"CounterDeal", "G/SessionSponsor.cpp:234", true, None, [](ss::Session& S) { return S.CounterDeal("turn-actions", 0); }},
+		{"AskForRaise", "G/SessionSponsor.cpp:259", true, None, [](ss::Session& S) { return S.AskForRaise("turn-actions"); }},
+		{"ListAction", "G/SessionStake.cpp:326", true, None, [](ss::Session& S) { return S.ListAction("turn-actions", 100, 1000); }},
+		{"ProposeSwap", "G/SessionStake.cpp:351", true, None, [](ss::Session& S) { return S.ProposeSwap("turn-actions", "Mei", 100); }},
+		{"Heard", "G/SessionTown.cpp:93", true, None,
+			[](ss::Session& S) {
+				ss::town::Talk Told;
+				Told.Line = "Rain's coming in off the river tonight.";
+				Told.Topic = "news";
+				S.Heard("lonnie", Told);
+				return std::string();
+			}},
+		{"Lend", "G/SessionTown.cpp:191", true, None, [](ss::Session& S) { return S.Lend("twitch", 2000); }},
+		{"ChooseIdea", "G/SessionVideo3.cpp:521", true, None, [](ss::Session& S) { return S.ChooseIdea(-1); }},
+		{"SettleEdit", "G/SessionVideo.cpp:1049", true,
+			[](ss::Session& S) {
+				// A bad beat waiting in MOMENTS, as a night's play leaves one: the Breakdown that publishes it uploads (the drain is
+				// after the upload).
+				ss::video::Candidate C;
+				C.Id = "turn-actions-clip";
+				C.At = S.WorldMinutes() - 30.0;
+				C.K = ss::video::Kind::BadBeat;
+				C.Event = "Turn Actions";
+				C.BuyIn = 110;
+				C.Field = 1000;
+				C.Expires = S.WorldMinutes() + 7.0 * 1440.0;
+				S.Life.Video.Open.push_back(C);
+			},
+			[](ss::Session& S) { return S.SettleEdit("video:1:0:0:turn-actions-clip"); }},
+		{"DebugBadge", "G/SessionBadges.cpp:289", true, None, [](ss::Session& S) { return S.DebugBadge("describe"); }},
+		{"DebugSitePlay", "G/SessionSitePlay.cpp:440", true, None, [](ss::Session& S) { return S.DebugSitePlay("describe"); }},
+		{"DebugSite", "G/SessionSites.cpp:298", true, None, [](ss::Session& S) { return S.DebugSite("describe"); }},
+		{"DebugSponsor", "G/SessionSponsor.cpp:402", true, None, [](ss::Session& S) { return S.DebugSponsor("describe"); }},
+		{"DebugVideo", "G/SessionVideo.cpp:1395", true, None, [](ss::Session& S) { return S.DebugVideo("trends"); }},
+		{"DebugWorld", "G/SessionWorld.cpp:21", true, None, [](ss::Session& S) { return S.DebugWorld("start"); }},
+		{"CallOut", "G/SessionSitePlay.cpp:250", true,
+			[](ss::Session& S) {
+				// A RunItTwice League month with a member to call out (siteplay_session's CalloutOnLeave setup, no clause).
+				ss::site::play::Book& B = S.Life.SitePlay;
+				B.Rt.L.Month = ss::site::play::PlayMonth(ss::site::play::PlayDay(S.WorldMinutes()));
+				B.Rt.L.Npcs.fill(-1);
+				B.Rt.L.Npcs[0] = 7;
+			},
+			[](ss::Session& S) { return S.CallOut(7); }},
+		{"GoToGame", "G/Session.cpp:4213", true,
+			[](ss::Session& S) {
+				S.BankrollCents = std::max<ss::Chips>(S.BankrollCents, 100000);
+				S.Life.Energy = 100.0;
+			},
+			[](ss::Session& S) { return S.GoToGame("dee-game", 4000); },
+			[](const ss::Session& S) {
+				// Dee's game open (Saturdays, nine to three): the prep's money and energy, then life::Blocked as GoToGame asks it.
+				const ss::life::Activity* A = ss::life::Find("dee-game");
+				ss::life::State L = S.Life;
+				L.Energy = 100.0;
+				ss::life::Context Ctx = S.LifeContext();
+				Ctx.Bankroll = std::max<ss::Chips>(Ctx.Bankroll, 100000);
+				return A && ss::life::Blocked(*A, L, Ctx).empty();
+			}},
+		{"GoToLive", "G/Session.cpp:4241", true, [](ss::Session& S) { S.Life.Energy = 100.0; }, [](ss::Session& S) { return S.GoToLive(std::string()); }},
+		{"NewCareer", "G/Session.cpp:1662", false, None,
+			[](ss::Session& S) {
+				S.NewCareer(TurnSomeone());
+				return std::string();
+			},
+			nullptr, true},
+		{"RegisterEvent", "G/Session.cpp:2021", true, None, [](ss::Session& S) { return S.RegisterEvent(ss::Lobby()[1]); }, nullptr, true},
+	};
+}
+
+/** What a session is after an action, for the unsliced run's to equal: its save without the world's text (the session keeps a world
+ *  text up to an hour old for its saves, so a save's copy depends on when the saves before it were written: a save that waited for a
+ *  hold refreshes it later), the world's own text, and the phone. Asks for a save on both sessions alike. */
+std::string TurnActionState(ss::Session& S, TurnHooks& H)
+{
+	S.DrainWorld();
+	S.Save();
+	ss::SaveData D = H.Last;
+	D.WorldText.clear();
+	std::string Out = D.Serialize() + "\n-- world\n" + TurnText(S.Living()) + "\n-- phone\n";
+	for (const std::string& Text : H.Texts)
+	{
+		Out += Text + "\n";
+	}
+	return Out;
+}
+
+std::string TurnActionShort(const std::string& S)
+{
+	std::string Out = S.substr(0, std::min<size_t>(S.size(), 72));
+	std::replace(Out.begin(), Out.end(), '\n', ' ');
+	return Out + (S.size() > 72 ? "..." : "");
+}
+
+/** turn_actions (the lead's Q-10, §3.7 R3): every user action that drains (TurnActionCases), called while the session's world holds a
+ *  turn at the forced 0.5 ms, with the HoldGuard's sink armed: no guarded World call before its drain, the call finishes the held turn,
+ *  and its answer, the session's save, the world and the phone after it equal the unsliced run's, which makes the same calls in the
+ *  same frames at an unlimited budget. Two sessions in lockstep, one action a hold (the first still to run that is ready), in
+ *  turn_session's rhythm (a night is a jump to 07:00, four frames, a jump to 23:00 and a minute a frame to 01:00). A night that never
+ *  holds at 0.5 ms (a fast PC) runs the next at 0 ms (one unit a call), so every action still meets a hold; the action itself runs at
+ *  0.5 ms.
+ *  Mutations: RegisterEvent's drain removed (HeroEntered during the hold: a guard trip, the turn left held); any listed drain removed
+ *  (the turn left held). */
+void SegTurnActions()
+{
+	const auto T0 = std::chrono::steady_clock::now();
+	constexpr double Forced = 0.5;
+	const double Unlimited = std::numeric_limits<double>::infinity();
+	TurnHooks HS;
+	TurnHooks HR;
+	std::unique_ptr<ss::Session> S(new ss::Session(HS, "u4-turn-actions"));
+	std::unique_ptr<ss::Session> R(new ss::Session(HR, "u4-turn-actions"));
+	double NightBudget = Forced;
+	const auto Budgets = [&]() {
+		S->Living().TurnBudgetMs = NightBudget;
+		R->Living().TurnBudgetMs = Unlimited;
+	};
+	for (ss::Session* X : {S.get(), R.get()})
+	{
+		X->NewCareer(TurnSomeone());
+		X->CurrentScreen = ss::Screen::Lobby;
+		X->Living().ResetTurnStats();
+	}
+	Budgets();
+	const std::vector<TurnActionCase> Cases = TurnActionCases();
+	std::vector<bool> Ran(Cases.size(), false);
+	size_t Next = 0; // how many have run
+	int Fallbacks = 0;
+	bool HeldTonight = false;
+	bool Restart = false;
+	double Now = 0.0;
+	std::string Log;
+	const auto RunCase = [&](const TurnActionCase& C) {
+		const std::string At = std::string("turn_actions: ") + C.Name + " (" + C.Drain + ")";
+		C.Prep(*S);
+		C.Prep(*R);
+		S->Living().TurnBudgetMs = Forced;
+		const int DrainsBefore = S->Living().TurnCounters().Drains;
+		const double HeldAt = S->WorldMinutes();
+		TurnActionTrips.clear();
+		const ss::world::World::HoldGuardSink Was = ss::world::World::SetHoldGuardSink(&TurnActionTrip);
+		const std::string Answer = C.Call(*S);
+		ss::world::World::SetHoldGuardSink(Was);
+		const bool Finished = S->Living().TurnCounters().Drains > DrainsBefore && !S->Living().Holding();
+		const std::string Expected = C.Call(*R);
+		Expect(TurnActionTrips.empty(), At + ": no guarded World call during the hold" +
+			(TurnActionTrips.empty() ? std::string() : " (first: World::" + TurnActionTrips.front() + ", " + std::to_string(TurnActionTrips.size()) + " in all)"));
+		if (C.Drains)
+		{
+			Expect(Finished, At + ": the call finishes the held turn");
+		}
+		Expect(Answer == Expected, At + ": the same answer as the unsliced run (\"" + TurnActionShort(Answer) + "\"; unsliced \"" + TurnActionShort(Expected) + "\")");
+		Expect(TurnActionState(*S, HS) == TurnActionState(*R, HR), At + ": the session's save, the world and the phone after it equal the unsliced run's");
+		char Line[160];
+		std::snprintf(Line, sizeof(Line), " %s@%02d:%02d%s", C.Name, static_cast<int>(std::fmod(HeldAt, 1440.0) / 60.0), static_cast<int>(std::fmod(HeldAt, 60.0)),
+			Finished ? "" : "(no drain)");
+		Log += Line;
+		Restart = std::strcmp(C.Name, "NewCareer") == 0; // the clock went back with the new career: a night from its clock
+		if (Restart)
+		{
+			for (ss::Session* X : {S.get(), R.get()})
+			{
+				X->CurrentScreen = ss::Screen::Lobby;
+				X->Living().ResetTurnStats();
+			}
+		}
+		Budgets();
+	};
+	const auto Frame = [&](double ToMinute) {
+		for (ss::Session* X : {S.get(), R.get()})
+		{
+			X->LobbyMinutes += std::max(0.0, ToMinute - X->WorldMinutes());
+		}
+		Now += 1.0 / 30.0;
+		S->Update(Now);
+		R->Update(Now);
+		if (S->Living().Holding())
+		{
+			HeldTonight = true;
+			bool Before = true; // every action listed before this one has run
+			for (size_t K = 0; K < Cases.size(); ++K)
+			{
+				if (!Ran[K] && (!Cases[K].AfterTheRest || Before) && (!Cases[K].Ready || Cases[K].Ready(*S)))
+				{
+					Ran[K] = true;
+					++Next;
+					RunCase(Cases[K]);
+					break;
+				}
+				Before = Before && Ran[K];
+			}
+		}
+	};
+	for (int K = 0; K < 6; ++K)
+	{
+		Frame(0.0);
+	}
+	int Day = static_cast<int>(std::floor(S->WorldMinutes() / 1440.0)) + 1;
+	int Nights = 0;
+	for (; Next < Cases.size() && Nights < 3 * static_cast<int>(Cases.size()); ++Day)
+	{
+		++Nights;
+		HeldTonight = false;
+		Restart = false;
+		S->Life.Hunger = 10.0;
+		R->Life.Hunger = 10.0;
+		const double D = static_cast<double>(Day) * 1440.0;
+		Frame(D + 7.0 * 60.0);
+		for (int K = 0; K < 3 && !Restart; ++K)
+		{
+			Frame(0.0);
+		}
+		if (!Restart)
+		{
+			Frame(D + 23.0 * 60.0);
+		}
+		while (!Restart && S->WorldMinutes() < D + 1440.0 + 60.0)
+		{
+			Frame(S->WorldMinutes() + 1.0);
+		}
+		if (Restart)
+		{
+			Day = static_cast<int>(std::floor(S->WorldMinutes() / 1440.0));
+			continue;
+		}
+		if (!HeldTonight && NightBudget > 0.0)
+		{
+			NightBudget = 0.0; // a fast PC: the next nights hold at one unit a call (the actions still run at 0.5 ms)
+			++Fallbacks;
+			Budgets();
+		}
+	}
+	Expect(Next == Cases.size(), "turn_actions: every action met a hold (" + std::to_string(Next) + " of " + std::to_string(Cases.size()) + " in " +
+		std::to_string(Nights) + " nights)");
+	// The table RegisterEvent opened plays on for ten seconds in both runs, then the two compare once more.
+	for (int K = 0; K < 300; ++K)
+	{
+		Frame(0.0);
+	}
+	Expect(TurnActionState(*S, HS) == TurnActionState(*R, HR), "turn_actions: ten seconds of the table later, the session, the world and the phone equal the unsliced run's");
+	std::printf("  turn_actions: %zu actions in %d nights%s:%s\n", Next, Nights, Fallbacks > 0 ? " (fell back to 0 ms nights)" : "", Log.c_str());
+	std::printf("  turn_actions: %.1fs\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
 }
 } // namespace world_u4_test
 
@@ -962,12 +1266,17 @@ int main(int Argc, char** Argv)
 	{
 		world_u4_test::SegTurnSession();
 	}
+	else if (Argc > 1 && std::strcmp(Argv[1], "turn-actions") == 0)
+	{
+		world_u4_test::SegTurnActions();
+	}
 	else
 	{
 		world_u4_test::SegTurn();
 		if (world_u4_test::kTurnSessionWired)
 		{
 			world_u4_test::SegTurnSession();
+			world_u4_test::SegTurnActions();
 		}
 		else
 		{

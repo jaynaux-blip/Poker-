@@ -1269,6 +1269,9 @@ void PagedRoster::resize(size_t N)
 
 std::shared_ptr<const World> World::Snapshot()
 {
+	// Update 4 (SPEC v1.7 §3.7 R3, R5; the lead's Q-13): the HoldGuard. A snapshot taken in the middle of a held turn would save a
+	// half-turned world (Session::Save waits for the hold's end; G2's held view is taken before the hold begins).
+	HoldGuard("Snapshot");
 	if (!Created)
 	{
 		return nullptr;

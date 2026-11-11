@@ -573,9 +573,9 @@ void World::HoldGuard(const char* Method) const
 {
 	// The HoldGuard (§3.7 R3, rev-code M2): a non-display method called while the world holds a turn, outside the machine, would read
 	// or change a half-turned world. The caller drains first (Session's drain-on-touch); this catches the calls a grep misses. Display
-	// reads never check (the allowlist: BoardValue, RankBefore, Leaders, RoomLeaders, CircuitRank, CardCutLine, PlayerOfYearTitles,
-	// HallClass, HallScore, HallEligible, Holding, TurnCounters and the inline views in World.h). Test builds report to the sink, or
-	// abort; an Unreal build only counts.
+	// reads never check (the allowlist: Find and League, which the UI reads directly, §3.7 R3; BoardValue, RankBefore, Leaders,
+	// RoomLeaders, CircuitRank, CardCutLine, PlayerOfYearTitles, HallClass, HallScore, HallEligible, Holding, TurnCounters and the
+	// inline views in World.h). Test builds report to the sink, or abort; an Unreal build only counts.
 	if (HeldTurn.Targets.empty() || HeldTurn.Running)
 	{
 		return;
