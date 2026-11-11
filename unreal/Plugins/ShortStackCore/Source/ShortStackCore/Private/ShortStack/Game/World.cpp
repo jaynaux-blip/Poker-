@@ -1301,8 +1301,7 @@ const std::vector<net::Player>& World::SnapshotView() const
 
 bool World::NameUsed(const std::string& Name) const
 {
-	const std::string L = sim::NameLower(Name);
-	return NamesLower.Get().count(L) > 0 || (!HeroName.empty() && sim::NameLower(HeroName) == L);
+	return NamesLower.Get().count(sim::NameLower(Name)) > 0;
 }
 
 std::ostream& operator<<(std::ostream& Out, const SharedText& T)

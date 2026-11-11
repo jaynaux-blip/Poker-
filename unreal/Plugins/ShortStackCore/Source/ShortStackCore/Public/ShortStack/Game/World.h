@@ -1643,9 +1643,10 @@ public:
 	const std::vector<net::Player>& View() const { return SnapRows ? SnapshotView() : Rows; }
 	SHORTSTACKCORE_API int ActiveCount() const;
 	/**
-	 * Update 4 (SPEC v1.7 §6 PA-33; LEAD_CALLS Q-5): whether a name is taken, case-insensitively: anyone in the roster (every name ever
-	 * added: Sim::Add and the load keep a lowercased index current), the player's (HeroName) and so the rival's. The session's naming
-	 * asks this through handles::Field's predicate instead of building a set of every name per register (A1's call sites).
+	 * Update 4 (SPEC v1.7 §6 PA-33; LEAD_CALLS Q-5): whether a name is anyone's in the roster, case-insensitively (every Npc's name,
+	 * any status, lowercased byte by byte as handles::Field's set does; Sim::Add and the load keep the index current). The session's
+	 * naming asks this through handles::Field's predicate instead of building a set of every name per register, and checks the
+	 * player's and the rival's names itself (A1's call sites), so the answers are the set's exactly.
 	 */
 	SHORTSTACKCORE_API bool NameUsed(const std::string& Name) const;
 
