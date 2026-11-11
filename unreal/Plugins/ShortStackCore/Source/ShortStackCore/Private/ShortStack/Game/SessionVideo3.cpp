@@ -5,6 +5,7 @@
 // mechanics (the rescale component, the next check-in skipped) and VideoStatsOf, on the core's model (VideoAlgoPriv.h's
 // readings of the saved fields). The ideas, the options and Repackage's new packaging score are core-videocontent's.
 #include "ShortStack/Game/Session.h"
+#include "SessionHold.h"
 
 #include "VideoAlgoPriv.h"
 #include "VideoContentPriv.h"
@@ -517,6 +518,7 @@ std::string Session::ChooseIdea(int IdeaId)
 	// §6.3: a ready idea becomes a candidate in MOMENTS (Source 5); a group A idea tags its moment instead (the hand's own
 	// candidate, Idea set and the idea's facts beside its own); a group P idea declares its series first.
 	using namespace session_video3_detail;
+	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): the idea's context reads the world
 	CtxIn In;
 	In.L = &Life;
 	In.History = &History;

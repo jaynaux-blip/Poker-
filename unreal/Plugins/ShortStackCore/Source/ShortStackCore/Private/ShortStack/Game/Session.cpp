@@ -1,6 +1,7 @@
 #include "ShortStack/Game/Session.h"
 #include "../StrictFloat.h"
 #include "KastCopy.h"
+#include "SessionHold.h"
 #include "SitesDetail.h"
 
 #include "ShortStack/AI/Bot.h"
@@ -1334,6 +1335,9 @@ void Session::StartWorld(const SaveData* Loaded, world::Start S)
 		}
 	}
 	LivingWorld.AdvanceTo(WorldMinutes());
+	// Update 4 (SPEC v1.7 §3.7, §6 PA-35): a load or a new world is whole before anything reads it (the clock just below, and in the
+	// constructor the abandoned nights, the badges' review and the networks' prewarm).
+	session_hold_detail::HoldWhole(LivingWorld, WorldMinutes(), Hooks);
 	WorldNewsAt = std::max(WorldNewsAt, LivingWorld.Clock() - 6.0 * 60.0);
 }
 
@@ -1345,6 +1349,8 @@ void Session::WorldNote(const std::vector<std::string>& F)
 	}
 	const double At = std::atof(F[2].c_str());
 	LivingWorld.AdvanceTo(At);
+	// Update 4 (§3.7, PA-35): the host's note lands on a whole world (BackRoomNight, EmbercrestDone, HeroFinished, KnownPlaces).
+	session_hold_detail::HoldWhole(LivingWorld, At, Hooks);
 	if (F[1] == "backroom")
 	{
 		std::vector<std::string> Names;
@@ -1430,6 +1436,8 @@ void Session::WorldSkip(int DayCount)
 		Life.StorageDue += life::StorageDays * net::MinutesPerDay;
 	}
 	LivingWorld.AdvanceTo(WorldMinutes());
+	// Update 4 (SPEC v1.7 §3.7, §6 PA-35): a skip drains, so the clock, the news mark and the save below see the whole world.
+	session_hold_detail::HoldWhole(LivingWorld, WorldMinutes(), Hooks);
 	WorldNewsAt = LivingWorld.Clock();
 	WorldSaved.clear();
 	WorldSnap.reset();
@@ -1438,7 +1446,21 @@ void Session::WorldSkip(int DayCount)
 
 void Session::WorldStep()
 {
+	Hooks.Scope("SS.World.Slice", true);
 	LivingWorld.AdvanceTo(WorldMinutes());
+	Hooks.Scope("SS.World.Slice", false);
+	// Update 4 (SPEC v1.7 §3.7 R6, §6 PA-35): while the turn holds, the clock stands at the turn's instant and later units still post at
+	// it, so nothing below reads the world until the turn completes: the stake book, the cancellations and the phone's scan (a scan now
+	// would mark the instant read and skip whatever the rest of the turn posts there).
+	if (LivingWorld.Holding())
+	{
+		return;
+	}
+	// §3.7 R5: a save asked for during the turn is written the frame it completes.
+	if (bSaveAfterHold)
+	{
+		Save();
+	}
 	// The stake book's money and memories to the world, each once (next_segment_spec §1.3).
 	StakeWorld();
 	SettleCancelled();
@@ -1496,6 +1518,15 @@ void Session::WorldStep()
 
 void Session::Save()
 {
+	// Update 4 (SPEC v1.7 §3.7 R5, §6 PA-35): never in the middle of a held turn (NewDay marks the week and the month done before their
+	// units run, so a world written mid-turn would reload with them skipped): asked for now, written the frame the turn completes
+	// (WorldStep). A scene exit drains first, so its save is written at once.
+	if (LivingWorld.Holding())
+	{
+		bSaveAfterHold = true;
+		return;
+	}
+	bSaveAfterHold = false;
 	SaveData D;
 	D.BankrollCents = BankrollCents;
 	D.HeroName = HeroName;
@@ -1512,12 +1543,14 @@ void Session::Save()
 	if (bBackground)
 	{
 		// A frozen copy for the host to write off the game thread (it writes each copy's text only once).
+		Hooks.Scope("SS.Save.Snapshot", true);
 		if (!WorldSnap || bStale)
 		{
 			WorldSnap = LivingWorld.Ready() ? std::make_shared<const world::World>(LivingWorld) : nullptr;
 			WorldSavedAt = LivingWorld.Clock();
 			WorldSavedRev = LivingWorld.HeroRevision();
 		}
+		Hooks.Scope("SS.Save.Snapshot", false);
 		D.WorldSnapshot = WorldSnap;
 		Hooks.Save(D);
 		return;
@@ -1581,6 +1614,7 @@ void Session::NewCareer(const hero::Character& Who, world::Start S)
 	KastNewCareer();
 	Person = Who;
 	Person.Created = true;
+	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): drain-on-touch
 	session_detail::TellBirthYear(LivingWorld, Person);
 	Life.Perks = hero::PerksOf(Person);
 	Life.Perks.TiltGain = coach::TiltGainNow(Life.Study, Life.Perks.TiltGain, WorldMinutes());
@@ -1937,6 +1971,9 @@ std::string Session::RegisterEvent(const LobbyEvent& Listing, StrikeConfirm Conf
 	// Update 4 (SPEC v1.7 §4.3.1; Phase A, §6 PA-39): the register strip's Pick is read from G3 (B-session: the table's plan for a field
 	// over 3,000); every registration passes None until then, and None is today's table.
 	// Update 3 (§7.2): the reason is returned ("" registered), so a refusal is observable.
+	// Update 4 (SPEC v1.7 §3.7 R3, §6 PA-35): a registration needs the world's answer now (the rival's seat, HeroEntered, NameField's
+	// names and joins, its save), so a held turn finishes first.
+	session_hold_detail::HoldDrain(LivingWorld, Hooks);
 	if (!CanAfford(Listing))
 	{
 		return "Not enough to cover the buy-in.";
@@ -2209,6 +2246,7 @@ void Session::BuildSeats()
 			FieldMet.insert(Npc->second);
 			if (FieldGreeted.insert(Npc->second).second)
 			{
+				session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): the greeting reads the bond
 				const std::string Hello = LivingWorld.Greeting(Npc->second, Fnv1a(T->Spec.Id + P.Id));
 				if (!Hello.empty())
 				{
@@ -4175,6 +4213,8 @@ std::string Session::GoToGame(const std::string& Id, Chips BuyInCents)
 	{
 		return "Can't get there right now.";
 	}
+	// Update 4 (SPEC v1.7 §3.7 R5, §6 PA-35): a scene exit drains, then saves (a save left waiting for the turn would go with the scene).
+	session_hold_detail::HoldDrain(LivingWorld, Hooks);
 	if (Stream.Live)
 	{
 		EndStream();
@@ -4200,6 +4240,9 @@ std::string Session::GoToLive(const std::string& OccurrenceId)
 		return "Finish your tournament first.";
 	}
 	const double World = WorldMinutes();
+	// Update 4 (SPEC v1.7 §3.7 R3, R5; §6 PA-35): the world's answer now (the cancellations, the field, HeroEntered) and a scene exit's
+	// save, so a held turn finishes first.
+	session_hold_detail::HoldDrain(LivingWorld, Hooks);
 	live::Occurrence O = live::FindOccurrence(OccurrenceId);
 	if (!O.Valid())
 	{
@@ -4353,6 +4396,7 @@ void Session::ResolveAbandonedLive()
 			Prize = Night->PrizeFor(Place);
 		}
 		live::Settle(BankrollCents, Life, E.Id, Place, Night->Spec.Entrants, Prize, O.Start + Night->ClockMinutes() - static_cast<double>(O.T->StartMinute));
+		session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): drain-on-touch
 		LivingWorld.HeroFinished(E.Id, Place, Prize, world::World::TableReport());
 	}
 }
@@ -4373,6 +4417,8 @@ void Session::SettleCancelled()
 		{
 			continue;
 		}
+		// Update 4 (§3.7 R3, PA-35): drain-on-touch (WorldStep calls this only on a whole world, R6; StartWorld before it advances).
+		session_hold_detail::HoldDrain(LivingWorld, Hooks);
 		if (Open)
 		{
 			// Short of the minimum as the entry has the field (or called off by the world): the floor calls it at the start.
@@ -4417,6 +4463,7 @@ void Session::CancelledTexts()
 			continue;
 		}
 		// Called off at its start (SettleCancelled), not left before the seats: the desk's other refund is no cancellation.
+		session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): drain-on-touch
 		const world::Cancellation* Called = LivingWorld.CancellationOf(E.Id);
 		if ((!Called && !live::BelowMinimum(O, E.Entrants)) || E.FinishedAt < O.Start)
 		{
@@ -4795,6 +4842,8 @@ void Session::BondTexts(double From, double To)
 			{
 				continue;
 			}
+			// Update 4 (§3.7 R3, PA-35): the slot reads the bonds, the finishes and the next Sunday, so a held turn finishes first.
+			session_hold_detail::HoldDrain(LivingWorld, Hooks);
 			// Who has the most to say about a night at the Embercrest the day before, or the day before that.
 			struct Pick
 			{
@@ -4945,6 +4994,9 @@ std::string Session::StartActivity(const std::string& Id)
 
 void Session::FinishSkip()
 {
+	// Update 4 (SPEC v1.7 §3.7, §6 PA-35): a sleep (or a shift, a run) ends on a whole world: what it settles (an upload, a venue's
+	// visit) and its save don't wait for the turn.
+	session_hold_detail::HoldDrain(LivingWorld, Hooks);
 	const life::Outcome O = TimeSkip.Result;
 	TimeSkip.Active = false;
 	LobbyMinutes = O.End - net::MinutesPerDay * static_cast<double>(net::NightOneDay);
@@ -6176,6 +6228,7 @@ void Session::ReportToWorld()
 	}
 	Rp.Met.assign(FieldMet.begin(), FieldMet.end());
 	Rp.BigPots = FieldPots;
+	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): drain-on-touch
 	LivingWorld.HeroFinished(T->Spec.Id, BustPlace, BustPrize + BountyWon, Rp);
 }
 
@@ -6265,8 +6318,11 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 	const int Today = static_cast<int>(std::floor(To / net::MinutesPerDay));
 	// Update 4 (SPEC v1.7 §3.5 R1; Phase A, §6 PA-38): Kast's reach for the world's wake, once for each world day the step crosses
 	// (a skip runs every calendar day, so it is skip-invariant), with the channel's follower count. A no-op before G2.
+	// (CheckCalendar runs before WorldStep every frame, so each of its steps drains only where it touches the world, its order kept:
+	// §3.7 R3, PA-35.)
 	for (int ReachDay = static_cast<int>(std::floor(From / net::MinutesPerDay)) + 1; ReachDay <= Today; ++ReachDay)
 	{
+		session_hold_detail::HoldDrain(LivingWorld, Hooks);
 		LivingWorld.NoteReach(ReachDay, Channel.Followers);
 	}
 	// (Not within a day of a real meal: she'd have heard about it.)

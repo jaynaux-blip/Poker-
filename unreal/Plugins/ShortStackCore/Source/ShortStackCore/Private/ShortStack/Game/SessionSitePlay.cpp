@@ -2,6 +2,7 @@
 // view, the claims (each "" or why not, through site::play's keyed and idempotent claims, autosaved on success: the claim
 // commits before the UI animates it), the post-hand hook, the calendar's step and ss.Site.Play.
 #include "ShortStack/Game/Session.h"
+#include "SessionHold.h"
 
 #include "SitePlayPriv.h"
 #include "SitesDetail.h"
@@ -246,6 +247,7 @@ std::string Session::CallOut(int Npc)
 	{
 		// The member's points as the call is made: the world's recorded best days (the duel is the week's points).
 		site::play::Callout& C = Life.SitePlay.Rt.C;
+		session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): drain-on-touch
 		const world::LeagueBook* Lb = LivingWorld.League(net::SiteId::RunItTwice);
 		double Theirs = 0.0;
 		if (Lb && Lb->MonthKey == Life.SitePlay.Rt.L.Month)
@@ -342,6 +344,7 @@ void Session::SitePlayHand(const Hand& H, const HandFacts& F)
 			if (!Name.empty())
 			{
 				N.Knocked.push_back(Name);
+				session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): drain-on-touch (the lists below follow it)
 				N.KnockedNpcs.push_back(LivingWorld.Find(Name));
 			}
 		}
@@ -352,6 +355,7 @@ void Session::SitePlayHand(const Hand& H, const HandFacts& F)
 		if (const TPlayer* P = By.empty() ? nullptr : PlayerById(By))
 		{
 			N.BustedBy = P->Name;
+			session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): drain-on-touch
 			N.BustedByNpc = LivingWorld.Find(P->Name);
 		}
 	}
@@ -406,9 +410,16 @@ void Session::SitePlayStep(double From, double To)
 		rep::FromHistory(P, History);
 		Lg.Div = static_cast<int8_t>(site::play::PlacementDivision(P.Abi100));
 	}
+	// Update 4 (SPEC v1.7 §3.7 R3, §6 PA-35): the step reads the world only through RunItTwice's loops (RitStep), so a held turn
+	// finishes first only for a RunItTwice book (CheckCalendar runs every frame); the League group it draws goes to the world.
+	if (site::play::siteplay_detail::SitePlayRitStarted(Life.SitePlay))
+	{
+		session_hold_detail::HoldDrain(LivingWorld, Hooks);
+	}
 	const site::play::StepOut Out = site::play::Step(Life.SitePlay, Life, Life.Sites, &LivingWorld, Life.Sponsors, WorldSeed(), From, To);
 	if (Out.Roster)
 	{
+		session_hold_detail::HoldDrain(LivingWorld, Hooks);
 		LivingWorld.SetLeagueRoster(net::SiteId::RunItTwice, Out.MonthKey, Out.Div, Out.Npcs);
 	}
 	for (const std::pair<std::string, std::string>& Tx : Out.Mail)
@@ -426,6 +437,7 @@ std::string Session::DebugSitePlay(const std::string& Args)
 	const double World = WorldMinutes();
 	Book& B = Life.SitePlay;
 	auto Num = [&W](size_t I, long long Default) { return W.size() > I ? std::atoll(W[I].c_str()) : Default; };
+	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): the verbs read and write the world (the League roster)
 	if (Verb == "describe")
 	{
 		return siteplay_detail::IgniteDescribe(B, World) + siteplay_detail::RitDescribe(B, &LivingWorld, World) + DebugSitePlay("gov");
