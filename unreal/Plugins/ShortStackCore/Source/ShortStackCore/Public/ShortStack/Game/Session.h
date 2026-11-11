@@ -730,7 +730,7 @@ public:
 	/** Update 4 (SPEC v1.7 §3.7 R3, R5; §6 PA-35): finishes a held turn now and does what WorldStep does once the world has caught up
 	 *  (the waiting save, the stake book, the cancellations, the phone): every drain-on-touch, a scene exit, a host about to take the
 	 *  save. Nothing when the world isn't holding. */
-	void DrainWorld();
+	SHORTSTACKCORE_API void DrainWorld();
 	/** Debug: how the world would look Days from now (a copy is played forward; nothing changes). */
 	SHORTSTACKCORE_API std::string WorldPreview(int DayCount) const;
 	/** Debug: the player sleeps through Days (the clock and the world move on; nothing else happens to the player). */
