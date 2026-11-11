@@ -4347,13 +4347,13 @@ void IgniteTableStandings(Canvas& C, const Tournament& T, const Rect& Box)
 	// seats wear (its arc is G2's levels), not a disc with a letter on it; yours is lit. Low-poly, so ten rows and yours stay
 	// inside the table's 22k at its busiest frame.
 	const Chips Bb = std::max<Chips>(1, T.CurrentLevel().Bb);
-	const std::vector<const TPlayer*> St = T.Standings();
+	const std::vector<TLeader> St = T.Leaders(10); // Standings()'s first 10 (Update 4 PA-18: the leader lists read Leaders(K))
 	const TPlayer& Me = T.Hero();
 	const int HeroRank = Me.Busted ? 0 : T.HeroRank();
 	const Color Track = Hex(rlsites_detail::SitesIgTrack); // the level ring's track (the acting seat's fuse burns round the same)
 	float Y = Box.Y + 4.0f;
-	const auto Standing = [&](int Rank, const TPlayer& Pl, float Ry) {
-		const bool You = Pl.IsHero;
+	const auto Standing = [&](int Rank, const TLeader& Pl, float Ry) {
+		const bool You = Pl.Hero;
 		if (You)
 		{
 			IgniteLowRoundRect(C, {Box.X, Ry, Box.W, 32.0f}, 16.0f, igniteart::IgniteA(Hex(rlsites_detail::SitesIgCoral), 0.2f));
@@ -4374,12 +4374,16 @@ void IgniteTableStandings(Canvas& C, const Tournament& T, const Rect& Box)
 	const int Shown = static_cast<int>(std::min<size_t>(St.size(), 10));
 	for (int I = 0; I < Shown && Y + 32.0f <= Box.Y + Box.H; ++I)
 	{
-		Standing(I + 1, *St[static_cast<size_t>(I)], Y);
+		Standing(I + 1, St[static_cast<size_t>(I)], Y);
 		Y += 36.0f;
 	}
 	if (HeroRank > Shown && Y + 40.0f <= Box.Y + Box.H)
 	{
-		Standing(HeroRank, Me, Y + 6.0f);
+		TLeader MeRow;
+		MeRow.Name = Me.Name;
+		MeRow.Stack = Me.Stack;
+		MeRow.Hero = true;
+		Standing(HeroRank, MeRow, Y + 6.0f);
 	}
 }
 

@@ -930,20 +930,6 @@ TextStyle TblReadout(const TblLook& L, Align A)
 	return L.Cut > 0.0f ? Ts(13.0f, 500, pal::Muted, A, Baseline::Alphabetic, true) : Ts(14.0f, 700, pal::Muted, A);
 }
 
-/** The prize jump ahead of the hero: the next place up that pays more than finishing now (0 when none). */
-int TblNextJump(const Tournament& T)
-{
-	const Chips Here = T.PrizeFor(T.Remaining);
-	for (int P = T.Remaining - 1; P >= 1; --P)
-	{
-		if (T.PrizeFor(P) > Here)
-		{
-			return P;
-		}
-	}
-	return 0;
-}
-
 /**
  * What a table's places pay. A FUSE pays the session's split (fuse::PrizeAt: 80/12/8 from x25 up), not the engine's one
  * place of the whole pool; every other event its own payouts.
@@ -1000,7 +986,7 @@ void TblRitInfo(Canvas& C, const Tournament& T, const Rect& Box, const rlsites_d
 	C.FillRect({L, Y, Box.W, 1.0f}, pal::Line);
 	Y += 24.0f;
 	const int Secs = static_cast<int>(std::max(0.0, JsRound(LevelLeft)));
-	const int Jump = TblNextJump(T);
+	const int Jump = T.NextPayJump(); // the engine's since Update 4's Phase A (PA-17): RiverLine's TblNextJump, moved
 	const double Avg = T.AverageStack();
 	struct InfoRow
 	{
@@ -1031,10 +1017,10 @@ void TblRitInfo(Canvas& C, const Tournament& T, const Rect& Box, const rlsites_d
 	C.Text("CHIP LEADERS", L, Y, TblFaced(Look, 12.0f, pal::Muted));
 	C.Text(InBb ? "BB" : "CHIPS", R, Y, TblFaced(Look, 12.0f, pal::Muted, Align::Right));
 	Y += 10.0f;
-	const std::vector<const TPlayer*> St = T.Standings();
+	const std::vector<TLeader> St = T.Leaders(8); // Standings()'s first 8 (Update 4 PA-18: the leader lists read Leaders(K))
 	const int HeroRank = Me.Busted ? 0 : T.HeroRank();
-	const auto LeaderRow = [&](int Rank, const TPlayer& Pl, float Ry, bool Zebra) {
-		const bool You = Pl.IsHero;
+	const auto LeaderRow = [&](int Rank, const TLeader& Pl, float Ry, bool Zebra) {
+		const bool You = Pl.Hero;
 		if (You)
 		{
 			C.GlowRoundRect({L, Ry + 18.0f, Box.W, 8.0f}, 0.0f, TblA(rlsites_detail::SitesRitRed, 0.35f), 4.0f);
@@ -1054,12 +1040,16 @@ void TblRitInfo(Canvas& C, const Tournament& T, const Rect& Box, const rlsites_d
 	const int Shown = static_cast<int>(std::min<size_t>(St.size(), 8));
 	for (int I = 0; I < Shown && Y + 26.0f <= Box.Y + Box.H; ++I)
 	{
-		LeaderRow(I + 1, *St[static_cast<size_t>(I)], Y, I % 2 == 1);
+		LeaderRow(I + 1, St[static_cast<size_t>(I)], Y, I % 2 == 1);
 		Y += 26.0f;
 	}
 	if (HeroRank > Shown && Y + 34.0f <= Box.Y + Box.H)
 	{
-		LeaderRow(HeroRank, Me, Y + 8.0f, false);
+		TLeader MeRow;
+		MeRow.Name = Me.Name;
+		MeRow.Stack = Me.Stack;
+		MeRow.Hero = true;
+		LeaderRow(HeroRank, MeRow, Y + 8.0f, false);
 	}
 }
 
@@ -1196,7 +1186,7 @@ void TblIgHead(Canvas& C, const Tournament& T, const Rect& Head, bool LevelFlash
 	// The four stats.
 	const TPlayer& Me = T.Hero();
 	const bool Itm = T.InTheMoney();
-	const int Jump = TblNextJump(T);
+	const int Jump = T.NextPayJump();
 	const std::vector<Chips> Pays = TblPays(T);
 	const std::pair<std::string, std::string> Stats[4] = {
 		{Grouped(T.Remaining), "LEFT OF " + Grouped(T.Spec.Entrants)},
@@ -3564,14 +3554,14 @@ void RiverLine::SidePanel(double Now)
 	}
 	else
 	{
-		const std::vector<const TPlayer*> St = T.Standings();
+		const std::vector<TLeader> St = T.Leaders(12); // Standings()'s first 12 (Update 4 PA-18)
 		const int HeroRank = T.HeroRank();
 		float Y = Box.Y + 30.0f;
 		for (size_t I = 0; I < St.size() && I < 12; ++I)
 		{
-			const TPlayer& Pl = *St[I];
+			const TLeader& Pl = St[I];
 			UI.Text(std::to_string(I + 1) + ".", Box.X + 16.0f, Y, Ts(14.0f, 500, pal::Muted, Align::Left, Baseline::Alphabetic, true));
-			UI.Text(Pl.Name, Box.X + 56.0f, Y, Ts(14.0f, Pl.IsHero ? 800 : 500, Pl.IsHero ? pal::Accent : Pl.Name == RivalName ? Hex(0xff8da0) : pal::Ink, Align::Left, Baseline::Alphabetic, false, 190.0f));
+			UI.Text(Pl.Name, Box.X + 56.0f, Y, Ts(14.0f, Pl.Hero ? 800 : 500, Pl.Hero ? pal::Accent : Pl.Name == RivalName ? Hex(0xff8da0) : pal::Ink, Align::Left, Baseline::Alphabetic, false, 190.0f));
 			UI.Text(ChipsText(static_cast<double>(Pl.Stack)), Box.X + Box.W - 16.0f, Y, Ts(14.0f, 700, pal::Ink, Align::Right, Baseline::Alphabetic, true));
 			Y += 22.0f;
 		}

@@ -3,6 +3,7 @@
 
 #include "ShortStack/AI/Style.h"
 #include "ShortStack/AI/View.h"
+#include "ShortStack/FieldModel.h"
 #include "ShortStack/Names.h"
 
 #include <algorithm>
@@ -131,6 +132,9 @@ Tournament::Tournament(const TournamentSpec& InSpec, const std::string& HeroName
 	}
 }
 
+// Out of line (Update 4, SPEC v1.7 §4.1.4, rev-code minor 7): M's fieldmodel::Model is complete here, not in the header.
+Tournament::~Tournament() = default;
+
 // ---------------------------------------------------------------- queries
 
 const Level& Tournament::CurrentLevel() const
@@ -237,6 +241,97 @@ double Tournament::PressureFor(const TPlayer& P) const
 		return 0.45 * (Bbs < 8.0 ? 0.5 : 1.0);
 	}
 	return 0.12;
+}
+
+// ---------------------------------------------------------------- big fields (Update 4, SPEC v1.7 §4.1)
+// Phase A (§6 PA-15, PA-17, PA-18, the lead): every field is dealt and no model exists (M is null; nothing sets DealtTables
+// before G3), so each query answers exactly what today's code reads; B-engine fills the model-mode branches at G2/G3.
+
+bool Tournament::Modelled() const
+{
+	return false;
+}
+
+const fieldmodel::Model* Tournament::FieldModel() const
+{
+	return M.get();
+}
+
+int Tournament::TableCountAll() const
+{
+	return static_cast<int>(Tables.size());
+}
+
+const fieldmodel::View& Tournament::FieldView() const
+{
+	if (M)
+	{
+		return M->Cache;
+	}
+	static const fieldmodel::View NoView{}; // a dealt field has no view (nothing reads it before G3)
+	return NoView;
+}
+
+Chips Tournament::TotalChips() const
+{
+	return static_cast<Chips>(Spec.Entrants) * Spec.StartingStack;
+}
+
+int Tournament::NextPayJump() const
+{
+	// RiverLine's TblNextJump (UI/RiverLine.cpp:934-945 at 8db6d21), moved unchanged but for where the walk starts (§4.6,
+	// rev-code minor 12): at min(Remaining - 1, PaidPlaces()) instead of Remaining - 1, the same answer for every field. Past the
+	// money's last place PrizeFor is 0, and before the money Here = PrizeFor(Remaining) is 0 too, so no place the old walk
+	// skipped here could pay more than Here; in the money the two starts are one. (About 106,000 steps a call before the money
+	// in a 125,000 field otherwise.)
+	const Chips Here = PrizeFor(Remaining);
+	for (int P = std::min(Remaining - 1, PaidPlaces()); P >= 1; --P)
+	{
+		if (PrizeFor(P) > Here)
+		{
+			return P;
+		}
+	}
+	return 0;
+}
+
+std::vector<TLeader> Tournament::Leaders(int K) const
+{
+	// A dealt field: Standings()'s first K, in its order (stable by stack), as rows (§4.1.11). G3 adds the modelled field's.
+	const std::vector<const TPlayer*> St = Standings();
+	std::vector<TLeader> Out;
+	const size_t Shown = K > 0 ? std::min(St.size(), static_cast<size_t>(K)) : 0;
+	Out.reserve(Shown);
+	for (size_t I = 0; I < Shown; ++I)
+	{
+		const TPlayer& P = *St[I];
+		TLeader Row;
+		Row.Name = P.Name;
+		Row.Stack = P.Stack;
+		Row.Hero = P.IsHero;
+		Out.push_back(std::move(Row));
+	}
+	return Out;
+}
+
+void Tournament::SetWatch(const std::vector<int>& /*Fields*/)
+{
+	// A dealt field has nothing to watch through the model (G3 keeps the list in the model's Watch).
+}
+
+bool Tournament::ModelSome(int /*Count*/)
+{
+	return true; // no modelled table to step
+}
+
+std::vector<TEvent> Tournament::Reenter()
+{
+	return {}; // refused: no re-entry before G3 (§4.13)
+}
+
+bool Tournament::CatchUp(double /*ClockMinutes*/, double /*BudgetMs*/)
+{
+	return false; // refused: no catch-up before G3 (§4.12)
 }
 
 // ---------------------------------------------------------------- hands

@@ -179,6 +179,36 @@ std::vector<Chips> PayoutTable(Chips PoolCents, int Entrants, Chips MinCashCents
 	return Rounded;
 }
 
+// Update 4 (SPEC v1.7 §2.4.3, §6 PA-11). Phase A: Standard is PayoutTable exactly; Main routes to it until F-net's body at G1
+// (nothing sets Main before then), so both answer today's table.
+std::vector<Chips> PayoutFor(Chips PoolCents, int Entrants, Chips MinCashCents, PayoutCurve Curve)
+{
+	switch (Curve)
+	{
+	case PayoutCurve::Main:
+	case PayoutCurve::Standard:
+	default:
+		return PayoutTable(PoolCents, Entrants, MinCashCents);
+	}
+}
+
+int PaidPlaces(int Entrants, PayoutCurve Curve)
+{
+	switch (Curve)
+	{
+	case PayoutCurve::Main:
+	case PayoutCurve::Standard:
+	default:
+		// PayoutTable's own count, in its arithmetic: one place up to 3 entrants (the whole pool), else
+		// max(1, min(N - 1, JsRound(N x 0.15))) places.
+		if (Entrants <= 3)
+		{
+			return 1;
+		}
+		return static_cast<int>(Max(1.0, Min(static_cast<double>(Entrants - 1), JsRound(static_cast<double>(Entrants) * 0.15))));
+	}
+}
+
 std::vector<double> Icm(const std::vector<double>& Stacks, const std::vector<double>& Prizes)
 {
 	const int N = static_cast<int>(Stacks.size());

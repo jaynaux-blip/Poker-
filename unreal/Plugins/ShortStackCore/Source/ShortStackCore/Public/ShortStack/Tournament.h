@@ -19,6 +19,11 @@ namespace style
 {
 struct HeroBrain; // AI/Style.h
 }
+namespace fieldmodel
+{
+struct Model; // FieldModel.h (Update 4, G3's modelled tables): the engine header needs only these two names
+struct View;
+} // namespace fieldmodel
 
 struct TournamentSpec
 {
@@ -48,6 +53,12 @@ struct TournamentSpec
 	// and the prize table's shape (C++ only; 0 and Standard keep the shared behavior). Nothing sets or reads them before G1.
 	Chips AddedCents = 0;
 	PayoutCurve Curve = PayoutCurve::Standard;
+	// Update 4 (SPEC v1.7 §4.1.3, §6 PA-12, the big fields; C++ only, zero keeps today). Nothing sets or reads them before G3.
+	int DealtTables = 0;            // 0: every table dealt (today, the TypeScript path). > 0: the ring of this many tables is
+	                                // dealt, the rest modelled (fieldmodel::Model). Set by Session::RegisterEvent, never by Listing.
+	uint8_t Calib = 0;              // fieldmodel::CalibId, set by Network::Listing for fields over kBigFieldEntries (else 0)
+	std::vector<Chips> MysteryDeck; // empty: the session's draw (today, the goldens). Set by RegisterEvent for every mystery
+	                                // event (§4.9): the envelope for the knockout of the player finishing p-th is MysteryDeck[Paid - p]
 };
 
 struct TPlayer
@@ -104,6 +115,9 @@ struct TEvent
 	int LevelNumber = 0; // Level (1-based)
 	Level Blinds;        // Level
 	std::string EliminatedBy; // Bust: the player who won the pot (C++ only)
+	// Update 4 (SPEC v1.7 §4.1.3, §6 PA-12; C++ only, the BountyCents pattern: the goldens never set them).
+	int Field = -1;      // the seat's field index in a modelled tournament (-1: not modelled)
+	Chips CashCents = 0; // Bust: what the knocker took (PKO half or the envelope); 0 when the session pays (today)
 };
 
 struct ReservedPlayer
@@ -127,6 +141,20 @@ struct TableRound
 	std::vector<std::string> Out; // the ids of the players the hand left with no chips
 };
 
+/**
+ * One row of a leader list (Update 4, SPEC v1.7 §4.1.11, §6 PA-18): Tournament::Leaders(K). A dealt field's rows are Standings()'s
+ * players (Field -1, Npc -1, Head 0); a modelled field's (G3) come from FieldView().Top with the model's names.
+ */
+struct TLeader
+{
+	int Field = -1; // the seat's field index in a modelled field (-1: a dealt field's player)
+	std::string Name;
+	Chips Stack = 0;
+	int Npc = -1;   // the world person in the seat (modelled fields, from the model's seat; -1 otherwise)
+	Chips Head = 0; // PKO: cents on this head in a modelled field (engine-owned there); 0 otherwise
+	bool Hero = false;
+};
+
 extern SHORTSTACKCORE_API const char* const HeroId; // "hero"
 
 /**
@@ -139,6 +167,8 @@ class Tournament
 {
 public:
 	SHORTSTACKCORE_API Tournament(const TournamentSpec& InSpec, const std::string& HeroName, const std::string& Seed, const std::vector<ReservedPlayer>& Reserved = {});
+	/** Out of line (Update 4, §4.1.4, rev-code minor 7): the field model's unique_ptr needs fieldmodel::Model complete. */
+	SHORTSTACKCORE_API ~Tournament();
 
 	// ---------------------------------------------------------------- queries
 	const TPlayer& Hero() const { return Players[static_cast<size_t>(HeroIndex)]; }
@@ -245,6 +275,44 @@ public:
 	 */
 	const std::vector<TableRound>& Rounds() const { return LastRounds; }
 
+	// ---------------------------------------------------------------- big fields (C++ only, Update 4 G3, SPEC v1.7 §4.1)
+	// Modelled tables beyond the hero's ring (fields over fieldmodel::kBigFieldEntries, Spec.DealtTables > 0). Declared in
+	// Phase A (§6 PA-15, PA-17, PA-18); until G3 every field is dealt and each of these answers exactly as today: no model exists.
+	/** A modelled field (Spec.DealtTables > 0, from G3). Phase A: false. */
+	SHORTSTACKCORE_API bool Modelled() const;
+	/** The field model (null in a dealt field; always null before G3). */
+	SHORTSTACKCORE_API const fieldmodel::Model* FieldModel() const;
+	/** Every table still open, dealt and modelled (HandForHand, FinalTable and the catch-up read it from G3): Tables.size(). */
+	SHORTSTACKCORE_API int TableCountAll() const;
+	/**
+	 * The field's ranks, top 10 and watched seats, rebuilt once a tick (§4.1.11; const so HeroRank() can read it, the cache
+	 * living in the model). Phase A: an empty view (nothing reads it before G3).
+	 */
+	SHORTSTACKCORE_API const fieldmodel::View& FieldView() const;
+	/** The chips in play: Entrants x StartingStack (re-entries add a stack each from G3). */
+	SHORTSTACKCORE_API Chips TotalChips() const;
+	/**
+	 * The prize jump ahead of the hero (§4.6; moved from RiverLine's TblNextJump, unchanged): the next place up that pays more
+	 * than finishing now, 0 when none. Before the money that is the money itself (place PaidPlaces()).
+	 */
+	SHORTSTACKCORE_API int NextPayJump() const;
+	/** The chip leaders' first K rows: Standings()'s first K in a dealt field (§4.1.11; the leader lists draw from it). */
+	SHORTSTACKCORE_API std::vector<TLeader> Leaders(int K) const;
+	/**
+	 * Names a modelled seat when it is lit or shown (§4.1.8; set by the session's NameField, the HeroReadHook precedent): the
+	 * field index in, the name and the country out. Two strings, never handles::Identity: no Game header enters the engine.
+	 * Null keeps today's (nothing calls it before G3).
+	 */
+	std::function<void(int Field, std::string& Name, std::string& Country)> Namer;
+	/** The seats the session watches (people the player knows; at most bigfield::kWatchMax). Phase A: no model, nothing kept. */
+	SHORTSTACKCORE_API void SetWatch(const std::vector<int>& Fields);
+	/** Steps up to Count modelled tables of the tick being finished (after FinishSome); true once none are left. Phase A: true. */
+	SHORTSTACKCORE_API bool ModelSome(int Count);
+	/** The hero's re-entry (§4.13): a bullet into the running field. Phase A: refused (no events, nothing changed). */
+	SHORTSTACKCORE_API std::vector<TEvent> Reenter();
+	/** Late registration's catch-up (§4.12): model ticks until the clock reaches ClockMinutes. Phase A: refused (false, nothing done). */
+	SHORTSTACKCORE_API bool CatchUp(double ClockMinutes, double BudgetMs);
+
 	TournamentSpec Spec;
 	Rng R;
 	std::vector<TPlayer> Players; // insertion order: hero, reserved, then the field
@@ -292,5 +360,7 @@ private:
 	bool AtHeroTable(const Hand& H) const;
 	/** BeginFinish's body: the hero's hand finished by HeroAuto (a profile) or by Brain (the plan), then applied. */
 	void BeginFinishHand(Hand* HeroHand, const Profile* HeroAuto, const style::HeroBrain* Brain);
+	// Update 4 (§4.1.4): the modelled field, model mode only (G3); null in a dealt field, so always null before G3.
+	std::unique_ptr<fieldmodel::Model> M;
 };
 } // namespace ss

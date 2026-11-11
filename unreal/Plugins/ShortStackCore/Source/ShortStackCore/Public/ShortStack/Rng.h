@@ -67,4 +67,20 @@ private:
 	uint32_t C = 0;
 	uint32_t D = 0;
 };
+
+/**
+ * Update 4 (SPEC v1.7 §4.1.7, §6 PA-16): the one integer key mix, string-free, for keyed streams that must not depend on the
+ * order things are asked for: the field model's table-hands (KeyMix(Salt, 3 + Tick, TableId)) and the crowd's seats and weeks
+ * (§5.4-§5.6). splitmix64 of KeyA ^ (KeyB x 0x9E3779B97F4A7C15) ^ (KeyC x 0xBF58476D1CE4E5B9) ^ (KeyD x 0x94D049BB133111EB),
+ * so the three-key form is the four-key form with KeyD = 0. Every new keyed draw uses this, never another local Mix in a detail
+ * namespace (rev-code minor 6). Draws from no Rng; nothing calls it before G3.
+ */
+constexpr uint64_t KeyMix(uint64_t KeyA, uint64_t KeyB, uint64_t KeyC, uint64_t KeyD = 0)
+{
+	uint64_t Z = KeyA ^ (KeyB * 0x9E3779B97F4A7C15ull) ^ (KeyC * 0xBF58476D1CE4E5B9ull) ^ (KeyD * 0x94D049BB133111EBull);
+	Z += 0x9E3779B97F4A7C15ull;
+	Z = (Z ^ (Z >> 30)) * 0xBF58476D1CE4E5B9ull;
+	Z = (Z ^ (Z >> 27)) * 0x94D049BB133111EBull;
+	return Z ^ (Z >> 31);
+}
 } // namespace ss
