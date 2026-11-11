@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ShortStack/Common.h"
+#include "ShortStack/Structure.h"
 
 #include <cstdint>
 #include <map>
@@ -165,6 +166,10 @@ struct Result
 	int Entries = 0;
 	Chips Prize = 0;
 	bool Online = false;
+	// Update 4 (SPEC v1.7 §2.4.3; §6 PA-14): the event's prize table shape (the room copies world::Finish::Curve), so the bubble
+	// rule counts the places that field paid. StoryText writes it as a 7th '^' field only when it isn't Standard; StoryOf reads it
+	// when present. Standard on every record until G1's festival Mains.
+	PayoutCurve Curve = PayoutCurve::Standard;
 };
 SHORTSTACKCORE_API std::vector<Result> StoryOf(const std::string& Story);
 SHORTSTACKCORE_API std::string StoryText(const std::vector<Result>& Results);

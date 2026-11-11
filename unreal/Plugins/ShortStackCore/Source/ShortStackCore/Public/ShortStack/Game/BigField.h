@@ -2,6 +2,7 @@
 
 #include "ShortStack/Common.h"
 #include "ShortStack/Game/Handles.h"
+#include "ShortStack/Structure.h"
 
 #include <cstdint>
 #include <deque>
@@ -16,6 +17,14 @@ namespace life
 {
 struct State;
 }
+namespace world
+{
+class World;
+}
+struct LobbyEvent;
+struct TournamentSpec;
+class Tournament;
+class Session;
 
 /**
  * Update 4, the Big Field (SPEC v1.7 §4.2-§4.15; Phase A's declarations, §6 PA-42): fields over 3,000 played three ways (every
@@ -48,6 +57,9 @@ constexpr int kRunMinEntries = 1000, kRunsBest = 12, kRunsLast = 3;
 constexpr double kBeatHoldSeconds = 3.2;
 /** The session watches at most this many seats of a modelled field for WHO'S IN (§4.7.3, Tournament::SetWatch). */
 constexpr int kWatchMax = 12;
+/** Step A-2 (LEAD_CALLS Q-5; §4.1.2's game-side list): CHIP COUNTS' top rows and a PKO's biggest heads (§4.7.2), and YOUR RUN's
+ *  samples kept per run (§4.15.1: 32 buffered, decimated to 16). */
+constexpr int kLeaders = 10, kBiggestHeads = 5, kRunSamples = 16;
 
 /** The register strip's three tiles (§4.3.1; autoplay::Prefs::BigPick holds the last one, 0 for never). None: today's table. */
 enum class Pick : uint8_t
@@ -140,5 +152,87 @@ SHORTSTACKCORE_API std::vector<std::string> Inventory();
 SHORTSTACKCORE_API bool ReadLine(const std::vector<std::string>& Fields, life::State& L);
 /** The kept runs as run\t lines, only once Update4LinesRead & U4Run is set (§4.15.2). Phase A: nothing. */
 SHORTSTACKCORE_API void WriteLines(const life::State& L, std::string& Out);
+
+// Step A-2 (LEAD_CALLS Q-5): every function the Big Field's sections name in this header, declared before the freeze with a stub
+// that answers empty, none or false (bodies in G/BigField.cpp, B-session's at G3; nothing calls them before G3).
+
+/** The extended ladder (§4.1.10): Base (the listing's levels: the template's, doubled for stacks over 10,000) continued past its
+ *  last level in the ladder's decade pattern (1M, 1.2M, 1.6M, 2M, 2.5M, 3M, 4M, 5M, 6M, 8M, 10M ...; small blind half, ante = big
+ *  blind) up to fieldmodel::kLadderCap. Network::Listing sets it as Spec.Levels for a listing over kBigFieldEntries (per listing,
+ *  never a template field). Phase A: empty. */
+SHORTSTACKCORE_API std::vector<Level> Ladder(const std::vector<Level>& Base);
+
+/** One tile of the register strip (§4.3.1): its pick, the title ("KEY SPOTS"), the estimate line ("about 55 min") and the sub line. */
+struct StripTile
+{
+	Pick Which = Pick::None;
+	std::string Title, Estimate, Sub;
+};
+/** The register strip (§4.3.1): RiverLine's RegisterBlock, Ignite's event sheet and RunItTwice's Prospectus each draw it in their
+ *  own skin from this one view, one layout rule. Presentation only: never saved. */
+struct Strip
+{
+	bool Shown = false;          // a listing over kBigFieldEntries while net::Unlock::UnlockBigField is on
+	Pick Selected = Pick::None;  // the preselected tile: Prefs::BigPick's last pick, KEY SPOTS when it's 0
+	StripTile Tiles[3];          // EVERY HAND, KEY SPOTS, JUMP TO THE FINAL TABLE
+	bool AllInStop = true;       // tile 3's toggle ("ALL-IN STOP ON" / "OFF"): on for every registration until dropped for it
+	std::string Clock;           // under the strip: "About 11 hours on the clock." (the instance's Duration, to the hour, >= 1)
+};
+/** The strip for a listing (§4.3.1): Unlocks the career's net::Unlock bits, BigPick autoplay::Prefs::BigPick, AllInStop tile 3's
+ *  toggle for this registration. Phase A: not shown (an empty view). */
+SHORTSTACKCORE_API Strip StripView(const LobbyEvent& Listing, int Unlocks, uint8_t BigPick, bool AllInStop);
+
+/** The deep-run beats (§4.5.2), by priority (a lower value wins; one banner a tick). FinalTable, InTheMoney and Bubble (THE BUBBLE /
+ *  HAND FOR HAND) are today's engine events; the rest are new, in fields of kBroadcastEntries or more, from day 2, with the bit on,
+ *  while the hero is in. */
+enum class Beat : uint8_t
+{
+	None,
+	FinalTable, // 1, today's
+	HeadsUp,    // 2 HEADS-UP FOR THE TITLE: 2 left, the hero one of them
+	InTheMoney, // 3, today's (a modelled field's sub line is new)
+	Bubble,     // 4, today's THE BUBBLE / HAND FOR HAND
+	LastThree,  // 5 LAST THREE TABLES: TableCountAll() falls from 4 or more to 3 or fewer
+	Left100,    // 6 100 LEFT: Remaining crosses 100; entries over 200
+	Left500,    // 7 500 LEFT: crosses 500; entries over 1,000
+	Left1000,   // 8 1,000 LEFT: crosses 1,000; entries over 2,000
+	HalfGone,   // 9 HALF THE FIELD IS GONE: crosses entries / 2; entries 2,000 or more
+	Count,
+};
+/** What the beats compare, taken before and after each engine tick (§4.5.2). Fired holds the beats this event has already shown
+ *  (bit 1 << Beat), so each fires at most once per event. */
+struct BeatState
+{
+	int Entries = 0, Remaining = 0, Tables = 0; // Tables: Tournament::TableCountAll()
+	bool HeroIn = false;
+	int HeroRank = 0;
+	uint32_t Fired = 0;
+};
+/** The highest-priority new beat crossed between two ticks (§4.5.2; G/SessionBig.cpp calls it after each tick at G3). Phase A: None. */
+SHORTSTACKCORE_API Beat BeatsCrossed(const BeatState& Before, const BeatState& After);
+
+/** The skip card's line in a modelled field (§4.3.4): "SKIPPING · KEY SPOTS · 4,112 left · you're 640th · 34 to the money." before
+ *  the money, "... · next jump at 1,080th." in it (autoplay::SkipLine elsewhere). Phase A: "". */
+SHORTSTACKCORE_API std::string SkipLine(const Tournament& T, Pick P);
+
+/** A watched seat's status while the hero's run lives (§4.7.3, WHO'S IN's lines): in, with the rank from FieldView().WatchRank, or
+ *  out, with the place. Known false: the engine doesn't know the seat (then the world's result speaks, after the event). */
+struct SeatStatus
+{
+	bool Known = false;
+	bool In = false;
+	int Rank = 0;  // in: the seat's rank in chips
+	int Place = 0; // out: where it finished
+};
+/** Field is the seat's field index (TLeader::Field, fieldmodel's). Phase A: unknown. */
+SHORTSTACKCORE_API SeatStatus StatusOf(const Tournament& T, int Field);
+
+/** Late registration into a modelled field closes before the estimated money (§4.12.1): the start plus the calibration's median
+ *  money tick (by CalibId, scaled by LevelMinutes) less one level, in clock minutes. Phase A: 0 (no estimate). */
+SHORTSTACKCORE_API double MoneyMinutes(const TournamentSpec& Spec);
+
+/** The broadcast's honorific for a seat (§4.8.4): public facts only, the first match wins (titles, team or badge, a rank, an arc
+ *  fact, history with you, this event's facts, then "Plays from {country}."); Npc -1 for an anonymous seat. Phase A: "". */
+SHORTSTACKCORE_API std::string Honorific(const world::World& W, const Session& S, int Npc, const std::string& EventId);
 } // namespace bigfield
 } // namespace ss

@@ -97,6 +97,12 @@
 //                              second bust by ss.Site.Play beef when play made none), the
 //                              League's Placement month half played with its world line, a Callout, two Team scalps and the
 //                              Guest List; saved WITH its world, which holds the League's line; "show" prints each day)
+//   fixture_tool write-u4-scene <n> <dir>  writes Update 4's grown scene fixture, u4_scene_<n>.ssave, WITH its world (SPEC v1.7
+//                              §6 PA-49, §6.6, §5.14; for PIE and Phase A's snapshot measure, never committed: write it to
+//                              scratch, since MigrationAll3 globs Tests/*.ssave): a NewCareer whose world today's Sim::Rookie grows
+//                              to n people (up to 3,000) at day 0, then 60 days walked a day at a time while the Scene Book is
+//                              stubbed (rev-plan minor 8); prints the §5.14 rows it can measure (G2 re-grows it; the 10,000 path
+//                              is S-scale's at G4)
 //   fixture_tool transcript    prints every save as the careers are built and as each fixture is loaded and played on
 //                              (texts, ledgers, the whole save but the world, whose size and hash are printed), the
 //                              c09bc31 careers first, then update 2's; a build whose transcript matches the code the
@@ -170,6 +176,18 @@
 #include <set>
 #else
 #define SS_FIXTURE_U3G2 0
+#endif
+
+// Update 4's grown scene fixture (SPEC v1.7 §6 PA-49, §6.6; write-u4-scene): today's Sim::Rookie, Sim::SeedSites, Sim::Add, Sim::Bind
+// and Sim::Ranks through the world's private simulation header (Sim's public statics, as the Update 4 perf-save probe grew its
+// worlds), on a tree with Phase A's world headers.
+#if SS_FIXTURE_U3G2 && __has_include("ShortStack/Game/WorldScene.h") && __has_include("../../Source/ShortStackCore/Private/ShortStack/Game/WorldSim.h")
+#define SS_FIXTURE_U4SCENE 1
+#include "../../Source/ShortStackCore/Private/ShortStack/Game/WorldSim.h"
+#include "ShortStack/Game/Sites.h"
+#include <chrono>
+#else
+#define SS_FIXTURE_U4SCENE 0
 #endif
 
 #include <algorithm>
@@ -2977,6 +2995,140 @@ void PlayOn(const char* Tag, const ss::SaveData& Saved)
 	Dump((std::string(Tag) + ": two days on").c_str(), H.Last);
 	(void)Now;
 }
+
+#if SS_FIXTURE_U4SCENE
+/** Milliseconds since a steady-clock point (write-u4-scene's timings). */
+double U4SceneMs(std::chrono::steady_clock::time_point From)
+{
+	return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - From).count();
+}
+
+double U4SceneMedian(std::vector<double> V)
+{
+	if (V.empty())
+	{
+		return 0.0;
+	}
+	std::sort(V.begin(), V.end());
+	return V[V.size() / 2];
+}
+
+/**
+ * Update 4's grown scene fixture (SPEC v1.7 §6 PA-49, §6.6, §5.14): a NewCareer (the Established world: 1,657 people on Night One
+ * for this seed) whose world is grown at day 0 to Target people by today's Sim::Rookie, each newcomer added the way Sim::Newcomers adds one
+ * (SeedSites and Ignite's first step, the home-game tie both ways; no Debut post, so the news isn't 1,300 debuts long), then walked
+ * 60 days a day at a time (fed, with money in the bank, so the rent is paid and the player is at home) while the Scene Book is
+ * stubbed (rev-plan minor 8). Prints the §5.14 rows a standalone build can measure; the save is written WITH its world.
+ */
+bool U4Scene(int Target, const std::string& Path)
+{
+	namespace world = ss::world;
+	Hooks H;
+	std::unique_ptr<ss::Session> S(new ss::Session(H, "fixture-u4-scene"));
+	S->NewCareer(Someone());
+	S->CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(*S, 0.0, 0.2);
+	S->BankrollCents += 10000000; // $100,000: sixty days of rent, food and the corner store
+	world::World& W = S->Living();
+	const size_t Founding = W.People().size();
+	{
+		ss::Rng R("fixture/u4-scene/grow");
+		const int Day0 = world::sim::DayAt(W.Clock());
+		while (static_cast<int>(W.People().size()) < Target)
+		{
+			world::Npc N = world::Sim::Rookie(W, R, Day0);
+			const bool Friend = N.Came == world::Arrival::HomeGame && N.CameWith >= 0;
+			const int With = N.CameWith;
+			N.Sites = static_cast<uint8_t>(world::Sim::SeedSites(W, N, Day0));
+			if ((N.Sites & world::Sim::SiteBit(ss::net::SiteId::RiverLine)) == 0 && !N.Path.empty() && N.Path.front().Kind == world::StepKind::Joined)
+			{
+				N.Path.front().What = ss::net::Def(ss::net::SiteId::Ignite).Name;
+			}
+			const int Id = world::Sim::Add(W, std::move(N));
+			if (Friend)
+			{
+				world::Sim::Bind(W, Id, With, world::TieKind::HomeGame, 0.5f, Day0);
+				world::Sim::Bind(W, With, Id, world::TieKind::HomeGame, 0.5f, Day0);
+			}
+		}
+		world::Sim::Ranks(W);
+	}
+	std::printf("write-u4-scene: %zu people on Night One, grown to %zu at day 0 by Sim::Rookie\n", Founding, W.People().size());
+	// Sixty days, one at a time: each step is the world's AdvanceTo over a day inside the session's update.
+	std::vector<double> DayMs;
+	const double Midnight = std::floor(S->WorldMinutes() / Day) * Day;
+	for (int D = 1; D <= 60; ++D)
+	{
+		Fed(*S);
+		const std::chrono::steady_clock::time_point T0 = std::chrono::steady_clock::now();
+		Now = At(*S, Now, Midnight + static_cast<double>(D) * Day + 10.0 * 60.0);
+		DayMs.push_back(U4SceneMs(T0));
+	}
+	Fed(*S);
+	Now = Wait(*S, Now, 0.2);
+	S->Save();
+	const std::string Text = H.Last.Serialize();
+	std::string WorldLines;
+	WithoutWorld(Text, &WorldLines);
+	if (!WriteFile(Path, Text))
+	{
+		return false;
+	}
+	// The rows (§5.14), measured on this build: the copy is today's deep copy (PA-34's shared snapshot replaces it in A-2).
+	std::vector<double> CopyMs;
+	for (int K = 0; K < 7; ++K)
+	{
+		const std::chrono::steady_clock::time_point T0 = std::chrono::steady_clock::now();
+		const std::shared_ptr<const world::World> Snap = std::make_shared<const world::World>(W);
+		CopyMs.push_back(U4SceneMs(T0));
+	}
+	std::vector<double> LoadMs;
+	for (int K = 0; K < 3; ++K)
+	{
+		const std::chrono::steady_clock::time_point T0 = std::chrono::steady_clock::now();
+		world::World Loaded;
+		size_t At0 = 0;
+		while (At0 < WorldLines.size())
+		{
+			size_t End = WorldLines.find('\n', At0);
+			End = End == std::string::npos ? WorldLines.size() : End;
+			std::vector<std::string> Fields;
+			size_t F0 = At0;
+			while (true)
+			{
+				const size_t Tab = WorldLines.find('\t', F0);
+				if (Tab == std::string::npos || Tab > End)
+				{
+					Fields.push_back(WorldLines.substr(F0, End - F0));
+					break;
+				}
+				Fields.push_back(WorldLines.substr(F0, Tab - F0));
+				F0 = Tab + 1;
+			}
+			Loaded.Read(Fields);
+			At0 = End + 1;
+		}
+		Loaded.Finish();
+		LoadMs.push_back(U4SceneMs(T0));
+	}
+	double SkipMs = 0.0;
+	{
+		world::World Copy = W;
+		const std::chrono::steady_clock::time_point T0 = std::chrono::steady_clock::now();
+		Copy.Simulate(30);
+		SkipMs = U4SceneMs(T0);
+	}
+	std::printf("  people %zu (active %d), world day %d\n", W.People().size(), W.ActiveCount(), world::sim::DayAt(W.Clock()));
+	std::printf("  sim per world day (the 60 days, the session's update around AdvanceTo): median %.1f ms, max %.1f ms\n", U4SceneMedian(DayMs),
+		DayMs.empty() ? 0.0 : *std::max_element(DayMs.begin(), DayMs.end()));
+	std::printf("  a 30-day skip (World::Simulate(30) on a copy): %.0f ms\n", SkipMs);
+	std::printf("  save snapshot (the world copied as Session::Save copies it): median of 7 %.2f ms\n", U4SceneMedian(CopyMs));
+	std::printf("  world text %zu bytes; the save %zu bytes (before Oodle)\n", WorldLines.size(), Text.size());
+	std::printf("  load (World::Read + Finish): median of 3 %.0f ms\n", U4SceneMedian(LoadMs));
+	(void)Now;
+	return true;
+}
+#endif
 } // namespace fixture_tool
 
 int main(int Argc, char** Argv)
@@ -2994,10 +3146,24 @@ int main(int Argc, char** Argv)
 	if (Mode == "write-u4-scene")
 	{
 		// Update 4 (SPEC v1.7 §6 PA-49, §6.6): the grown scene fixture (3,000 now: today's Sim::Rookie x N at day 0, then a 60-day
-		// simulate while the book is stubbed; re-grown at G2; the 10,000 path is S-scale's at G4). Declared in step A-1; the lead
-		// grows it in A-2, so this verb writes nothing yet.
-		std::printf("fixture_tool write-u4-scene: not built yet (Update 4 Phase A, step A-2); nothing written\n");
-		return 0;
+		// walk while the book is stubbed; re-grown at G2; the 10,000 path is S-scale's at G4). Step A-2 (the lead) grows it.
+#if SS_FIXTURE_U4SCENE
+		const int Target = Argc > 2 ? std::atoi(Argv[2]) : 0;
+		if (Argc < 4 || Target < 1)
+		{
+			std::printf("usage: fixture_tool write-u4-scene <n> <dir>   (n up to 3000; write it to scratch, never Tests/)\n");
+			return 2;
+		}
+		if (Target > 3000)
+		{
+			std::printf("fixture_tool write-u4-scene: %d people need the crowd (the 10,000 path is S-scale's, Update 4's G4); nothing written\n", Target);
+			return 2;
+		}
+		return U4Scene(Target, std::string(Argv[3]) + "/u4_scene_" + std::to_string(Target) + ".ssave") ? 0 : 1;
+#else
+		std::printf("fixture_tool write-u4-scene: this tree has no Update 4 world headers (Game/WorldScene.h)\n");
+		return 2;
+#endif
 	}
 	if (Mode == "write-u3g2")
 	{

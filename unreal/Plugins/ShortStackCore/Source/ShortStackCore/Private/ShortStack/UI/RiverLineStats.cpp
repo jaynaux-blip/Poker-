@@ -882,6 +882,9 @@ void RiverLine::HeroStatsCard(double Now)
 	NetBadgeRail(*C, UI, this, NetCardBadges(S.HeroBadges(), 6, NetBadgeFrame(Pic)), -1, R.X + 156.0f + Nw, R.Y + 58.0f, 22.0f, 3, R.X + R.W - 80.0f - (R.X + 156.0f + Nw), Now);
 	// The tracker follows the player across sites (update 2 §1.10): once a rival has been played, it says so.
 	UI.Text(rlsites_detail::SitesPlayedRival(S) ? "Your online tournaments since Night One" : "Your tournaments on RiverLine since Night One", R.X + 142.0f, R.Y + 102.0f, Ts(16.0f, 600, StSoft()));
+	// Update 4 (SPEC v1.7 §3.19.3; step A-2, LEAD_CALLS Q-6): the player's TPI line under it, from the first cash (RiverLineCardStory.cpp,
+	// W-ui's at G2; nothing before).
+	HeroCardTpiLine(R, Now);
 	{
 		const Rect X{R.X + R.W - 56.0f, R.Y + 22.0f, 36.0f, 36.0f};
 		const Ui::ClickState Cx = UI.Clickable("herostatsclose", X);

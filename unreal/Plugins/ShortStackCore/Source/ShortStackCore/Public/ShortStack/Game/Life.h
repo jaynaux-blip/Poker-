@@ -329,6 +329,45 @@ constexpr Chips CouchChipInCents = 1000;
 constexpr Chips StorageCents = 6000;
 constexpr double StorageDays = 30.0;
 
+/**
+ * Update 4, step A-2 (SPEC v1.7 §4.15.2; LEAD_CALLS Q-7): one kept YOUR RUN record, an MTT result of bigfield::kRunMinEntries or
+ * more, as its run\t line holds it: run\t<eventId>\t<entries>\t<place>\t<prizeCents>\t<hands>\t<clockMin>\t<realSec>\t<peakRank>
+ * \t<peakHand>\t<maxBb>\t<flags>\t<day>\t<16 samples hand:remaining:rank, comma-joined>. B-session's from G3; no record exists
+ * before.
+ */
+struct RunRecord
+{
+	/** RunRecord::Flags bits. */
+	enum Flag : uint32_t
+	{
+		Won = 1,
+		FinalTable = 2,
+		InTheMoney = 4,
+		Modelled = 8, // a field over 3,000 (modelled)
+		ByPlan = 16,  // played mostly by the plan
+	};
+	/** One of the field curve's samples: the hand, the players left, the hero's rank. */
+	struct Sample
+	{
+		int Hand = 0;
+		int Remaining = 0;
+		int Rank = 0;
+	};
+	std::string EventId;
+	int Entries = 0;
+	int Place = 0;
+	Chips PrizeCents = 0;
+	int Hands = 0;
+	int ClockMinutes = 0; // ClockMinutes() - StartClock at the end
+	int RealSeconds = 0;  // Session::Now from register to the end
+	int PeakRank = 0;
+	int PeakHand = 0;
+	int MaxBb = 0;        // the biggest stack, in big blinds
+	uint32_t Flags = 0;
+	int Day = 0;
+	std::vector<Sample> Samples; // bigfield::kRunSamples, evenly spaced
+};
+
 /** What persists about the player's life (saved with the session). */
 struct State
 {
@@ -456,6 +495,19 @@ struct State
 	 * qualifying result; the Notebook's first open); NewCareer sets every bit (the SegShift precedent). Never in AfterParse (S10).
 	 */
 	uint32_t Update4LinesRead = 0;
+	/**
+	 * Update 4, step A-2 (SPEC v1.7 §4.15; LEAD_CALLS Q-7): YOUR RUN's kept runs (the best kRunsBest by place over entries plus the
+	 * last kRunsLast, bigfield::), saved as run\t lines by bigfield::WriteLines once U4Run is set and read back by bigfield::ReadLine.
+	 * B-session keeps them from G3; empty until then, so nothing is written.
+	 */
+	std::vector<RunRecord> YourRuns;
+	/**
+	 * Update 4, step A-2 (SPEC v1.7 §3.21; LEAD_CALLS Q-7): the Notebook's nb\tseen values (W-ui, G2), written once U4Notebook is
+	 * set: the world day the Notebook was last opened (-1: never) and how many PASSED YOU the YOU tab has shown. Nothing sets them
+	 * before G2.
+	 */
+	int NotebookSeenDay = -1;
+	int NotebookPassedSeen = 0;
 
 	SHORTSTACKCORE_API void Record(double At, const std::string& Label, Chips Amount, int Kind);
 	int TicketsFor(const std::string& TemplateId) const;
