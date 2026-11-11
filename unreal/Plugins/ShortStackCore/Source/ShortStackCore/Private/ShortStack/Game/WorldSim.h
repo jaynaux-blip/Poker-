@@ -320,6 +320,9 @@ struct Sim
 	static bool Major(const Pending& P);
 
 	static void Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, Chips Prize, bool Seat);
+	/** Update 4 (SPEC v1.7 §2.4.3; §6 PA-13): an event's prize table shape, the template's Curve for an online event with a valid
+	 *  template, else Standard (live events, the underground and the rest). Standard on every template until G1's festival Mains. */
+	static PayoutCurve CurveOf(const Pending& P);
 	static void PlanTrips(World& W, int Day, Rng& R);
 	static void Finances(World& W, Npc& N, int Day, Rng& R);
 	static void Stakes(World& W, Npc& N, int Day, Rng& R);
@@ -413,3 +416,7 @@ struct Sim
 };
 } // namespace world
 } // namespace ss
+
+// Update 4 (§6 PA-35): A3's World::AdvanceTo runs the turn as these splits' pieces (G/WorldHero.cpp TurnPlanUnit, TurnDayUnit) when
+// this is defined, and PlanDay and NewDay whole otherwise (World::TurnUnitsRanged() says which).
+#define SS_WORLDSIM_TURN_PIECES 1

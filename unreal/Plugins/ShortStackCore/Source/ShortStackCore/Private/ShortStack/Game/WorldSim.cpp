@@ -1358,7 +1358,7 @@ Chips Bounties(Rng& R, const Pending& P, int Place, double BountySkill)
 		// false in Phase A, so every place keeps today's envelope.
 		if (story::MysteryInMoney(P))
 		{
-			const int InMoney = std::max(1, ss::PaidPlaces(P.Entries, PayoutCurve::Standard));
+			const int InMoney = std::max(1, ss::PaidPlaces(P.Entries, Sim::CurveOf(P)));
 			Money = Place <= InMoney ? Money * static_cast<double>(std::max(1, P.Entries)) / static_cast<double>(InMoney) : 0.0;
 		}
 	}
@@ -1606,6 +1606,7 @@ void Sim::Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, C
 		F.Where = P.Online ? 0 : 1;
 		F.Major = P.Major;
 		F.Seat = Seat ? P.SeatValue : 0;
+		F.Curve = CurveOf(P); // Update 4 (§2.4.3, PA-14): Standard until G1's festival Mains
 		N.Recent.insert(N.Recent.begin(), F);
 		if (N.Recent.size() > 10)
 		{
@@ -1699,6 +1700,16 @@ void Sim::Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, C
 	W.Refresh(N.Id);
 }
 
+PayoutCurve Sim::CurveOf(const Pending& P)
+{
+	if (!P.Online || P.Template < 0)
+	{
+		return PayoutCurve::Standard;
+	}
+	const std::vector<net::EventTemplate>& Temps = net::ForEvent(P.Id).Templates();
+	return static_cast<size_t>(P.Template) < Temps.size() ? Temps[static_cast<size_t>(P.Template)].Curve : PayoutCurve::Standard;
+}
+
 void Sim::Resolve(World& W, Pending& P)
 {
 	Rng R(Seeded(W, "result", P.Id));
@@ -1756,7 +1767,8 @@ void Sim::Resolve(World& W, Pending& P)
 	P.Entries = Field;
 	const bool Bounty = Has(P.Kinds, KindBounty);
 	const Chips PrizePool = Bounty ? P.Pool / 2 : P.Pool;
-	const std::vector<Chips> Pay = Has(P.Kinds, KindSatellite) ? std::vector<Chips>() : PayoutTable(PrizePool, Field, std::max<Chips>(1, P.BuyIn * 3 / 2));
+	// Update 4 (SPEC v1.7 §2.4.3; §6 PA-13): the one payout function, on the event's curve (Standard: PayoutTable exactly).
+	const std::vector<Chips> Pay = Has(P.Kinds, KindSatellite) ? std::vector<Chips>() : PayoutFor(PrizePool, Field, std::max<Chips>(1, P.BuyIn * 3 / 2), CurveOf(P));
 	std::set<int> Taken;
 	if (HeroIn)
 	{

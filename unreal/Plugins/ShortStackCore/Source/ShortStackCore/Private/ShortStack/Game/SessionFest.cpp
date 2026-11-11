@@ -9,9 +9,20 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace ss
 {
+namespace fest
+{
+// Step A-2 (LEAD_CALLS Q-5; moved here from G/Festival.cpp by the integrator): Dee's festival lines and Rerun's festival titles, empty
+// in Phase A. F-world writes the body at G1.
+std::vector<std::string> TextInventory()
+{
+	return {};
+}
+} // namespace fest
+
 std::optional<FestMoment> Session::PeekFestMoment() const
 {
 	return std::nullopt;

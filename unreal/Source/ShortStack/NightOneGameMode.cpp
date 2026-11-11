@@ -1538,6 +1538,8 @@ void ANightOneGameMode::QuitToMainMenu()
 	if (Game && bStarted)
 	{
 		// A stream still live ends here (credited), as leaving the desk any other way ends it.
+		// Update 4 (SPEC v1.7 §3.7 R5, §6 PA-35): a scene exit finishes a held turn and the session's catch-up (Session::DrainWorld), then saves (Session::Save waits for the turn).
+		Game->Session.DrainWorld();
 		Game->Session.EndStream();
 		Game->Session.Save();
 	}
@@ -1549,6 +1551,8 @@ void ANightOneGameMode::QuitToDesktop()
 {
 	if (Game && bStarted)
 	{
+		// Update 4 (SPEC v1.7 §3.7 R5, §6 PA-35): a scene exit finishes a held turn and the session's catch-up (Session::DrainWorld), then saves (Session::Save waits for the turn).
+		Game->Session.DrainWorld();
 		Game->Session.EndStream();
 		Game->Session.Save();
 	}
@@ -1698,6 +1702,8 @@ bool ANightOneGameMode::GoOutside()
 		Game->Text("RiverLine", "You have tables open. Finish or unregister before you head out.");
 		return false;
 	}
+	// Update 4 (SPEC v1.7 §3.7 R5, §6 PA-35): a scene exit finishes a held turn and the session's catch-up (Session::DrainWorld), then saves (Session::Save waits for the turn).
+	Game->Session.DrainWorld();
 	// Live on Kast: the stream ends as the player gets up, as it does on every other way out, so its hours, viewers and
 	// payout are credited (an unended stream isn't saved: it would just vanish with the level).
 	if (Game->Session.Streaming())
@@ -1766,6 +1772,8 @@ void ANightOneGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		if (bStarted)
 		{
+			// Update 4 (SPEC v1.7 §3.7 R5, §6 PA-35): a scene exit finishes a held turn and the session's catch-up (Session::DrainWorld), then saves (Session::Save waits for the turn).
+			Game->Session.DrainWorld();
 			Game->Session.Save();
 		}
 		Game->Saver.Flush();

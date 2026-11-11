@@ -276,7 +276,7 @@ void Session::SiteStep(double From, double To)
 	rep::Public P;
 	if (net::DayOf(From) != net::DayOf(To))
 	{
-		session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): the gates read the world's record of the player
+		DrainWorld(); // Update 4 (§3.7 R3, PA-35): the gates read the world's record of the player
 		P = Record();
 		rep::FromHistory(P, History);
 	}
@@ -295,7 +295,7 @@ std::string Session::DebugSite(const std::string& Args)
 	const std::string Verb = W.empty() ? std::string("describe") : W[0];
 	const double World = WorldMinutes();
 	const net::SiteId Named = W.size() > 1 ? SitesNamed(W[1]) : net::SiteId::Count;
-	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): the verbs read the world, some write it
+	DrainWorld(); // Update 4 (§3.7 R3, PA-35): the verbs read the world, some write it
 	const std::string Usage = "ss.Site.<Describe|Invite <site>|Accept <site>|Decline <site>|Launch <site>|Deposit <site> <dollars> [card]|Withdraw <site> <dollars> [bank]|Advance <hours>>";
 	// Update 3 (§7.6): ss.Site.Play's verbs, the rest of the line as typed (core-siteplay's DebugSitePlay).
 	if (Verb == "play")

@@ -1267,6 +1267,20 @@ int FuseTierOf(const std::string& EventId)
 	return std::atoi(EventId.c_str() + Prefix.size());
 }
 
+/**
+ * Update 4 (SPEC v1.7 §6 PA-33): a name as handles::Field's own set compares it (each byte through std::tolower), for the taken names
+ * the session keeps beside World::NameUsed's index (the player's and the rival's, and from G4 the crowd's names NameCrowdSeats gives).
+ */
+std::string NameUsedKey(const std::string& Name)
+{
+	std::string Key = Name;
+	for (char& Ch : Key)
+	{
+		Ch = static_cast<char>(std::tolower(static_cast<unsigned char>(Ch)));
+	}
+	return Key;
+}
+
 /** The worlds of the sessions alive now, newest last: the network shows the newest. */
 std::vector<const world::World*>& LiveWorlds()
 {
@@ -1313,6 +1327,9 @@ void Session::StartWorld(const SaveData* Loaded, world::Start S)
 		LivingWorld.Create(Fnv1a(SeedBase + ":world:" + HeroName), WorldMinutes(), S);
 	}
 	LivingWorld.HeroName = HeroName;
+	// Update 4 (SPEC v1.7 §6.6, §6 PA-35): SS_TURN_BUDGET forces the held turn's slicing for the Phase A exit's 0.5 ms runs (unset: unlimited,
+	// so a turn runs whole as today); G2 sets 2.0 here (§3.7 R1). Create and a fresh World() reset the budget, so it is set after both.
+	LivingWorld.TurnBudgetMs = world::World::ForcedTurnBudgetMs();
 	session_detail::TellBirthYear(LivingWorld, Person);
 	std::vector<const world::World*>& Worlds = session_detail::LiveWorlds();
 	if (std::find(Worlds.begin(), Worlds.end(), &LivingWorld) == Worlds.end())
@@ -1440,7 +1457,8 @@ void Session::WorldSkip(int DayCount)
 	session_hold_detail::HoldWhole(LivingWorld, WorldMinutes(), Hooks);
 	WorldNewsAt = LivingWorld.Clock();
 	WorldSaved.clear();
-	WorldSnap.reset();
+	WorldSnapStamp = world::WorldStamp();
+	WorldSnapLent.reset();
 	Save();
 }
 
@@ -1456,6 +1474,21 @@ void Session::WorldStep()
 	{
 		return;
 	}
+	WorldCaughtUp();
+}
+
+void Session::DrainWorld()
+{
+	if (!LivingWorld.Holding())
+	{
+		return;
+	}
+	session_hold_detail::HoldDrain(LivingWorld, Hooks);
+	WorldCaughtUp();
+}
+
+void Session::WorldCaughtUp()
+{
 	// §3.7 R5: a save asked for during the turn is written the frame it completes.
 	if (bSaveAfterHold)
 	{
@@ -1542,16 +1575,27 @@ void Session::Save()
 	const bool bStale = LivingWorld.HeroRevision() != WorldSavedRev || LivingWorld.Clock() - WorldSavedAt >= 60.0;
 	if (bBackground)
 	{
-		// A frozen copy for the host to write off the game thread (it writes each copy's text only once).
+		// A frozen copy for the host to write off the game thread, made only when the world has moved on (Update 4, SPEC v1.7 §6 PA-34).
+		// The session keeps the copy's stamp, never the copy, so the host's write releases it and no page stays shared into the next
+		// slices; a save with the same stamp carries the copy again only while the host still holds it (not yet written), else just
+		// the stamp, whose text the host keeps.
 		Hooks.Scope("SS.Save.Snapshot", true);
-		if (!WorldSnap || bStale)
+		if (!WorldSnapStamp.Valid() || bStale)
 		{
-			WorldSnap = LivingWorld.Ready() ? std::make_shared<const world::World>(LivingWorld) : nullptr;
+			// A2's shared snapshot (World::Snapshot: the pages and containers shared, View()'s rows left behind; null before a world).
+			std::shared_ptr<const world::World> Snap = LivingWorld.Snapshot();
+			WorldSnapStamp = Snap ? Snap->SnapshotStamp() : world::WorldStamp();
+			WorldSnapLent = Snap;
+			D.WorldSnapshot = std::move(Snap);
 			WorldSavedAt = LivingWorld.Clock();
 			WorldSavedRev = LivingWorld.HeroRevision();
 		}
+		else
+		{
+			D.WorldSnapshot = WorldSnapLent.lock();
+		}
 		Hooks.Scope("SS.Save.Snapshot", false);
-		D.WorldSnapshot = WorldSnap;
+		D.WorldStamp = WorldSnapStamp;
 		Hooks.Save(D);
 		return;
 	}
@@ -1595,7 +1639,8 @@ void Session::ResetSave(world::Start S)
 	// A new career, a new world.
 	LivingWorld = world::World();
 	WorldSaved.clear();
-	WorldSnap.reset();
+	WorldSnapStamp = world::WorldStamp();
+	WorldSnapLent.reset();
 	StartWorld(nullptr, S);
 	Save();
 }
@@ -1614,7 +1659,7 @@ void Session::NewCareer(const hero::Character& Who, world::Start S)
 	KastNewCareer();
 	Person = Who;
 	Person.Created = true;
-	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): drain-on-touch
+	DrainWorld(); // Update 4 (§3.7 R3, PA-35): drain-on-touch
 	session_detail::TellBirthYear(LivingWorld, Person);
 	Life.Perks = hero::PerksOf(Person);
 	Life.Perks.TiltGain = coach::TiltGainNow(Life.Study, Life.Perks.TiltGain, WorldMinutes());
@@ -1973,7 +2018,7 @@ std::string Session::RegisterEvent(const LobbyEvent& Listing, StrikeConfirm Conf
 	// Update 3 (§7.2): the reason is returned ("" registered), so a refusal is observable.
 	// Update 4 (SPEC v1.7 §3.7 R3, §6 PA-35): a registration needs the world's answer now (the rival's seat, HeroEntered, NameField's
 	// names and joins, its save), so a held turn finishes first.
-	session_hold_detail::HoldDrain(LivingWorld, Hooks);
+	DrainWorld();
 	if (!CanAfford(Listing))
 	{
 		return "Not enough to cover the buy-in.";
@@ -2029,58 +2074,9 @@ std::string Session::RegisterEvent(const LobbyEvent& Listing, StrikeConfirm Conf
 	// The table opens now, or when the event starts if that's later (the wait passes at the desk).
 	Joined.Spec.StartClock = std::max(Joined.Spec.StartClock, Clock);
 	const LobbyEvent& Ev = Joined;
-	if (TicketsFor(Ev) > 0)
-	{
-		const std::string Tid = net::ForEvent(Ev.Spec.Id).TicketOf(Ev.Spec.Id.substr(0, Ev.Spec.Id.find('@')));
-		if (--Life.Tickets[Tid] <= 0)
-		{
-			Life.Tickets.erase(Tid);
-		}
-		// The entry's line goes in its site's ledger (update 2 §1.2): RiverLine's is the bank's; a rival's ticket never
-		// touches the bank, so its line is the site's own.
-		const net::SiteId TicketSite = net::SiteOf(Ev.Spec.Id);
-		if (TicketSite == net::SiteId::RiverLine)
-		{
-			Life.Record(WorldMinutes(), "Ticket: " + Ev.Spec.Name, 0, 0);
-		}
-		else
-		{
-			site::AddLine(Life.Sites, TicketSite, WorldMinutes(), 0, 0, "Ticket: " + Ev.Spec.Name);
-		}
-	}
-	else
-	{
-		// Who pays (next_segment_spec §1.2): a package's roll (its own ledger takes the buy-in), otherwise the player, from
-		// the event's site's pot (update 2 §1.2: RiverLine's is the bankroll and the bank's line; a rival's is its wallet,
-		// whose line site::OnBuyIn writes). OnBuyIn also takes the rake into RiverLine Rewards or the site's VIP month.
-		const life::Funding Fund = stake::FundFor(Life.Stakes, Ev.Spec.Id, Ev.BuyInCents, false, WorldMinutes());
-		const net::SiteId Site = net::SiteOf(Ev.Spec.Id);
-		if (Fund.From != life::Paid::Package)
-		{
-			stake::Pot Pot = PotFor(Site);
-			if (!Pot.Cents)
-			{
-				Pot = stake::Pot{&BankrollCents, 0};
-			}
-			*Pot.Cents -= Ev.BuyInCents;
-			if (Ev.BuyInCents > 0 && Pot.Site == 0)
-			{
-				Life.Record(WorldMinutes(), "Buy-in: " + Ev.Spec.Name, -Ev.BuyInCents, 0);
-			}
-		}
-		// Update 3 (§2.6 F7): the fee the rake hooks see is the override when there is one (FUSE's real fee, never its spec's).
-		const Chips RakeFee = RakeOverride >= 0 ? RakeOverride : Ev.Spec.FeeCents;
-		site::OnBuyIn(Life.Sites, Site, Ev.BuyInCents, RakeFee, "Buy-in: " + Ev.Spec.Name, WorldMinutes());
-		// Update 3 (W4, §7.2; core-siteplay's body at G2): a rival entry paid from its wallet moves the site's loops, with the
-		// same fee. Not a ticket (the branch above), a freeroll or a package's roll (it pays RiverLine's only).
-		if (Site != net::SiteId::RiverLine && Fund.From != life::Paid::Package && Ev.BuyInCents > 0)
-		{
-			const net::EventTemplate* EntryTmpl = net::ForEvent(Ev.Spec.Id).FindTemplate(Ev.Spec.Id.substr(0, Ev.Spec.Id.find('@')));
-			const int EntryFormat = static_cast<int>(EntryTmpl ? EntryTmpl->Fmt : net::Format::Freezeout);
-			site::play::OnPaidEntry(Life.SitePlay, Life, Site, RakeFee, Ev.BuyInCents, EntryFormat, Ev.Spec.Id, WorldMinutes());
-		}
-		StakeEntered(Ev.Spec.Id, Ev.BuyInCents, Fund);
-	}
+	// Update 4 (SPEC v1.7 §4.13.1 item 3; §6 PA-39): the payment, extracted as PayEntry (SessionBig.cpp): the ticket or the buy-in,
+	// the same ledger lines in the same order (bullet 1; Reenter pays the later bullets at G3).
+	PayEntry(Ev, RakeOverride);
 	// Update 2 (§5.7, §7.4; core-deals' body at G3): a table opened on a site (and streamed, if the stream's live) is a
 	// strike under a running deal that plays only on another one. The register button warned first.
 	sponsor::NoteSitePlay(Life.Sponsors, Life, static_cast<int>(net::SiteOf(Ev.Spec.Id)), WorldMinutes(), Stream.Live, false);
@@ -2246,7 +2242,7 @@ void Session::BuildSeats()
 			FieldMet.insert(Npc->second);
 			if (FieldGreeted.insert(Npc->second).second)
 			{
-				session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): the greeting reads the bond
+				DrainWorld(); // Update 4 (§3.7 R3, PA-35): the greeting reads the bond
 				const std::string Hello = LivingWorld.Greeting(Npc->second, Fnv1a(T->Spec.Id + P.Id));
 				if (!Hello.empty())
 				{
@@ -4214,7 +4210,7 @@ std::string Session::GoToGame(const std::string& Id, Chips BuyInCents)
 		return "Can't get there right now.";
 	}
 	// Update 4 (SPEC v1.7 §3.7 R5, §6 PA-35): a scene exit drains, then saves (a save left waiting for the turn would go with the scene).
-	session_hold_detail::HoldDrain(LivingWorld, Hooks);
+	DrainWorld();
 	if (Stream.Live)
 	{
 		EndStream();
@@ -4242,7 +4238,7 @@ std::string Session::GoToLive(const std::string& OccurrenceId)
 	const double World = WorldMinutes();
 	// Update 4 (SPEC v1.7 §3.7 R3, R5; §6 PA-35): the world's answer now (the cancellations, the field, HeroEntered) and a scene exit's
 	// save, so a held turn finishes first.
-	session_hold_detail::HoldDrain(LivingWorld, Hooks);
+	DrainWorld();
 	live::Occurrence O = live::FindOccurrence(OccurrenceId);
 	if (!O.Valid())
 	{
@@ -4396,7 +4392,7 @@ void Session::ResolveAbandonedLive()
 			Prize = Night->PrizeFor(Place);
 		}
 		live::Settle(BankrollCents, Life, E.Id, Place, Night->Spec.Entrants, Prize, O.Start + Night->ClockMinutes() - static_cast<double>(O.T->StartMinute));
-		session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): drain-on-touch
+		DrainWorld(); // Update 4 (§3.7 R3, PA-35): drain-on-touch
 		LivingWorld.HeroFinished(E.Id, Place, Prize, world::World::TableReport());
 	}
 }
@@ -4418,7 +4414,7 @@ void Session::SettleCancelled()
 			continue;
 		}
 		// Update 4 (§3.7 R3, PA-35): drain-on-touch (WorldStep calls this only on a whole world, R6; StartWorld before it advances).
-		session_hold_detail::HoldDrain(LivingWorld, Hooks);
+		DrainWorld();
 		if (Open)
 		{
 			// Short of the minimum as the entry has the field (or called off by the world): the floor calls it at the start.
@@ -4463,7 +4459,7 @@ void Session::CancelledTexts()
 			continue;
 		}
 		// Called off at its start (SettleCancelled), not left before the seats: the desk's other refund is no cancellation.
-		session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): drain-on-touch
+		DrainWorld(); // Update 4 (§3.7 R3, PA-35): drain-on-touch
 		const world::Cancellation* Called = LivingWorld.CancellationOf(E.Id);
 		if ((!Called && !live::BelowMinimum(O, E.Entrants)) || E.FinishedAt < O.Start)
 		{
@@ -4843,7 +4839,7 @@ void Session::BondTexts(double From, double To)
 				continue;
 			}
 			// Update 4 (§3.7 R3, PA-35): the slot reads the bonds, the finishes and the next Sunday, so a held turn finishes first.
-			session_hold_detail::HoldDrain(LivingWorld, Hooks);
+			DrainWorld();
 			// Who has the most to say about a night at the Embercrest the day before, or the day before that.
 			struct Pick
 			{
@@ -4996,7 +4992,7 @@ void Session::FinishSkip()
 {
 	// Update 4 (SPEC v1.7 §3.7, §6 PA-35): a sleep (or a shift, a run) ends on a whole world: what it settles (an upload, a venue's
 	// visit) and its save don't wait for the turn.
-	session_hold_detail::HoldDrain(LivingWorld, Hooks);
+	DrainWorld();
 	const life::Outcome O = TimeSkip.Result;
 	TimeSkip.Active = false;
 	LobbyMinutes = O.End - net::MinutesPerDay * static_cast<double>(net::NightOneDay);
@@ -5958,11 +5954,6 @@ void Session::NameField()
 		const size_t Hash = FuseId.rfind('#');
 		const int Ordinal = Hash == std::string::npos ? 0 : std::atoi(FuseId.c_str() + Hash + 1);
 		const std::vector<std::string> Keyed = fuse::SeatsFor(&LivingWorld, WorldSeed(), session_detail::FuseTierOf(FuseId), Ordinal, WorldMinutes());
-		std::set<std::string> FuseTaken = {HeroName, RivalName};
-		for (const world::Npc& Somebody : LivingWorld.People())
-		{
-			FuseTaken.insert(Somebody.Name);
-		}
 		std::vector<size_t> Unnamed;
 		size_t Next = 0;
 		for (size_t I = 0; I < T->Players.size(); ++I)
@@ -5991,7 +5982,13 @@ void Session::NameField()
 		}
 		// Fewer members online than seats: a screen name for the rest, drawn from the FUSE's own id.
 		Rng Fr(FuseId + ":fuseseat");
-		const std::vector<handles::Identity> Ids = handles::Field(static_cast<int>(Unnamed.size()), Fr, FuseTaken);
+		// Update 4 (SPEC v1.7 §6 PA-33, PA-29): the names the world uses through its lowercased index (World::NameUsed) instead of a set
+		// built from the whole roster at every register; the player's and the rival's stay the session's, compared as Field's own set
+		// compares them (lowercased), so every retry, and every name after it, is the same.
+		const std::string FuseHeroKey = session_detail::NameUsedKey(HeroName);
+		const std::string FuseRivalKey = session_detail::NameUsedKey(RivalName);
+		const std::vector<handles::Identity> Ids = handles::Field(static_cast<int>(Unnamed.size()), Fr,
+			[&](const std::string& NameKey) { return NameKey == FuseHeroKey || NameKey == FuseRivalKey || LivingWorld.NameUsed(NameKey); });
 		for (size_t K = 0; K < Unnamed.size() && K < Ids.size(); ++K)
 		{
 			TPlayer& P = T->Players[Unnamed[K]];
@@ -6107,12 +6104,9 @@ void Session::NameField()
 		}
 		return TakeFrom(SeatsBy, Wanted);
 	};
-	// Nobody else at the tables goes by a name the world uses.
+	// Nobody else at the tables goes by a name the world uses (World::NameUsed's lowercased index, Update 4 PA-33) or the player's or
+	// the rival's. Taken holds only the session's own names: the player's, the rival's and, from G4, the crowd's (NameCrowdSeats).
 	std::set<std::string> Taken = {HeroName, RivalName};
-	for (const world::Npc& N : LivingWorld.People())
-	{
-		Taken.insert(N.Name);
-	}
 	std::set<size_t> Named;
 	for (int Id : Who)
 	{
@@ -6151,7 +6145,15 @@ void Session::NameField()
 	// Update 4 (SPEC v1.7 §5.5 R1-R2; Phase A, §6 PA-38): the crowd names what it fills of the rest first (nothing before G4; its own
 	// fork, never Nr).
 	NameCrowdSeats(Rest, Taken);
-	const std::vector<handles::Identity> Ids = handles::Field(static_cast<int>(Rest.size()), Nr, Taken);
+	// Update 4 (§6 PA-33, PA-29): Field's taken set was Taken plus every name in the roster, lowercased; the predicate answers the same
+	// for every lowercased name (the session's own here, the roster's from the world's index), so the draws and the retries are Field's.
+	std::set<std::string> TakenKeys;
+	for (const std::string& Name : Taken)
+	{
+		TakenKeys.insert(session_detail::NameUsedKey(Name));
+	}
+	const std::vector<handles::Identity> Ids = handles::Field(static_cast<int>(Rest.size()), Nr,
+		[&](const std::string& NameKey) { return TakenKeys.count(NameKey) > 0 || LivingWorld.NameUsed(NameKey); });
 	for (size_t K = 0; K < Rest.size() && K < Ids.size(); ++K)
 	{
 		TPlayer& P = T->Players[Rest[K]];
@@ -6228,7 +6230,7 @@ void Session::ReportToWorld()
 	}
 	Rp.Met.assign(FieldMet.begin(), FieldMet.end());
 	Rp.BigPots = FieldPots;
-	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): drain-on-touch
+	DrainWorld(); // Update 4 (§3.7 R3, PA-35): drain-on-touch
 	LivingWorld.HeroFinished(T->Spec.Id, BustPlace, BustPrize + BountyWon, Rp);
 }
 
@@ -6322,7 +6324,7 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 	// §3.7 R3, PA-35.)
 	for (int ReachDay = static_cast<int>(std::floor(From / net::MinutesPerDay)) + 1; ReachDay <= Today; ++ReachDay)
 	{
-		session_hold_detail::HoldDrain(LivingWorld, Hooks);
+		DrainWorld();
 		LivingWorld.NoteReach(ReachDay, Channel.Followers);
 	}
 	// (Not within a day of a real meal: she'd have heard about it.)

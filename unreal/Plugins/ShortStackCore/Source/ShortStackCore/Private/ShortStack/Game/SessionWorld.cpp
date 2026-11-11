@@ -18,7 +18,7 @@ world::Start Session::WorldStart() const
 
 std::string Session::DebugWorld(const std::string& Args)
 {
-	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): a launch writes the world, a describe reads it
+	DrainWorld(); // Update 4 (§3.7 R3, PA-35): a launch writes the world, a describe reads it
 	// ss.Site.Launch <site> (§6.6, testing; SessionSites.cpp forwards it as "sitelaunch <key>"): a rival opens in this world
 	// now, its news with it, instead of on its own day.
 	if (Args.rfind("sitelaunch", 0) == 0)

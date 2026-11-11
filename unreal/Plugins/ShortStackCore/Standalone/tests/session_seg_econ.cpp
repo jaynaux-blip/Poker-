@@ -494,6 +494,7 @@ void EconClock(ss::Session& S, double World)
 {
 	S.LobbyMinutes = World - ss::net::MinutesPerDay * ss::net::NightOneDay;
 	S.Living().AdvanceTo(World);
+	S.Living().DrainHold(); // Update 4 (SPEC v1.7 §3.7, §6.6): the test acts as the host, so a held turn finishes before it reads (a no-op unless SS_TURN_BUDGET slices the turn).
 }
 
 /**

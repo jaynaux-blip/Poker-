@@ -325,6 +325,8 @@ void Sim::SeedStats(Npc& N)
 
 void World::GrantHeroResults(int Count)
 {
+	// Update 4 (SPEC v1.7 §3.7 R3, §6 PA-35): the HoldGuard (A3; World.h's A3 block): not while a turn is held, outside a drain.
+	HoldGuard("GrantHeroResults");
 	Rng R("hero-results:" + std::to_string(HeroBook.Events));
 	static const double BuyIns[7] = {0.25, 1.10, 2.20, 3.30, 5.50, 11.0, 22.0};
 	for (int K = 0; K < Count; ++K)

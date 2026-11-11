@@ -305,6 +305,8 @@ void FStreetGame::Resume()
 
 void FStreetGame::QuitToMenu()
 {
+	// Update 4 (SPEC v1.7 §3.7 R5, §6 PA-35): a scene exit finishes a held turn and the session's catch-up (Session::DrainWorld), then saves (Session::Save waits for the turn).
+	Session.DrainWorld();
 	Session.Save();
 	Saver.Flush();
 	Mode.SaveSettingsNow();
@@ -313,6 +315,8 @@ void FStreetGame::QuitToMenu()
 
 void FStreetGame::QuitGame()
 {
+	// Update 4 (SPEC v1.7 §3.7 R5, §6 PA-35): a scene exit finishes a held turn and the session's catch-up (Session::DrainWorld), then saves (Session::Save waits for the turn).
+	Session.DrainWorld();
 	Session.Save();
 	Saver.Flush();
 	Mode.SaveSettingsNow();
@@ -774,6 +778,8 @@ void AStreetGameMode::EndPlay(const EEndPlayReason::Type Reason)
 {
 	if (Game && !bLeaving)
 	{
+		// Update 4 (SPEC v1.7 §3.7 R5, §6 PA-35): a scene exit finishes a held turn and the session's catch-up (Session::DrainWorld), then saves (Session::Save waits for the turn).
+		Game->Session.DrainWorld();
 		Game->Session.Save();
 	}
 	// The save being written (and any waiting) lands before the next scene reads it.
@@ -1801,6 +1807,8 @@ void AStreetGameMode::GoHome()
 	}
 	// A minute up the stairs (1812's, or Dee's while evicted: the hub is hers then), then the session's save carries the
 	// street back to the desk, the clock with it.
+	// Update 4 (SPEC v1.7 §3.7 R5, §6 PA-35): a scene exit finishes a held turn and the session's catch-up (Session::DrainWorld), then saves (Session::Save waits for the turn).
+	Game->Session.DrainWorld();
 	Game->Session.Save();
 	Leave(FName(TEXT("NightOne")), TEXT("Home?Street"), true);
 	if (Audio)

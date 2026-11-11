@@ -152,7 +152,7 @@ SHORTSTACKCORE_API const Festival* PassFestival(net::SiteId Site, double World);
 SHORTSTACKCORE_API int PassNeeds(const Festival& F, const net::InviteGate& Gate);
 
 // Step A-2 (LEAD_CALLS Q-5): every function the festival sections name in this header, declared before the freeze with a stub that
-// answers empty or none (in G/Festival.cpp; at G1 each body lands in its owner's file, named below, and replaces its stub here).
+// answers empty or none, each stub in the file its G1 owner fills (named below; YourLine and Inventory in G/Festival.cpp).
 
 /** YOUR <FESTIVAL> (§2.8.2): the hub panel's numbers and the register sheets' two-line strip, each host drawing it in its own skin
  *  from this one view (FestYourStrip). Presentation only: never saved. */

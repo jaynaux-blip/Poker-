@@ -301,6 +301,9 @@ struct Finish
 	int Where = 0; // Venue
 	bool Major = false;
 	Chips Seat = 0; // a satellite seat won (its value)
+	// Update 4 (SPEC v1.7 §2.4.3; §6 PA-14): the event's prize table shape (Sim::CurveOf), so the room's story and the table talk's
+	// bubble rule count the places that field paid. The recent record's 9th field, written only when it isn't Standard.
+	PayoutCurve Curve = PayoutCurve::Standard;
 };
 
 /** A year of a career (the career graph and the profile's years). */

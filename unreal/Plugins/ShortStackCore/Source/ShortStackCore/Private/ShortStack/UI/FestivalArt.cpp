@@ -7,6 +7,16 @@
 
 namespace ss
 {
+namespace fest
+{
+// Step A-2 (LEAD_CALLS Q-5; moved here from G/Festival.cpp by the integrator): the words the festival art prints, empty in Phase A.
+// F-look writes the body at G1.
+std::vector<std::string> FestArtInventory()
+{
+	return {};
+}
+} // namespace fest
+
 namespace ui
 {
 namespace festart

@@ -1413,7 +1413,7 @@ std::vector<shop::Lot> Session::PawnShelf() const
 std::string Session::PawnSell(const std::string& LotId)
 {
 	using namespace session_shops_detail;
-	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): the lots read the world's awards
+	DrainWorld(); // Update 4 (§3.7 R3, PA-35): the lots read the world's awards
 	shop::Lot L;
 	bool Found = false;
 	for (const shop::Lot& Each : PawnLots())
@@ -1487,7 +1487,7 @@ std::string Session::PawnSell(const std::string& LotId)
 std::string Session::PawnLoan(const std::string& LotId)
 {
 	using namespace session_shops_detail;
-	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): the lots read the world's awards
+	DrainWorld(); // Update 4 (§3.7 R3, PA-35): the lots read the world's awards
 	shop::Lot L;
 	bool Found = false;
 	for (const shop::Lot& Each : PawnLots())

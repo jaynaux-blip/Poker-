@@ -252,8 +252,9 @@ std::string TurnBudgetName(double Ms)
  *  and the 32 hand-offs, Save deferred while holding, WorldStep returning while holding). Until A1's track is merged a held
  *  session world reads half-turned state, so the default run checks session-wide slicing only once this is true (the integrator
  *  sets it with the merge; `world_u4_test turn-session` runs them in any build). The transcript at SS_TURN_BUDGET=0.5 is the same
- *  check end to end (Session::StartWorld applies World::ForcedTurnBudgetMs, patch a2-A3_to_a2-A1_1). */
-constexpr bool kTurnSessionWired = false;
+ *  check end to end (Session::StartWorld applies World::ForcedTurnBudgetMs, patch a2-A3_to_a2-A1_1). Step A-2's integration merged
+ *  A1, A2 and A3 with Session::DrainWorld (patch a2-A3_to_a2-A1_2), so the default run checks it. */
+constexpr bool kTurnSessionWired = true;
 
 struct TurnHooks : ss::SessionHooks
 {

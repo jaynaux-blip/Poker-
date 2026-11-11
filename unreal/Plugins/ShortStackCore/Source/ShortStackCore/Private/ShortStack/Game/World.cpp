@@ -1079,6 +1079,8 @@ int World::RankBefore(net::SiteId Site, net::Board B, int Npc) const
 
 void World::SetLeagueRoster(net::SiteId Site, int MonthKey, int Div, const std::vector<int>& Npcs)
 {
+	// Update 4 (SPEC v1.7 §3.7 R3, §6 PA-35): the HoldGuard (A3; World.h's A3 block): not while a turn is held, outside a drain.
+	HoldGuard("SetLeagueRoster");
 	// Update 3 (§3.6 R2): the month's group as the session drew it (site::play::Step's roster). Sim::Apply scores its members'
 	// paid RunItTwice entries from here on and WorldSave writes the book as world\tleague. Div is WorldLeague.h's packed
 	// division and pace. Handing over the same month's group again keeps what the world has recorded for anyone still in it

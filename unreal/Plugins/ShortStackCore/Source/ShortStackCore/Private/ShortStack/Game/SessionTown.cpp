@@ -90,7 +90,7 @@ void Session::Heard(const std::string& Speaker, const town::Talk& Told) // (not 
 	const int Today = net::DayOf(World);
 	Forget(Life, Today);
 	const std::string Name = P ? P->Name : Speaker.substr(4);
-	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): the talk lends, repays and remembers in the world
+	DrainWorld(); // Update 4 (§3.7 R3, PA-35): the talk lends, repays and remembers in the world
 	const int Npc = ((P && P->InWorld) || Local) && LivingWorld.Ready() ? LivingWorld.Find(Name) : -1;
 
 	// The one-time line it spent.
@@ -188,7 +188,7 @@ std::string Session::Lend(const std::string& Speaker, Chips Cents)
 	{
 		return "He still owes you the last twenty.";
 	}
-	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): the loan reads and writes the world
+	DrainWorld(); // Update 4 (§3.7 R3, PA-35): the loan reads and writes the world
 	const int Npc = LivingWorld.Ready() ? LivingWorld.Find("Twitch") : -1;
 	if (!Down(LivingWorld.Get(Npc)))
 	{

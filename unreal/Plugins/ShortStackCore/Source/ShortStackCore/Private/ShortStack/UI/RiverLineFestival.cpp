@@ -7,8 +7,23 @@
 // FestivalHub or CareerPins before G1. Access is empty.
 #include "ShortStack/UI/RiverLine.h"
 
+#include "ShortStack/Game/Festival.h"
+
+#include <string>
+#include <vector>
+
 namespace ss
 {
+namespace fest
+{
+// Step A-2 (LEAD_CALLS Q-5; moved here from G/Festival.cpp by the integrator): the hubs', the register sheets' and the takeovers' UI
+// strings, empty in Phase A. F-hubs writes the body at G1.
+std::vector<std::string> FestUiInventory()
+{
+	return {};
+}
+} // namespace fest
+
 namespace ui
 {
 namespace rlfest_detail

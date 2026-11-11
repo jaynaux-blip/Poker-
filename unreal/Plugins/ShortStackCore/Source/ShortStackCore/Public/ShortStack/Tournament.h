@@ -50,7 +50,9 @@ struct TournamentSpec
 	int BreakEvery = 0;
 	double BreakMinutes = 0.0;
 	// Update 4 (SPEC v1.7 §2.4.1, §6 PA-12's first two, landed with PA-5's listing fills): site money added to the prize pool
-	// and the prize table's shape (C++ only; 0 and Standard keep the shared behavior). Nothing sets or reads them before G1.
+	// and the prize table's shape (C++ only; 0 and Standard keep the shared behavior). Read since Phase A's step A-2 (PA-13: the
+	// pool adds AddedCents and the table is PayoutFor's under Curve, Tournament.cpp); nothing sets them before G1, so every
+	// pool and table is today's.
 	Chips AddedCents = 0;
 	PayoutCurve Curve = PayoutCurve::Standard;
 	// Update 4 (SPEC v1.7 §4.1.3, §6 PA-12, the big fields; C++ only, zero keeps today). Nothing sets or reads them before G3.

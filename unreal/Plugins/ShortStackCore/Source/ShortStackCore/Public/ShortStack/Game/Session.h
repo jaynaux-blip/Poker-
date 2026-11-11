@@ -727,6 +727,10 @@ public:
 	/** Everyone else's careers, going on whether the player is watching or not. */
 	world::World& Living() { return LivingWorld; }
 	const world::World& Living() const { return LivingWorld; }
+	/** Update 4 (SPEC v1.7 §3.7 R3, R5; §6 PA-35): finishes a held turn now and does what WorldStep does once the world has caught up
+	 *  (the waiting save, the stake book, the cancellations, the phone): every drain-on-touch, a scene exit, a host about to take the
+	 *  save. Nothing when the world isn't holding. */
+	void DrainWorld();
 	/** Debug: how the world would look Days from now (a copy is played forward; nothing changes). */
 	SHORTSTACKCORE_API std::string WorldPreview(int DayCount) const;
 	/** Debug: the player sleeps through Days (the clock and the world move on; nothing else happens to the player). */
@@ -1110,7 +1114,11 @@ private:
 	// The world's save text, rewritten when something involving the player happened or an hour has passed (writing
 	// a couple of megabytes on every save would hitch).
 	std::string WorldSaved;
-	std::shared_ptr<const world::World> WorldSnap; // the same, frozen, for a host that saves in the background
+	// Update 4 (SPEC v1.7 §6 PA-34): for a host that saves in the background, the stamp of the last frozen copy handed over (never the
+	// copy itself, so it dies once the host has written its text) and a weak look at the copy (handed over again while the host still
+	// holds it, so a newer save that replaces a waiting one keeps it).
+	world::WorldStamp WorldSnapStamp;
+	std::weak_ptr<const world::World> WorldSnapLent;
 	double WorldSavedAt = -1.0e9;
 	int WorldSavedRev = -1;
 	// Update 4 (SPEC v1.7 §3.7 R5, §6 PA-35): a save asked for while the world's turn held, written the frame the turn completes
@@ -1118,6 +1126,10 @@ private:
 	bool bSaveAfterHold = false;
 	void StartWorld(const SaveData* Loaded, world::Start S = world::Start::Established);
 	void WorldStep();
+	/** Update 4 (SPEC v1.7 §3.7 R3, R5, R6; §6 PA-35): WorldStep's work once the world has caught up (the waiting save, the stake
+	 *  book, the cancellations, the phone's scan, the director's notes); and a drain-on-touch that finishes a held turn and then
+	 *  does that work at once, as the unbudgeted run did in the frame the turn ended. */
+	void WorldCaughtUp();
 	void WorldNote(const std::vector<std::string>& Fields);
 	void ReportToWorld();
 	void Push(const std::string& Who, const std::string& Text, ChatKind Kind);

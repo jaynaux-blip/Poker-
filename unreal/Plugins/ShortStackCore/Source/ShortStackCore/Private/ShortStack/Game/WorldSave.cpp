@@ -643,6 +643,8 @@ using namespace worldsave_detail;
 
 void World::Write(std::string& Out) const
 {
+	// Update 4 (SPEC v1.7 §3.7 R3, §6 PA-35): the HoldGuard (A3; World.h's A3 block): not while a turn is held, outside a drain.
+	HoldGuard("Write");
 	if (!Created)
 	{
 		return;
@@ -767,7 +769,10 @@ void World::Write(std::string& Out) const
 			std::vector<std::string> R;
 			for (const world::Finish& Fi : N.Recent)
 			{
-				R.push_back(Rec({I(Fi.Day), Esc(Fi.Event), I(Fi.Place), I(Fi.Entries), I(Fi.Prize), I(Fi.Where), I(Fi.Major), I(Fi.Seat)}));
+				// Update 4 (SPEC v1.7 §2.4.3; §6 PA-14): a 9th field, the curve, only when it isn't Standard (old records unchanged).
+				R.push_back(Fi.Curve == PayoutCurve::Standard ? Rec({I(Fi.Day), Esc(Fi.Event), I(Fi.Place), I(Fi.Entries), I(Fi.Prize), I(Fi.Where), I(Fi.Major), I(Fi.Seat)})
+															   : Rec({I(Fi.Day), Esc(Fi.Event), I(Fi.Place), I(Fi.Entries), I(Fi.Prize), I(Fi.Where), I(Fi.Major), I(Fi.Seat),
+																	 I(static_cast<int>(Fi.Curve))}));
 			}
 			Emit(Line("recent") << I(N.Id) << JoinRecords(R));
 		}
@@ -1548,6 +1553,7 @@ bool World::Read(const std::vector<std::string>& Fields)
 				Fi.Where = Rc.Small();
 				Fi.Major = Rc.Bool();
 				Fi.Seat = Rc.Int();
+				Fi.Curve = Rc.Small() == static_cast<int>(PayoutCurve::Main) ? PayoutCurve::Main : PayoutCurve::Standard; // the 9th, when present
 				N->Recent.push_back(Fi);
 			}
 			else if (Kind == "years")

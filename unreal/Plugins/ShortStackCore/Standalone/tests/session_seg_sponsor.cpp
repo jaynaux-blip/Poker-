@@ -46,6 +46,8 @@ double Jump(ss::Session& S, double Now, double ToWorld)
 	}
 	Now += 1.0 / 30.0;
 	S.Update(Now);
+	// Update 4 (SPEC v1.7 §3.7, §6.6): the test acts as the host, so a held turn finishes before it reads (a no-op unless SS_TURN_BUDGET slices the turn).
+	S.DrainWorld();
 	return Now;
 }
 

@@ -247,7 +247,7 @@ std::string Session::CallOut(int Npc)
 	{
 		// The member's points as the call is made: the world's recorded best days (the duel is the week's points).
 		site::play::Callout& C = Life.SitePlay.Rt.C;
-		session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): drain-on-touch
+		DrainWorld(); // Update 4 (§3.7 R3, PA-35): drain-on-touch
 		const world::LeagueBook* Lb = LivingWorld.League(net::SiteId::RunItTwice);
 		double Theirs = 0.0;
 		if (Lb && Lb->MonthKey == Life.SitePlay.Rt.L.Month)
@@ -344,7 +344,7 @@ void Session::SitePlayHand(const Hand& H, const HandFacts& F)
 			if (!Name.empty())
 			{
 				N.Knocked.push_back(Name);
-				session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): drain-on-touch (the lists below follow it)
+				DrainWorld(); // Update 4 (§3.7 R3, PA-35): drain-on-touch (the lists below follow it)
 				N.KnockedNpcs.push_back(LivingWorld.Find(Name));
 			}
 		}
@@ -355,7 +355,7 @@ void Session::SitePlayHand(const Hand& H, const HandFacts& F)
 		if (const TPlayer* P = By.empty() ? nullptr : PlayerById(By))
 		{
 			N.BustedBy = P->Name;
-			session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): drain-on-touch
+			DrainWorld(); // Update 4 (§3.7 R3, PA-35): drain-on-touch
 			N.BustedByNpc = LivingWorld.Find(P->Name);
 		}
 	}
@@ -414,12 +414,12 @@ void Session::SitePlayStep(double From, double To)
 	// finishes first only for a RunItTwice book (CheckCalendar runs every frame); the League group it draws goes to the world.
 	if (site::play::siteplay_detail::SitePlayRitStarted(Life.SitePlay))
 	{
-		session_hold_detail::HoldDrain(LivingWorld, Hooks);
+		DrainWorld();
 	}
 	const site::play::StepOut Out = site::play::Step(Life.SitePlay, Life, Life.Sites, &LivingWorld, Life.Sponsors, WorldSeed(), From, To);
 	if (Out.Roster)
 	{
-		session_hold_detail::HoldDrain(LivingWorld, Hooks);
+		DrainWorld();
 		LivingWorld.SetLeagueRoster(net::SiteId::RunItTwice, Out.MonthKey, Out.Div, Out.Npcs);
 	}
 	for (const std::pair<std::string, std::string>& Tx : Out.Mail)
@@ -437,7 +437,7 @@ std::string Session::DebugSitePlay(const std::string& Args)
 	const double World = WorldMinutes();
 	Book& B = Life.SitePlay;
 	auto Num = [&W](size_t I, long long Default) { return W.size() > I ? std::atoll(W[I].c_str()) : Default; };
-	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): the verbs read and write the world (the League roster)
+	DrainWorld(); // Update 4 (§3.7 R3, PA-35): the verbs read and write the world (the League roster)
 	if (Verb == "describe")
 	{
 		return siteplay_detail::IgniteDescribe(B, World) + siteplay_detail::RitDescribe(B, &LivingWorld, World) + DebugSitePlay("gov");

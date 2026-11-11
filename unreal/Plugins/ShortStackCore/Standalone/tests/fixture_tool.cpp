@@ -291,6 +291,8 @@ double Wait(ss::Session& S, double Now, double Seconds)
 		Now += 1.0 / 30.0;
 		S.Update(Now);
 	}
+	// Update 4 (SPEC v1.7 §3.7, §6.6): the host acts on a world that has caught up (a held turn finished, as a scene exit does).
+	S.DrainWorld();
 	return Now;
 }
 
@@ -3074,7 +3076,8 @@ bool U4Scene(int Target, const std::string& Path)
 	{
 		return false;
 	}
-	// The rows (§5.14), measured on this build: the copy is today's deep copy (PA-34's shared snapshot replaces it in A-2).
+	// The rows (§5.14), measured on this build. A plain World copy shares the roster's pages since PA-34 (step A-2) but still copies
+	// View()'s rows; Session::Save takes World::Snapshot, measured below (§6.6).
 	std::vector<double> CopyMs;
 	for (int K = 0; K < 7; ++K)
 	{
@@ -3118,11 +3121,54 @@ bool U4Scene(int Target, const std::string& Path)
 		Copy.Simulate(30);
 		SkipMs = U4SceneMs(T0);
 	}
+	// §6.6 (step A-2's integration): the shared snapshot Session::Save takes (World::Snapshot, PA-34), alone and with a live snapshot
+	// held, its text against the world's, and the roster pages a played day clones while a snapshot is held.
+	std::vector<double> SnapMs;
+	for (int K = 0; K < 7; ++K)
+	{
+		const std::chrono::steady_clock::time_point T0 = std::chrono::steady_clock::now();
+		const std::shared_ptr<const world::World> Snap = W.Snapshot();
+		SnapMs.push_back(U4SceneMs(T0));
+	}
+	const std::shared_ptr<const world::World> Held = W.Snapshot();
+	std::vector<double> HeldMs;
+	for (int K = 0; K < 7; ++K)
+	{
+		const std::chrono::steady_clock::time_point T0 = std::chrono::steady_clock::now();
+		const std::shared_ptr<const world::World> Snap = W.Snapshot();
+		HeldMs.push_back(U4SceneMs(T0));
+	}
+	std::string HeldText;
+	std::string LiveText;
+	if (Held)
+	{
+		Held->Write(HeldText);
+	}
+	W.Write(LiveText);
+	const bool SameText = Held && HeldText == LiveText;
+	const size_t Pages = (W.People().size() + 63) / 64;
+	const uint64_t Clones0 = W.PageClones();
+	Fed(*S);
+	const std::chrono::steady_clock::time_point T1 = std::chrono::steady_clock::now();
+	Now = At(*S, Now, Midnight + 61.0 * Day + 10.0 * 60.0);
+	const double HeldDayMs = U4SceneMs(T1);
+	const uint64_t HeldClones = W.PageClones() - Clones0;
+	std::string HeldAfter;
+	if (Held)
+	{
+		Held->Write(HeldAfter);
+	}
+	const bool Frozen = Held && HeldAfter == HeldText;
 	std::printf("  people %zu (active %d), world day %d\n", W.People().size(), W.ActiveCount(), world::sim::DayAt(W.Clock()));
 	std::printf("  sim per world day (the 60 days, the session's update around AdvanceTo): median %.1f ms, max %.1f ms\n", U4SceneMedian(DayMs),
 		DayMs.empty() ? 0.0 : *std::max_element(DayMs.begin(), DayMs.end()));
 	std::printf("  a 30-day skip (World::Simulate(30) on a copy): %.0f ms\n", SkipMs);
-	std::printf("  save snapshot (the world copied as Session::Save copies it): median of 7 %.2f ms\n", U4SceneMedian(CopyMs));
+	std::printf("  a World copy (pages shared, View()'s rows copied): median of 7 %.2f ms\n", U4SceneMedian(CopyMs));
+	std::printf("  save snapshot (World::Snapshot, as Session::Save takes it): median of 7 %.3f ms, max %.3f ms; with a live snapshot held: median %.3f ms, max %.3f ms\n",
+		U4SceneMedian(SnapMs), SnapMs.empty() ? 0.0 : *std::max_element(SnapMs.begin(), SnapMs.end()), U4SceneMedian(HeldMs),
+		HeldMs.empty() ? 0.0 : *std::max_element(HeldMs.begin(), HeldMs.end()));
+	std::printf("  the snapshot's text equals the world's: %s; a day played (day 61) with it held: %.0f ms, %llu of %zu roster pages cloned; the held snapshot's text unchanged after: %s\n",
+		SameText ? "yes" : "NO", HeldDayMs, static_cast<unsigned long long>(HeldClones), Pages, Frozen ? "yes" : "NO");
 	std::printf("  world text %zu bytes; the save %zu bytes (before Oodle)\n", WorldLines.size(), Text.size());
 	std::printf("  load (World::Read + Finish): median of 3 %.0f ms\n", U4SceneMedian(LoadMs));
 	(void)Now;

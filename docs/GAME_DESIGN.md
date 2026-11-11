@@ -764,7 +764,7 @@ The tone is grounded drama.
 
 1. **Night One:**
    - Setting: the studio apartment at night, with the RiverLine client on the laptop.
-   - The tournament: a complete $1 micro MTT with 1,000 entrants, the shadow-simmed field, table moves, the bubble and payouts.
+   - The tournament: a complete $1 micro MTT with 1,000 entrants, every table dealt (the shadow-simmed field is planned: Update 4's Big Field), table moves, the bubble and payouts.
    - Systems: AI archetypes, Smart pacing and decision grades after the session.
 2. **The Back Room:** the laundromat live cash game, with first-person card and chip handling, tells, Composure and table talk.
 3. **The Grind:** multi-tabling, the HUD, satellites, the bankroll, the career hub and schedule, the skill tree and the study replayer.

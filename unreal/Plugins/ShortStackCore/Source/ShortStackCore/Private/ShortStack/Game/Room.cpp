@@ -678,6 +678,7 @@ life::LiveVoice VoiceOf(const world::World& W, int Npc, const std::string& Hero)
 		R.Entries = F.Entries;
 		R.Prize = F.Prize;
 		R.Online = F.Where == static_cast<int>(world::Venue::Online);
+		R.Curve = F.Curve; // Update 4 (SPEC v1.7 §2.4.3; §6 PA-14): the bubble rule counts the places that field paid
 		Story.push_back(R);
 	}
 	V.Story = talk::StoryText(Story);

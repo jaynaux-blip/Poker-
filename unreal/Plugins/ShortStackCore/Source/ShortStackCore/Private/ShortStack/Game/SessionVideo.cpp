@@ -804,7 +804,7 @@ void Session::VideoNoteHand(const Hand& H, const HandFacts& F)
 		C.OpponentNpc = Npc != FieldNpc.end() ? Npc->second : -1;
 		if (C.OpponentNpc >= 0)
 		{
-			session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): what the world thinks of them
+			DrainWorld(); // Update 4 (§3.7 R3, PA-35): what the world thinks of them
 		}
 		const world::Npc* Who = C.OpponentNpc >= 0 ? LivingWorld.Get(C.OpponentNpc) : nullptr;
 		C.Rival = RivalIn || (Who && Who->RepOf(world::Rep::Overall) >= 35.0f);
@@ -1046,7 +1046,7 @@ std::string Session::SettleEdit(const std::string& ActivityId)
 		return LastOutcome.Body;
 	}
 	// Update 3 (core-videocontent): an episode of a series is counted (its playlist, the challenge's state) once it's up.
-	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): drain-on-touch
+	DrainWorld(); // Update 4 (§3.7 R3, PA-35): drain-on-touch
 	session_video3_detail::AfterUpload(Life, History, LivingWorld, Channel, Gear, TextsSeen, BankrollCents, HeroName, Evicted(), World, C, Picked, Id);
 	// The face its thumbnails were made with stays theirs (§6.1, ChannelX::Looks): the look now, frozen once per look.
 	for (video::Video& V : Life.Video.Videos)
@@ -1146,7 +1146,7 @@ void Session::VideoStep(double From, double To)
 	// SteppedTo, with a minute's margin), so a held turn finishes first only then (CheckCalendar runs every frame).
 	if (To + 1.0 >= Life.Video.SteppedTo + net::MinutesPerDay)
 	{
-		session_hold_detail::HoldDrain(LivingWorld, Hooks);
+		DrainWorld();
 	}
 	video::Step(Life.Video, Life, BankrollCents, Channel, From, To, &LivingWorld);
 	// An envelope's multiple (core-videocontent): the knockout's envelope opened after the hand was captured.
@@ -1392,7 +1392,7 @@ std::string Session::DebugVideo(const std::string& Args)
 	if (Verb == "trends")
 	{
 		std::string Out;
-		session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): drain-on-touch
+		DrainWorld(); // Update 4 (§3.7 R3, PA-35): drain-on-touch
 		for (const video::Trend& Tr : video::Trends(Life, LivingWorld, World))
 		{
 			Out += (Out.empty() ? "" : "\n") + Tr.Label + "  heat " + Fixed(Tr.Heat, 2) + "  x" + Fixed(Tr.Strength, 2) + "  (yours " + std::to_string(Tr.Mine) + ", others " +

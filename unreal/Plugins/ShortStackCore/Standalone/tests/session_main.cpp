@@ -331,6 +331,8 @@ double Wait(ss::Session& S, double Now, double Seconds)
 		Now += 1.0 / 30.0;
 		S.Update(Now);
 	}
+	// Update 4 (SPEC v1.7 §3.7, §6.6): the test acts as the host, so a held turn finishes before it reads (a no-op unless SS_TURN_BUDGET slices the turn).
+	S.DrainWorld();
 	return Now;
 }
 
@@ -1060,6 +1062,7 @@ void EmbercrestRail()
 	OutHooks H2;
 	ss::Session S2(H2, "railed", &D);
 	S2.Living().AdvanceTo(End + 180.0);
+	S2.Living().DrainHold(); // Update 4 (SPEC v1.7 §3.7, §6.6): the test acts as the host, so a held turn finishes before it reads (a no-op unless SS_TURN_BUDGET slices the turn).
 	const ss::net::EventResult* Res = S2.Living().ResultOf(Nightly.Id);
 	int First = -9;
 	int Runner = -9;
@@ -1098,6 +1101,8 @@ double Walk(ss::Session& S, double Now, double ToWorld)
 		Now += 1.0 / 30.0;
 		S.Update(Now);
 	}
+	// Update 4 (SPEC v1.7 §3.7, §6.6): the test acts as the host, so a held turn finishes before it reads (a no-op unless SS_TURN_BUDGET slices the turn).
+	S.DrainWorld();
 	return Now;
 }
 
@@ -1145,6 +1150,7 @@ void EmbercrestMinimum()
 		Expect(H.Got(Inbox, "Embercrest", "was cancelled: 12 players"), "the desk texts the player who wasn't there");
 		Expect(Called && Called->Field == 12 && S.Living().Registered(Noon.Id).empty() && S.Living().PlannedEntries(Noon.Id) == 0, "the world records the cancellation");
 		S.Living().AdvanceTo(Noon.Start + 2.0 * 1440.0);
+		S.Living().DrainHold(); // Update 4 (SPEC v1.7 §3.7, §6.6): the test acts as the host, so a held turn finishes before it reads (a no-op unless SS_TURN_BUDGET slices the turn).
 		Expect(S.Living().ResultOf(Noon.Id) == nullptr && S.Living().CancellationOf(Noon.Id) != nullptr, "and never a winner");
 		// Reloaded: nothing is refunded or said twice.
 		const ss::Chips Bank = S.BankrollCents;
@@ -1187,6 +1193,7 @@ void EmbercrestMinimum()
 		Now = Walk(Home, Now, Home.WorldMinutes() + 10.0);
 		Expect(Home.Living().CancellationOf(Nightly.Id) != nullptr && !H2.Got(0, "Embercrest", "cancelled"), "the room's refund is the world's cancellation (the floor already said so)");
 		Home.Living().AdvanceTo(Nightly.Start + 2.0 * 1440.0 + 60.0);
+		Home.Living().DrainHold(); // Update 4 (SPEC v1.7 §3.7, §6.6): the test acts as the host, so a held turn finishes before it reads (a no-op unless SS_TURN_BUDGET slices the turn).
 		Expect(Home.Living().ResultOf(Nightly.Id) == nullptr, "a night the room called off has no winner");
 		Expect(Home.BankrollCents == 50000 - 2 * live::BusFareCents, "the player is out only the bus");
 	}
@@ -1208,6 +1215,7 @@ void EmbercrestMinimum()
 		S.BankrollCents = 50000;
 		Expect(S.GoToLive(Nightly.Id) == "That one was cancelled." && live::EntryFor(S.Life, Nightly.Id) == nullptr, "the desk won't register anyone for it");
 		S.Living().AdvanceTo(Nightly.Start + 12.0 * 60.0);
+		S.Living().DrainHold(); // Update 4 (SPEC v1.7 §3.7, §6.6): the test acts as the host, so a held turn finishes before it reads (a no-op unless SS_TURN_BUDGET slices the turn).
 		Expect(S.Living().ResultOf(Nightly.Id) == nullptr && S.Living().ResultOf(Noon.Id) != nullptr, "the thin night has no winner; the noon game that ran does");
 		(void)Now;
 	}
@@ -1250,6 +1258,7 @@ void EmbercrestMinimum()
 		Walk(S, 0.0, S.WorldMinutes() + 10.0);
 		Expect(S.Living().CancellationOf(Nightly.Id) == nullptr && !H.Got(0, "Embercrest", "cancelled"), "leaving the list isn't a cancellation, and nobody says it was");
 		S.Living().AdvanceTo(Nightly.Start + Nightly.T->Hours * 60.0 + 120.0);
+		S.Living().DrainHold(); // Update 4 (SPEC v1.7 §3.7, §6.6): the test acts as the host, so a held turn finishes before it reads (a no-op unless SS_TURN_BUDGET slices the turn).
 		Expect(S.Living().ResultOf(Nightly.Id) != nullptr, "the night ran without the player and has its winner");
 	}
 	std::printf("  embercrest: short fields called off, refunded once, no winners\n");
@@ -2064,6 +2073,7 @@ void StoreChecks()
 	S.Checkout(Keep);
 	S.Life.Hunger = 61.5;
 	S.Save();
+	S.DrainWorld(); // Update 4 (SPEC v1.7 §3.7 R5): a save asked for during a held turn is written when it completes (a no-op unless SS_TURN_BUDGET slices it).
 	ss::SaveData Parsed;
 	Expect(ss::SaveData::Parse(H.Last.Serialize(), Parsed) && Parsed.Life.Pantry["volt-rush"] == 2 && std::fabs(Parsed.Life.Hunger - 61.5) < 0.01, "the bag and the needs are saved");
 
