@@ -2984,12 +2984,20 @@ int main(int Argc, char** Argv)
 	using namespace fixture_tool;
 	const std::string Mode = Argc > 1 ? Argv[1] : "";
 	if (Mode != "write" && Mode != "write2" && Mode != "write-g1" && Mode != "write-g2" && Mode != "write-g3" && Mode != "write-g3k" && Mode != "g3k-dry" && Mode != "kast-worst" &&
-		Mode != "write-u3g3" && Mode != "write-u3g2" && Mode != "transcript")
+		Mode != "write-u3g3" && Mode != "write-u3g2" && Mode != "transcript" && Mode != "write-u4-scene")
 	{
 		std::printf("usage: fixture_tool write <dir> | fixture_tool write2 <dir> | fixture_tool write-g1 <dir> [show] | fixture_tool write-g2 <dir> [show] | fixture_tool write-g3 <dir> "
 					"[show] | fixture_tool write-g3k <dir> [show] | fixture_tool g3k-dry <days> | fixture_tool kast-worst | fixture_tool write-u3g3 <dir> [show] [days] | "
-					"fixture_tool write-u3g2 <dir> [show] | fixture_tool transcript\n");
+					"fixture_tool write-u3g2 <dir> [show] | fixture_tool transcript | fixture_tool write-u4-scene <n> <dir>\n");
 		return 2;
+	}
+	if (Mode == "write-u4-scene")
+	{
+		// Update 4 (SPEC v1.7 §6 PA-49, §6.6): the grown scene fixture (3,000 now: today's Sim::Rookie x N at day 0, then a 60-day
+		// simulate while the book is stubbed; re-grown at G2; the 10,000 path is S-scale's at G4). Declared in step A-1; the lead
+		// grows it in A-2, so this verb writes nothing yet.
+		std::printf("fixture_tool write-u4-scene: not built yet (Update 4 Phase A, step A-2); nothing written\n");
+		return 0;
 	}
 	if (Mode == "write-u3g2")
 	{

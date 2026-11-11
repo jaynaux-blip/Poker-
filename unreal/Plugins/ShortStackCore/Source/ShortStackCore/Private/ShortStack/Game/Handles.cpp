@@ -1,6 +1,7 @@
 #include "ShortStack/Game/Handles.h"
 #include "../StrictFloat.h"
 
+#include "ShortStack/Game/World.h"
 #include "ShortStack/Rng.h"
 
 #include <cctype>
@@ -315,6 +316,88 @@ std::vector<Identity> Field(int Count, Rng& R, const std::set<std::string>& Take
 		Out.push_back(Id);
 	}
 	return Out;
+}
+
+// ---- Update 4 (SPEC v1.7 §6 PA-29). Unused in Phase A.
+
+std::string PickCountryIn(Rng& R, world::Region In)
+{
+	// PickCountry's weights restricted to one region (Sim::Arrive's 70%, §3.2.2); a region with no country falls back to PickCountry.
+	double Total = 0.0;
+	for (const Country& C : Countries())
+	{
+		Total += world::RegionOf(C.Code) == In ? C.Weight : 0.0;
+	}
+	if (Total <= 0.0)
+	{
+		return PickCountry(R);
+	}
+	double Roll = R.Next() * Total;
+	for (const Country& C : Countries())
+	{
+		if (world::RegionOf(C.Code) == In && (Roll -= C.Weight) < 0.0)
+		{
+			return C.Code;
+		}
+	}
+	for (const Country& C : Countries())
+	{
+		if (world::RegionOf(C.Code) == In)
+		{
+			return C.Code; // (rounding: the region's first)
+		}
+	}
+	return PickCountry(R);
+}
+
+std::string MakeWide(Rng& R, const std::string& Code)
+{
+	// G4's body (S-crowd: an appended part set from R.Fork("wide"), crowd arrivals only). Phase A: today's generator.
+	return Make(R, Code);
+}
+
+std::vector<Identity> Field(int Count, Rng& R, const std::function<bool(const std::string&)>& Used)
+{
+	// The set version's loop exactly, with the world's names behind a predicate (PA-33's lowercased index): the same draws and the
+	// same retries whenever Used(lower) answers as the set would.
+	std::vector<Identity> Out;
+	std::set<std::string> Mine; // the names given here, lowercased
+	auto HandlesTaken = [&](const std::string& L) { return Mine.count(L) > 0 || (Used && Used(L)); };
+	for (int I = 0; I < Count; ++I)
+	{
+		Identity Id;
+		Id.Country = PickCountry(R);
+		std::string Name = Make(R, Id.Country);
+		for (int Try = 0; HandlesTaken(Lower(Name)); ++Try)
+		{
+			Name = Try < 6 ? Make(R, Id.Country) : Name + std::to_string(R.Int(10));
+		}
+		Mine.insert(Lower(Name));
+		Id.Name = Name;
+		Out.push_back(Id);
+	}
+	return Out;
+}
+
+Identity FieldAt(const std::string& FieldSeed, int F, const std::function<bool(const std::string&)>& Taken)
+{
+	// §4.1.8 (B-session's at G3): one seat from its own stream, Field's six retries then digits against Taken (lowercased names).
+	Rng R(FieldSeed + ":seat:" + std::to_string(F));
+	Identity Id;
+	Id.Country = PickCountry(R);
+	std::string Name = Make(R, Id.Country);
+	for (int Try = 0; Taken && Taken(Lower(Name)); ++Try)
+	{
+		Name = Try < 6 ? Make(R, Id.Country) : Name + std::to_string(R.Int(10));
+	}
+	Id.Name = Name;
+	return Id;
+}
+
+std::string CountryName(const std::string& Code)
+{
+	// B-session's table at G3 ("New Zealand" for "NZ", §4.8.4). Phase A: the code as given.
+	return Code;
 }
 } // namespace handles
 } // namespace ss

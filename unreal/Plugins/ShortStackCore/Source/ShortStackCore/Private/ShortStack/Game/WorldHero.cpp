@@ -49,6 +49,19 @@ float Add01(float V, double D)
 	return sim::Clampf(static_cast<double>(V) + D, 0.0, 1.0);
 }
 
+/** Update 4 (SPEC v1.7 §2.6.2, §6 PA-25): a festival title whose template isn't a major (T.Main false: PENNANT's Micro Main). The
+ *  template is the id before '@'; fest::IsTitleTemplate is false for every template until G1, so nothing is skipped before then. */
+bool WorldHeroMinorTitle(const Honor& H)
+{
+	const std::string Template = H.EventId.substr(0, H.EventId.find('@'));
+	if (!fest::IsTitleTemplate(Template))
+	{
+		return false;
+	}
+	const net::EventTemplate* T = net::ForEvent(H.EventId).FindTemplate(Template);
+	return T && !T->Main;
+}
+
 /** The fewest an event runs with (the Embercrest's stated minimum; 0 where none is stated). */
 int MinimumField(const std::string& Id)
 {
@@ -151,6 +164,9 @@ void World::AdvanceTo(double To)
 			NightPointsHourAgo = NightPoints;
 			NightHour = Now;
 			Changed = true;
+			// Update 4 (SPEC v1.7 §2.6.1, §3.2 R2; §6 PA-24): the festival crown, and the Scene Book's 09:00 step (no-ops until G1 and G2).
+			FestHour(*this, Now);
+			scene::Hour(*this, Now);
 		}
 		if (Now >= DayEnd)
 		{
@@ -641,6 +657,11 @@ void World::HeroFinished(const std::string& EventId, int Place, Chips Prize, con
 			HeroLivePoints += Pts;
 			HeroCircuit += Pts;
 		}
+		if (Online && !Again)
+		{
+			// Update 4 (SPEC v1.7 §2.5.2 rule 3, §6 PA-24): the hero's finish in the live festival's race, any site's (a no-op until G1).
+			FestScoreHero(*this, Ev, Place);
+		}
 		// The player's stats page (a satellite seat at its value).
 		if (!Again)
 		{
@@ -663,6 +684,11 @@ void World::HeroFinished(const std::string& EventId, int Place, Chips Prize, con
 			}
 		}
 	}
+	// Update 4 (§3.5 R1, §3.13, §3.17 R5; §6 PA-24): the wake of a public result, the hero's TPI cash, the hero's notes (no-ops until
+	// G2; each keyed or folded once, so a result told twice is still one result).
+	scene::OnHeroResult(*this, EventId, Place, Prize);
+	story::OnHeroResult(*this, EventId, Place, Prize);
+	NoteObserved(Report.Seen);
 	// What the people at the player's tables will remember.
 	for (int Npc : Report.Met)
 	{
@@ -780,6 +806,7 @@ void World::EmbercrestDone(double At, const std::vector<std::pair<std::string, i
 		Sim::NoteRoom(HeroRoomRec, Day, HeroPlace, live::EmbercrestTableSize, 0, Points);
 	}
 	HeroResults[Id] = {HeroPlace, 0};
+	scene::OnRoom(*this, Id, HeroPlace, FieldSize); // Update 4 (§3.5 R1, §6 PA-24): a room win's Room moment (no-op until G2)
 	++Rev;
 	++HeroRev;
 }
@@ -1124,6 +1151,12 @@ double World::HallScore(int Npc, int Year) const
 		}
 		for (const Honor& H : Titles)
 		{
+			// Update 4 (SPEC v1.7 §2.6.1, §2.6.2; §6 PA-25): a festival's Player of the Series belt never counts as a major, nor (v1.6) a
+			// title whose template isn't a major (PENNANT's Micro Main). Neither exists before G1.
+			if (IsCrownHonor(H) || WorldHeroMinorTitle(H))
+			{
+				continue;
+			}
 			// The player's majors are the titles history keeps for them (Resolve's Npc -1 honors), not the year-end ones.
 			Majors += H.Npc == -1 && H.Title != "Player of the Year" && H.Title != "Live Player of the Year" && H.Title != HallOfFameTitle ? 1 : 0;
 		}
@@ -1246,6 +1279,12 @@ std::vector<int> World::Backers(int Max) const
 
 std::vector<int> World::EmbercrestRegulars() const
 {
+	// Update 4 (SPEC v1.7 §3.18 R1, §6 PA-52): the pinned list once G2 sets it when the book opens (scene::PinRegulars). Never set in
+	// Phase A (the pin is disabled), so today's rule below answers.
+	if (!Regulars.empty())
+	{
+		return Regulars;
+	}
 	// Not who's playing this week (a break or a broke spell doesn't change who the room's regulars are). The room's
 	// own locals, then the town's live players, then its online players who've had the money for a live game (their
 	// best bankroll only grows, so they stay).
@@ -1278,6 +1317,12 @@ std::string World::SpokenGreeting(int Npc, uint32_t Salt) const
 	const Memory& Last = B->Memories.back();
 	const int Pick = static_cast<int>(Salt % 3u);
 	auto One = [&](const char* A, const char* Bb, const char* C) { return std::string(Pick == 0 ? A : Pick == 1 ? Bb : C); };
+	// Update 4 (SPEC v1.7 §3.16 R1, §6 PA-24): PASSED YOU within 30 days speaks first (G2; "" while Bond::PassedDay is 0).
+	const std::string Passed = story::PassedGreeting(*this, Npc, Salt, true);
+	if (!Passed.empty())
+	{
+		return Passed;
+	}
 	switch (Last.Kind)
 	{
 	case MemoryKind::KnockedOutHero: return One("You again. It went better for me last time.", "Rematch, huh?", "Remember that hand? I do.");
@@ -1302,6 +1347,7 @@ std::string World::SpokenGreeting(int Npc, uint32_t Salt) const
 	case MemoryKind::PaidLate: return One("Evening.", "Oh. You. Good luck.", "Hey. Play well.");
 	case MemoryKind::Welched:
 	case MemoryKind::WalkedOut: return One("Hm. You.", "Let's just play cards.", "Funny seeing you here.");
+	case MemoryKind::Watched: break; // Update 4 (§3.17 R3, §6 PA-24): the ForYou greeting (W-table, G2); no such memory before then
 	default: break;
 	}
 	return B->Encounters >= 2 ? One("Hey again.", "Good to see you.", "Evening.") : One("I know you. Good luck.", "Hey, I remember you.", "Good luck again.");
@@ -1318,6 +1364,12 @@ std::string World::Greeting(int Npc, uint32_t Salt) const
 	const Memory& Last = B->Memories.back();
 	const int Pick = static_cast<int>(Salt % 3u);
 	auto One = [&](const char* A, const char* Bb, const char* C) { return std::string(Pick == 0 ? A : Pick == 1 ? Bb : C); };
+	// Update 4 (SPEC v1.7 §3.16 R1, §6 PA-24): PASSED YOU within 30 days speaks first (G2; "" while Bond::PassedDay is 0).
+	const std::string Passed = story::PassedGreeting(*this, Npc, Salt, false);
+	if (!Passed.empty())
+	{
+		return Passed;
+	}
 	switch (Last.Kind)
 	{
 	case MemoryKind::KnockedOutHero: return One("you again. went better for me last time", "rematch?", "remember that hand? I do");
@@ -1337,9 +1389,38 @@ std::string World::Greeting(int Npc, uint32_t Salt) const
 	case MemoryKind::PaidLate: return One("oh. you. gl", "hm. gl", "evening");
 	case MemoryKind::Welched:
 	case MemoryKind::WalkedOut: return One("not you", "just play cards", "hm");
+	case MemoryKind::Watched: break; // Update 4 (§3.17 R3, §6 PA-24): the ForYou greeting (W-table, G2); no such memory before then
 	default: break;
 	}
 	return B->Encounters >= 3 ? One("gl", "hey again", "gl all") : "";
+}
+
+// ------------------------------------------------------------------ Update 4 (SPEC v1.7; Phase A's stubs)
+
+void World::KnownFinalTable(const std::string& /*EventId*/, const std::vector<KnownSeat>& /*Seats*/)
+{
+	// §4.10.2, PA-32: no field plays on before G3 (B-session: the seats into Pending::KnownFt, which Resolve then reads).
+}
+
+void World::HeroBullet(const std::string& /*EventId*/)
+{
+	// §4.13.1 rule 5, PA-32: no re-entry before G3 (B-session: one entry and its share of the pool on the pending event).
+}
+
+int World::HeroBullets(const std::string& /*EventId*/) const
+{
+	return 0;
+}
+
+bool World::Holding() const
+{
+	// §3.7, PA-35: the held turn is off in Phase A (A3's machine in A-2): every turn runs whole inside AdvanceTo, as today.
+	return false;
+}
+
+void World::DrainHold()
+{
+	// §3.7, PA-35: nothing is ever held in Phase A, so there is nothing to finish.
 }
 } // namespace world
 } // namespace ss

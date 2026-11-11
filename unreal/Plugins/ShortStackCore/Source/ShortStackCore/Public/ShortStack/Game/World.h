@@ -2,8 +2,18 @@
 
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/SiteData.h"
+// Update 4 (SPEC v1.7 §6.2, §6 PA-19): the side headers. Each includes nothing of this file; World includes them, appends their
+// stores and befriends each module's Access struct.
+#include "ShortStack/Game/WorldCrowd.h"
+#include "ShortStack/Game/WorldFest.h"
+#include "ShortStack/Game/WorldGrowth.h"
+#include "ShortStack/Game/WorldScene.h"
+#include "ShortStack/Game/WorldStory.h"
 
 #include <array>
+#include <cstdint>
+#include <deque>
+#include <limits>
 #include <map>
 #include <set>
 #include <string>
@@ -193,6 +203,10 @@ enum class Arrival : int
 	HomeGame,      // talked into it by a home game's regulars
 	Watched,       // signed up after watching someone (a stream, a Main Event)
 	Streamer,      // started a Kast channel on day one
+	// Update 4 (SPEC v1.7 §3.2.2, §6 PA-20; appended, saved by number): only the Scene Book's moments bring them (G2).
+	Festival,      // came for a festival
+	Satellite,     // came for a festival's satellites
+	ForYou,        // came because of the player (a result, the Kast channel, the room)
 	Count,
 };
 SHORTSTACKCORE_API const char* ArrivalName(Arrival A);
@@ -339,6 +353,8 @@ enum class StepKind : int
 	Retired,
 	PlayerOfYear,
 	HallOfFame, // inducted (July 15)
+	// Update 4 (SPEC v1.7 §5.7, §6 PA-20; appended): made a name (a crowd record promoted, G4).
+	Noticed,
 	Count,
 };
 
@@ -595,6 +611,13 @@ struct Npc
 	 * Ignite alone); a team pro's is the team's site alone ("plays only on", §1.9 #11). On the npc line from version 4.
 	 */
 	uint8_t Sites = 1;
+	// Update 4 (SPEC v1.7 §3.2, §3.6, §3.8, §3.13, §5.2; §6 PA-21; appended, defaults everywhere, nothing written while default):
+	int Moment = 0;           // the SceneMoment that brought them (0: none, as everyone before the book opens)
+	int8_t LeftWhy = 0;       // world::LeftWhy, private (N3)
+	int Noticed = 0;          // G4: the day they made a name (promoted from the crowd)
+	uint32_t CrowdSerial = 0; // G4: their crowd record's serial once promoted
+	Growth Grow;              // dynamic ability with causes (§3.8)
+	TpiRec Tpi;               // the TPI's record (§3.13)
 
 	float SkillOf(world::Skill S) const { return Skills[static_cast<size_t>(S)]; }
 	float TraitOf(world::Trait T) const { return Traits[static_cast<size_t>(T)]; }
@@ -629,6 +652,8 @@ enum class MemoryKind : int
 	PaidLate,    // the player was late paying them (the mark at the due time; the payment settles it)
 	Welched,     // the player never paid (a week past due; Lou's two)
 	WalkedOut,   // the player walked away from a deal still in makeup
+	// Update 4 (SPEC v1.7 §3.5 R4, §6 PA-20; appended): a ForYou arrival's seeded bond, they signed up after watching the player (G2).
+	Watched,
 	Count,
 };
 SHORTSTACKCORE_API const char* MemoryText(MemoryKind K);
@@ -652,6 +677,13 @@ struct Bond
 	int Encounters = 0;
 	int LastDay = -9999;
 	std::vector<Memory> Memories; // oldest first, the first meeting always kept
+	// Update 4 (SPEC v1.7 §3.16 R1, §3.17 R5, §3.21; §6 PA-21; appended after the memories, written only when non-zero):
+	int NoteDay0 = 0;                       // the hero's notes: the first 30 days after the first meeting
+	int N1Hands = 0, N1Vpip = 0, N1Pfr = 0;
+	int NoteDayR = 0;                       // and the latest 30-day block
+	int NrHands = 0, NrVpip = 0, NrPfr = 0;
+	int ArmHero = 0, ArmThem = 0;           // PASSED YOU, armed: both ranks at the meeting (RankedCount + 1 when unranked)
+	int PassedDay = 0;                      // the day they passed the player (once ever; 0: never)
 	/** "Knows you", "Rival", "Holds a grudge", "Respects you", ... (empty: a stranger). */
 	SHORTSTACKCORE_API std::string Label() const;
 };
@@ -688,6 +720,10 @@ enum class EventKind : int
 	SignedSiteTeam, // a rival site signed a team pro (G3)
 	SiteLaunched,   // a rival site opened its lobby (G3)
 	SiteOverlay,    // a rival's guarantee wasn't met (G3)
+	// Update 4 (SPEC v1.7 §2.6.1, §3.13, §3.19; §6 PA-20; appended): Headline returns false for them until their gates write it.
+	FestivalCrown,  // a festival's Player of the Series (G1)
+	TpiMark,        // a TPI mark: RISING, the top 100 (G2)
+	SceneEra,       // the scene's eras (G2)
 	Count,
 };
 SHORTSTACKCORE_API const char* EventKindName(EventKind K);
@@ -714,6 +750,9 @@ enum EventFlag : int
 	FlagHero = 8,      // the player was there
 	FlagLive = 16,     // a live event
 	FlagUnknown = 32,  // the world hadn't been following them
+	// Update 4 (SPEC v1.7 §3.4, §3.15 R3; §6 PA-22; free today): a story post Headline words (RISING), a first-year's result.
+	FlagStory = 64,
+	FlagFirstYear = 128,
 	// Update 2 §5.7, §5.10 (review of A3; core-world sets them at G3): a rival site's event carries its net::SiteId in these
 	// bits (RiverLine's: none), so RiverLine's News can leave it out and the site's own News show it. Saved with the log's
 	// flags. FlagSiteOf reads it.
@@ -873,6 +912,15 @@ struct Entry
 	int Better = 0; // the player's tables: still in when the player left, so better than this place (0: no bound)
 };
 
+/** Update 4 (SPEC v1.7 §4.10.2, §6 PA-32): a final-table seat the engine played after the player's bust (the field plays on, G3). */
+struct KnownSeat
+{
+	int Place = 0;
+	std::string Name, Country;
+	Chips Prize = 0;
+	int Npc = -1;
+};
+
 /** An event the world has planned (people registered) and will resolve when it ends. */
 struct Pending
 {
@@ -904,6 +952,9 @@ struct Pending
 	int Seats = 0;         // satellites: seats awarded
 	int FinalSize = 9;     // places at the final table
 	std::vector<Entry> Who;
+	// Update 4 (§6 PA-21, PA-32; appended, empty everywhere in Phase A, so the q line is written as today):
+	std::vector<CrowdEntry> CrowdIn; // G4: crowd members seated in the player's event (§5.4 R4)
+	std::vector<KnownSeat> KnownFt;  // G3: <= 9, set only by World::KnownFinalTable
 };
 
 /** An event called off before it was played: a live event short of its stated minimum field (R6). */
@@ -933,6 +984,96 @@ struct LeagueBook
 	int8_t Div = 0;
 	std::vector<LeagueMember> Members;
 };
+
+/** Update 4 (SPEC v1.7 §4.7.3, §6 PA-27): WHO'S IN, one query for the hub, CHIP COUNTS and the broadcast. Never saved; append-only
+ *  from the Phase A freeze (v1.6 wrote DefendingSeries, YearChampion and TitleHolder in before it, §2.6.7). */
+enum class StoryWhy : uint8_t
+{
+	Rival,
+	Following,
+	Met,
+	Wake,
+	DefendingChampion,
+	DefendingSeries,
+	Champion,
+	YearChampion,
+	TitleHolder,
+	TeamPro,
+	Streamer,
+	Rising,
+	Qualifier,
+	Count,
+};
+/** Append-only; Qualifiers first (§12.1 I-1). */
+enum class StoryGroup : uint8_t
+{
+	Qualifiers,
+	FestivalArrivals,
+	FirstYearQualifiers,
+	CameForYou,
+	Rising,
+	Count,
+};
+struct StoryPerson
+{
+	int Npc = -1;
+	StoryWhy Why = StoryWhy::Met;
+};
+struct FieldStories
+{
+	std::vector<StoryPerson> People;
+	std::array<int, static_cast<size_t>(StoryGroup::Count)> Groups{};
+};
+
+/**
+ * Update 4 (SPEC v1.7 §3.7 R2, §6 PA-35): the held turn's units, each in its place (the order is part of the contract: slice
+ * invariance depends on it). World::AdvanceTo queues them under TurnBudgetMs and dispatches each to a stub or to today's code (A3's
+ * machine in A-2; off in Phase A: TurnBudgetMs is unlimited, so a turn runs whole as today).
+ */
+enum class TurnUnit : uint8_t
+{
+	PlanDay,        // PlanDay(Day + 1) in ranges of 500 of its shuffled order, over PlanState
+	PlanInsert,     // its final queue insertion and stable_sort
+	SceneDay,       // the Scene Book's posting (§3.2)
+	NewDayPeople,   // NewDay's per-person loop, in id ranges
+	Ranks,          // NewDay's Ranks
+	CrowdDay,       // the crowd's day weights (G4, §5.3)
+	DirectorDay,    // the Director's urgent pass (§3.15)
+	NewWeekPeople,  // NewWeek's per-person loop, in id ranges (Growth's weekly hook inside)
+	KeeperWeek,     // the keeper's weekly step, in Newcomers' slot (§3.3)
+	CrowdWeek,      // the crowd's week, in ranges (G4, §5.6)
+	TpiScore,       // the TPI's weekly score fold
+	TpiSort,        // and its one sort
+	ArcWeek,        // the Arc Book, in ranges (§3.14)
+	DirectorWeek,   // the Director's week (§3.15)
+	NewMonthPeople, // NewMonth's per-person loop, in id ranges (TurnPro's Rng carried)
+	TpiMonthly,     // the monthly ring and the monthly rankings (§3.13)
+	RookieOfYear,   // January 1, after NewYear (§3.16 R2)
+	Count,
+};
+
+/**
+ * Update 4's optional world lines (SPEC v1.7 §1.7, §2.13, §3.21, §4.16, §5.12; §6 PA-26): world\t<kind>, read when present, written
+ * only when non-empty, never from Finish, an unknown sub-kind ignored (the world\tleague precedent; no version bump). The kinds are
+ * declared here in Phase A; the readers and writers are A2's (A-2). Today's reader already returns true for a kind it doesn't know.
+ */
+namespace u4line
+{
+constexpr const char Fest[] = "fest";         // sub-kinds:
+constexpr const char FestRace[] = "race";     //   the live race (G1)
+constexpr const char FestFinal[] = "final";   //   the last crown, through the Afterglow (G1)
+constexpr const char FestMarkLine[] = "mark"; //   the hero's marks and an unpaid crown ticket (G1)
+constexpr const char Scene[] = "scene";       // the Scene Book's keeper (G2)
+constexpr const char Moment[] = "moment";     // one per SceneMoment (G2)
+constexpr const char Grow[] = "grow";         // Growth records (G2)
+constexpr const char Tpi[] = "tpi";           // the TPI records (G2; PA-26's "alm", the Almanac's line before the TPI's name, §13.10)
+constexpr const char ArcLine[] = "arc";       // the Arc Book (G2)
+constexpr const char Follow[] = "follow";     // follows, Names to Watch, the feed, Dee's tip (G2)
+constexpr const char Regulars[] = "regulars"; // the pinned Embercrest regulars (G2)
+constexpr const char Crowd[] = "crowd";       // the packed crowd records, and its sub-kind "day" (G4)
+constexpr const char CrowdDay[] = "day";
+constexpr const char QCrowd[] = "qcrowd";     // a pending event's crowd entries (G4)
+} // namespace u4line
 
 class World
 {
@@ -1035,6 +1176,14 @@ public:
 	SHORTSTACKCORE_API void Join(const std::string& EventId, int Npc);
 	/** The player registered (their result decides where everyone else finishes around them). */
 	SHORTSTACKCORE_API void HeroEntered(const std::string& EventId, const std::string& EventName);
+	/** Update 4 (SPEC v1.7 §3.17 R5, §6 PA-21): what the player saw of someone at their tables (the engine's per-seat counters). */
+	struct Observed
+	{
+		int Npc = -1;
+		int Hands = 0;
+		int Vpip = 0;
+		int Pfr = 0;
+	};
 	/** The player's finish, and what their tables saw: who busted where, who was still in, who knocked whom out. */
 	struct TableReport
 	{
@@ -1044,6 +1193,10 @@ public:
 		int KnockedOutHero = -1;                 // npc
 		std::vector<int> HeroKnockedOut;         // npcs
 		std::vector<std::pair<int, Chips>> BigPots; // npc, net to the player (+ won, - lost)
+		// Update 4 (§6 PA-21; appended, ignored until their gates):
+		std::vector<Observed> Seen;                             // G2: the hero's notes (NoteObserved)
+		std::vector<std::pair<uint32_t, int>> CrowdPlaces;      // G4: crowd serial, place (busted before the player)
+		std::vector<uint32_t> CrowdStillIn;                     // G4: crowd serials still in
 	};
 	SHORTSTACKCORE_API void HeroFinished(const std::string& EventId, int Place, Chips Prize, const TableReport& Report);
 	/** Places the player saw in an event after their own finish (from the rail): the world's result keeps them. */
@@ -1076,6 +1229,47 @@ public:
 	 * play live, so they're the same people in every save for as long as they do.
 	 */
 	SHORTSTACKCORE_API std::vector<int> EmbercrestRegulars() const;
+	// ---- Update 4 (SPEC v1.7; Phase A's declarations, §6 PA-24, PA-27, PA-32-PA-35): the world API the session and the UI call.
+	// Stubs keep today's behaviour; each gate fills its own (the owner and the section beside each).
+	/** WHO'S IN (§4.7.3, PA-27): the stories in an event's registered field, cached per world revision. Empty in Phase A (G1's
+	 *  F-world fills People and the Qualifiers group; G2 and G3 the rest). */
+	SHORTSTACKCORE_API const FieldStories& FieldStoriesOf(const std::string& EventId) const;
+	/** The hero's notes (§3.17 R5, PA-24): HeroFinished folds TableReport::Seen into the bonds. No-op in Phase A (W-table, G2). */
+	SHORTSTACKCORE_API void NoteObserved(const std::vector<Observed>& Seen);
+	/** The Kast reach thresholds the player's channel crossed (§3.5 R1): Session::CheckCalendar, once per world day crossed. No-op in
+	 *  Phase A (W-arrive, G2). */
+	SHORTSTACKCORE_API void NoteReach(int Day, int Followers);
+	/** NEW FACES (§3.19.4): the arrivals of the 7 days before Monday with an account on Site, by moment (moment id, count), most first.
+	 *  Empty in Phase A (W-arrive, G2). */
+	SHORTSTACKCORE_API std::vector<std::pair<int, int>> NewFacesWeek(net::SiteId Site, int Monday) const;
+	/** The follow list (§3.15; at most 24): each drains the hold. Following a crowd name promotes it first (G4, §5.7 R1). No-ops in
+	 *  Phase A (W-story, G2). */
+	SHORTSTACKCORE_API void Follow(int Npc);
+	SHORTSTACKCORE_API void Unfollow(int Npc);
+	SHORTSTACKCORE_API void Follow(const std::string& CrowdName);
+	/** The Director's notes due (§3.15 R6), handed over once each. Empty in Phase A (W-story, G2). */
+	SHORTSTACKCORE_API std::vector<StoryNote> TakeStoryNotes();
+	/** The field plays on (§4.10.2, PA-32): the nine final-table seats the engine played after the player's bust. No-op in Phase A
+	 *  (B-session, G3). */
+	SHORTSTACKCORE_API void KnownFinalTable(const std::string& EventId, const std::vector<KnownSeat>& Seats);
+	/** Re-entry (§4.13.1 rule 5, PA-32): one more bullet of the player's in an event (its entries and pool), and how many they've
+	 *  fired. No-op and 0 in Phase A (B-session, G3). */
+	SHORTSTACKCORE_API void HeroBullet(const std::string& EventId);
+	SHORTSTACKCORE_API int HeroBullets(const std::string& EventId) const;
+	/** The crowd (§5.4-§5.9): a member joins one of the player's events, their dealt places, a meeting at the player's table, the light
+	 *  card, a record by name (null: none). No-ops, an empty card and null in Phase A (S-crowd, G4). */
+	SHORTSTACKCORE_API void CrowdJoin(const std::string& EventId, uint32_t Serial);
+	SHORTSTACKCORE_API void CrowdFinished(const std::string& EventId, const std::vector<std::pair<uint32_t, int>>& Places, const std::vector<uint32_t>& StillIn);
+	SHORTSTACKCORE_API void CrowdMet(uint32_t Serial, int Day);
+	SHORTSTACKCORE_API CrowdProfile CrowdProfileOf(const std::string& Name) const;
+	SHORTSTACKCORE_API const CrowdRec* FindCrowd(const std::string& Name) const;
+	/** The held turn (§3.7, PA-35; A3's machine in A-2). Holding: a turn is mid-way through its units; DrainHold finishes it now (every
+	 *  outcome-affecting call begins with it). Phase A: never holding, so DrainHold has nothing to do. */
+	SHORTSTACKCORE_API bool Holding() const;
+	SHORTSTACKCORE_API void DrainHold();
+	/** A frame's budget for the world's turn (§3.7 R1, PA-35): unlimited in Phase A (a turn runs whole, as today); 2.0 ms wherever a
+	 *  Session runs from G2. Not saved. */
+	double TurnBudgetMs = std::numeric_limits<double>::infinity();
 	/** The player's name, as the world knows it (honors, headlines). */
 	std::string HeroName;
 	/** The bracelets and rings the player has won, oldest first. */
@@ -1194,6 +1388,13 @@ public:
 
 private:
 	friend struct Sim;
+	// Update 4 (SPEC v1.7 §6.2): how the new modules reach World. Each is defined in its module's .cpp and holds the module's
+	// private reads and writes; nothing else gains access.
+	friend struct fest::WorldAccess;
+	friend struct scene::Access;
+	friend struct grow::Access;
+	friend struct story::Access;
+	friend struct crowd::Access;
 	bool Created = false;
 	uint32_t WorldSeed = 0;
 	double Now = 0.0;
@@ -1203,6 +1404,10 @@ private:
 	int HeroRev = 0;
 	int Founding = 0; // the network's regulars, at the start of the roster
 	std::vector<Npc> Roster;
+	/** Update 4 (SPEC v1.7 §6 PA-34; A2's pages of 64 in A-2): the roster's writers. Edit(id) for one person (an index writer),
+	 *  EditAll() for the whole-roster mutating loops (a page walk). Phase A: pass-throughs over today's vector. */
+	Npc& Edit(int Id) { return Roster[static_cast<size_t>(Id)]; }
+	std::vector<Npc>& EditAll() { return Roster; }
 	std::map<std::string, int> ByName;
 	std::vector<net::Player> Rows;
 	std::vector<Pending> Queue; // planned events, by end time
@@ -1264,6 +1469,21 @@ private:
 	// Update 3 (§3.6 R2; core-world's, empty until G2): the player's League group by site, saved as the optional
 	// world\tleague line only when one exists (the world stays version 4).
 	std::map<net::SiteId, LeagueBook> Leagues;
+	// Update 4 (SPEC v1.7 §6 PA-21; appended, empty or default everywhere in Phase A, so nothing is written and nothing reads them):
+	FestRace Fest;                        // G1: the live festival's race (world\tfest\trace)
+	FestFinal FestLast;                   // G1: the last crown, through the Afterglow (world\tfest\tfinal)
+	std::vector<HeroFestMark> HeroFest;   // G1: the hero's marks, one per edition scored in (world\tfest\tmark)
+	SceneBook Scene;                      // G2: the Scene Book (world\tscene, world\tmoment)
+	TpiBook Tpi;                          // G2: the TPI's book (world\tscene's tail)
+	TpiRec HeroTpi;                       // G2: the hero's TPI record (world\ttpi, id -1)
+	std::array<int16_t, 24> HeroHist{};   // G2: the hero's rank in each month's rankings (§3.15)
+	ArcBook Arcs;                         // G2: the Arc Book (world\tarc)
+	std::vector<FollowRec> Follows;       // G2: <= 24 (world\tfollow)
+	std::array<WatchPick, 12> Watch{};    // G2: Names to Watch
+	std::deque<FeedItem> Feed;            // G2: SINCE YOU LAST LOOKED, <= 40
+	DeeTip Tip;                           // G2: Dee's tip
+	std::vector<int> Regulars;            // G2: the pinned Embercrest regulars (64; world\tregulars); empty: today's sort (PA-52)
+	CrowdBook Crowd;                      // G4: the crowd (world\tcrowd)
 
 	void Refresh(int Id);
 	void RefreshAll();

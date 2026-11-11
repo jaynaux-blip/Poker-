@@ -171,6 +171,7 @@ int OnlineCount(const Npc& N, int Day, bool SeriesOn, Rng& R)
 	default: break;
 	}
 	M *= 1.0 - 0.6 * static_cast<double>(N.Fatigue);
+	M *= grow::VolumeScale(N, Day); // Update 4 (SPEC v1.7 §3.8, §6 PA-23): a surge's hot week, a busy spell (1.0 until G2)
 	if (N.TripUntil >= Day && Day >= N.TripFrom)
 	{
 		M *= 0.2;
@@ -958,6 +959,7 @@ void Sim::PlanDay(World& W, int Day)
 			const double Comfort = static_cast<double>(Sim::Comfort(N));
 			const int Tier = sim::TierIndex(N.Tier);
 			double Target = sim::Clamp(Comfort, static_cast<double>(sim::TierLow[Tier]), static_cast<double>(sim::TierHigh[Tier]));
+			Target *= grow::BuyInScale(N, Day); // Update 4 (§3.9, §6 PA-23): the wealthy amateur's stakes (1.0 until G2)
 			const double Risk = static_cast<double>(N.TraitOf(Trait::Risk));
 			double Shot = 1.6 + 2.5 * Risk;
 			if (N.Mood == Momentum::Heater || N.Mood == Momentum::Confident || N.Mood == Momentum::Breakout)
@@ -1168,6 +1170,14 @@ Chips Bounties(Rng& R, const Pending& P, int Place, double BountySkill)
 	{
 		const double Envelope = R.Next();
 		Money *= Envelope < 0.002 ? 120.0 : Envelope < 0.02 ? 8.0 : 0.62;
+		// Update 4 (SPEC v1.7 §3.13 R1, §6 PA-23): from G2 the world pays mystery money only in the money, scaled by Entries / Paid so its
+		// mean holds (as the keyed deck pays the hero, §4.9; the curve becomes Sim::CurveOf(P) with PA-13). story::MysteryInMoney is
+		// false in Phase A, so every place keeps today's envelope.
+		if (story::MysteryInMoney(P))
+		{
+			const int InMoney = std::max(1, ss::PaidPlaces(P.Entries, PayoutCurve::Standard));
+			Money = Place <= InMoney ? Money * static_cast<double>(std::max(1, P.Entries)) / static_cast<double>(InMoney) : 0.0;
+		}
 	}
 	return static_cast<Chips>(std::llround(Money));
 }
@@ -1243,7 +1253,7 @@ void Sim::Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, C
 	++L.Events;
 	L.Spent += Gross;
 	L.Won += Prize;
-	const bool Cash = Prize > 0 || Seat;
+	const bool Cash = story::TpiCash(P, Place, Prize, Seat); // Update 4 (§3.13 R1, §6 PA-23): today's Prize > 0 || Seat until G2
 	const bool Ft = Place >= 1 && Place <= P.FinalSize;
 	const bool Win = Place == 1;
 	L.Cashes += Cash ? 1 : 0;
@@ -1436,6 +1446,7 @@ void Sim::Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, C
 		N.Confidence = sim::Clampf(static_cast<double>(N.Confidence) + 0.4, -1.0, 1.0);
 		Sim::Post(W, P.End, EventKind::Breakout, N.Id, P.Name, Prize, Place);
 		W.Log.back().Flags |= SiteFlags(Site);
+		grow::OnBreakout(W, N, Day); // Update 4 (§3.8, §6 PA-23)
 	}
 	else if (Win && Prize >= Abi * 40 && N.Mood != Momentum::Breakout)
 	{
@@ -1468,6 +1479,9 @@ void Sim::Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, C
 			}
 		}
 	}
+	// Update 4 (SPEC v1.7 §2.5.2 rule 2, §6 PA-23): the live festival's race, any site's (a no-op until G1). RiverLine's board below
+	// stays its board.
+	FestScoreResult(W, P, N.Id, Place);
 	// RiverLine's running boards: its series and its Night Shift count only what was played on RiverLine (update 2 §5.8),
 	// checked where the points are added, so a rival's series or micro event can never switch or clear them.
 	if (P.Online && Points > 0.0 && Site == net::SiteId::RiverLine)
@@ -1496,6 +1510,9 @@ void Sim::Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, C
 			}
 		}
 	}
+	// Update 4 (§3.8, §3.13, §6 PA-23): the TPI's week fold and the result's beats, the Growth causes (no-ops until G2).
+	story::OnResult(W, N, P, Place, Prize, Seat);
+	grow::OnResult(W, N, P, Place, Prize);
 	W.Refresh(N.Id);
 }
 
@@ -1605,6 +1622,9 @@ void Sim::Resolve(World& W, Pending& P)
 		Place[Dr.I] = Got;
 		Taken.insert(Got);
 	}
+	// Update 4 (SPEC v1.7 §5.4 R2, §6 PA-23): the crowd's cash places below the final table, from the live taken set (G4; none in
+	// Phase A).
+	crowd::OnPlaced(W, P, Field, Pay, Taken);
 
 	// Money and records.
 	std::map<int, int> AtPlace; // place -> npc
@@ -1671,7 +1691,11 @@ void Sim::Resolve(World& W, Pending& P)
 		else
 		{
 			Pc.Player = -2;
-			Anonymous(W, P, Pl, Pc.Name, Pc.Country);
+			// Update 4 (§5.4 R1, §6 PA-23): a crowd member may hold the seat (G4); false in Phase A, so it is today's anonymous one.
+			if (!crowd::FtSeat(W, P, Pl, Pc))
+			{
+				Anonymous(W, P, Pl, Pc.Name, Pc.Country);
+			}
 		}
 		Res.FinalTable.push_back(Pc);
 	}
@@ -1686,9 +1710,15 @@ void Sim::Resolve(World& W, Pending& P)
 		if (Always || (Big && W.DiscoveredThisWeek < 2))
 		{
 			++W.DiscoveredThisWeek;
-			Npc N = Discover(W, Wn.Name, Wn.Country, P.Strength, Day, Fnv1a(P.Id));
-			N.Sites = static_cast<uint8_t>(N.Sites | SiteBit(Site)); // they were playing there: an account where they won it
-			const int Id = Add(W, std::move(N));
+			// Update 4 (§5.4 R6, §6 PA-23): a crowd winner is promoted from their record instead (one Discover path, one cap; G4).
+			// False in Phase A, so Discover makes the person as today.
+			int Id = -1;
+			if (!crowd::DiscoverFromCrowd(W, P, Wn, Day, Id))
+			{
+				Npc N = Discover(W, Wn.Name, Wn.Country, P.Strength, Day, Fnv1a(P.Id));
+				N.Sites = static_cast<uint8_t>(N.Sites | SiteBit(Site)); // they were playing there: an account where they won it
+				Id = Add(W, std::move(N));
+			}
 			Entry E;
 			E.Npc = Id;
 			// Big live fields are full of satellite qualifiers.
@@ -1772,6 +1802,8 @@ void Sim::Resolve(World& W, Pending& P)
 		H.At = P.End;
 		W.Titles.push_back(H);
 	}
+	// Update 4 (SPEC v1.7 §3.4, §6 PA-23): ripples and the rare Summer, once the winner's post is up (no-op until G2).
+	scene::OnResolved(W, P, Res);
 	// A fresh world's first weeks: the first title of each event family in the new books (update 2 §3.3 F9). The books are
 	// RiverLine's and the live rooms': a rival has no past in either mode, so its firsts are its launch's story, not these.
 	if (W.Began() == Start::Blank && !Res.FinalTable.empty() && Site == net::SiteId::RiverLine)
@@ -1839,6 +1871,7 @@ void Sim::RefreshField(World& W)
 	{
 		W.Field[T] = W.FieldRef[T] - FieldSoftness + 0.6 * (Avg - W.FieldRef[0]);
 	}
+	grow::FieldTiers(W); // Update 4 (§3.12, §6 PA-23): per-tier softness and the drift guard (no-op until G2)
 }
 
 std::vector<int> Sim::BoardRanks(const World& W, net::Board B, double At)
@@ -2101,6 +2134,7 @@ void Sim::Stakes(World& W, Npc& N, int Day, Rng& R)
 			{
 				N.Living = std::max(N.Living, sim::Cents(sim::Living[N.Tier] * R.Range(0.8, 1.2)));
 			}
+			grow::OnMovedUp(W, N, Day); // Update 4 (§3.8, §6 PA-23)
 		}
 	}
 	else if (Tier > 1 && static_cast<double>(C) < static_cast<double>(sim::TierFloor[Tier]) * (0.35 + 0.4 * static_cast<double>(N.TraitOf(Trait::Discipline))))
@@ -2200,7 +2234,8 @@ void Sim::Learn(World& W, Npc& N, int Day)
 	{
 		Study += T.Kind == TieKind::TrainingPartner ? 0.2 * static_cast<double>(T.Strength) : 0.0;
 	}
-	const double Rate = 0.004 * static_cast<double>(N.Potential) * (0.3 + Practice) * (0.4 + Study) * (N.Playing() ? 1.0 : 0.2);
+	// Update 4 (SPEC v1.7 §3.8 R2, §6 PA-23): the phase's closing (G2); today's rate, exactly, in Phase A.
+	const double Rate = grow::Rate(W, N, Day, 0.004 * static_cast<double>(N.Potential) * (0.3 + Practice) * (0.4 + Study) * (N.Playing() ? 1.0 : 0.2), Study);
 	const double Avg = static_cast<double>(N.Overall());
 	for (size_t I = 0; I < N.Skills.size(); ++I)
 	{
@@ -2212,6 +2247,7 @@ void Sim::Learn(World& W, Npc& N, int Day)
 		}
 		N.Skills[I] = sim::Clampf(S, 0.03, 0.99);
 	}
+	grow::Clamp(W, N, Day); // Update 4 (§3.8, §6 PA-23): the weekly caps (no-op until G2)
 	// What they play is what they get better at.
 	auto Practise = [&](Skill S, int Events) {
 		if (Events > 0)
@@ -2290,6 +2326,7 @@ void Sim::Broadcast(World& W, Npc& N, int Day, Rng& R)
 		if (Before < M && N.Followers >= M)
 		{
 			Sim::Post(W, At, EventKind::StreamMilestone, N.Id, "followers", 0, M);
+			scene::OnStreamMilestone(W, N, Day, M); // Update 4 (§3.2, §6 PA-23)
 		}
 	}
 	// Brands find the bigger channels: one from the sponsors' catalog the channel's size reaches (§3.7), never a poker
@@ -2320,6 +2357,7 @@ void Sim::Broadcast(World& W, Npc& N, int Day, Rng& R)
 			}
 		}
 	}
+	story::SponsorOnResults(W, N, Day); // Update 4 (§3.16 R3, §6 PA-23): sponsors on results (no-op until G2)
 	// Some stop: no growth, bad results, burnout.
 	if (N.Followers < 2000 && Day - N.Joined > 60 && R.Chance(0.012 + (N.Mood == Momentum::Burnout ? 0.03 : 0.0)))
 	{
@@ -2375,11 +2413,13 @@ void Sim::Lifecycle(World& W, Npc& N, int Day, Rng& R)
 					Bind(W, N.Id, Backer, TieKind::Backed, 0.6f, Day);
 				}
 				Sim::SetMood(N, Momentum::Rebuilding, Day);
+				grow::OnStaked(W, N, Day); // Update 4 (§3.8, §6 PA-23)
 				break;
 			}
 			N.St = Status::Broke;
 			N.Left = Day;
 			N.WeeksBroke = 0;
+			scene::Left(W, N, Day, true); // Update 4 (§3.6 R2, §6 PA-23): why they left (no-op until G2)
 			if (Known || N.Professional)
 			{
 				Sim::Post(W, At, EventKind::WentBroke, N.Id, "", 0, N.Tier);
@@ -2405,6 +2445,7 @@ void Sim::Lifecycle(World& W, Npc& N, int Day, Rng& R)
 			N.St = Status::Retired;
 			N.Left = Day;
 			N.TripUntil = -1;
+			scene::Left(W, N, Day, false); // Update 4 (§3.6 R2, §6 PA-23)
 			if (Known)
 			{
 				Sim::Post(W, At, EventKind::Retired, N.Id, "", N.CareerWon(), Age);
@@ -2425,6 +2466,7 @@ void Sim::Lifecycle(World& W, Npc& N, int Day, Rng& R)
 				Sim::Post(W, At, EventKind::Break, N.Id, "", 0, N.Until - Day);
 			}
 		}
+		scene::Honeymoon(W, N, Day); // Update 4 (§3.6 R1, §6 PA-23): a newcomer's extra weekly leave chance (no-op until G2)
 		break;
 	}
 	case Status::Broke:
@@ -2721,7 +2763,7 @@ bool Sim::SignsOnResults(const Npc& N, const std::vector<int>& SeasonRank)
 
 namespace worldsim_detail
 {
-Identity Label(const Npc& N, int Day)
+Identity Label(const World& W, const Npc& N, int Day)
 {
 	const int Age = N.Age(Day);
 	const double Sk = static_cast<double>(N.Overall());
@@ -2741,13 +2783,23 @@ Identity Label(const Npc& N, int Day)
 	{
 		return Identity::UndergroundSpecialist;
 	}
-	if (Age < 25 && Sk > 0.66)
 	{
-		return Identity::YoungCrusher;
-	}
-	if (Age < 30 && static_cast<double>(N.Peak) - Sk > 0.12 && Sk > 0.55 && N.Potential > 0.6f)
-	{
-		return Identity::RisingProspect;
+		// Update 4 (SPEC v1.7 §3.11, §6 PA-23): these two rows from public results from G2 (story::Labels); in Phase A it returns today's
+		// hidden-skill answer, so the label is today's.
+		Identity Hidden = Identity::Count;
+		if (Age < 25 && Sk > 0.66)
+		{
+			Hidden = Identity::YoungCrusher;
+		}
+		else if (Age < 30 && static_cast<double>(N.Peak) - Sk > 0.12 && Sk > 0.55 && N.Potential > 0.6f)
+		{
+			Hidden = Identity::RisingProspect;
+		}
+		const Identity Told = story::Labels(W, N, Day, Hidden);
+		if (Told != Identity::Count)
+		{
+			return Told;
+		}
 	}
 	if (Age >= 45 && N.Professional && Day - N.Joined > 365 * 8)
 	{
@@ -2849,6 +2901,8 @@ void Sim::TurnPro(World& W, Npc& N, int Day, Rng& R)
 
 void Sim::NewDay(World& W, int Day)
 {
+	// Update 4 (SPEC v1.7 §2.5.2 rule 1, §6 PA-23): a festival's race opens on its FirstDay (a no-op until G1).
+	FestDay(W, Day);
 	const int Yr = world::YearOf(Day);
 	if (Yr != world::YearOf(Day - 1))
 	{
@@ -2881,6 +2935,8 @@ void Sim::NewDay(World& W, int Day)
 			HallOfFame(W, Day);
 		}
 	}
+	// Update 4 (§3.2, §6 PA-23): the Scene Book's posting, after the calendar turns (no-op until G2).
+	scene::Day(W, Day);
 	for (Npc& N : W.Roster)
 	{
 		// Rest: a day off does more than a normal one; a long downswing wears on people too.
@@ -2944,6 +3000,7 @@ void Sim::NewDay(World& W, int Day)
 	// A fresh world's board report reads yesterday's ranks against today's, so it goes before they move.
 	BoardReport(W, Day);
 	Ranks(W);
+	story::Day(W, Day); // Update 4 (§3.15, §6 PA-23): the Director's urgent pass (no-op until G2)
 }
 
 void Sim::NewWeek(World& W, int Day)
@@ -2965,6 +3022,7 @@ void Sim::NewWeek(World& W, int Day)
 			Form(N, Day);
 			Stakes(W, N, Day, Q);
 		}
+		grow::Week(W, N, Day); // Update 4 (§3.8, §6 PA-23): phases, causes, dwell (no-op until G2)
 		Learn(W, N, Day);
 		// Fame fades without new results.
 		for (size_t K = 0; K < N.Fame.size(); ++K)
@@ -2985,11 +3043,16 @@ void Sim::NewWeek(World& W, int Day)
 	}
 	Connect(W, Day, R);
 	PlanTrips(W, Day, R);
-	Newcomers(W, Day, R);
+	// Update 4 (SPEC v1.7 §3.3 R1, §6 PA-23): the keeper's weekly step takes Newcomers' slot from G2; in Phase A it runs today's
+	// Newcomers, the week's last draws from R.
+	scene::Week(W, Day, R);
 	RefreshField(W);
 	W.DiscoveredThisWeek = 0;
 	// The circuit's standings post on Mondays.
 	Standings(W, YearOf(Day), SeasonWeek(Day) >= badge::CardFromWeek);
+	// Update 4 (§3.13-§3.15, §5.6, §6 PA-23): the TPI, the arcs and the Director's week; the crowd's week (no-ops until G2 and G4).
+	story::Week(W, Day);
+	crowd::Week(W, Day);
 	W.RefreshAll();
 }
 
@@ -3002,8 +3065,9 @@ void Sim::NewMonth(World& W, int Day)
 		{
 			W.Flow[4] += sim::Dollars(CashOut(N));
 			TurnPro(W, N, Day, R);
+			grow::TurnProOnResults(W, N, Day); // Update 4 (§3.10, §6 PA-23): turning pro on results (no-op until G2)
 		}
-		N.Is = Label(N, Day);
+		N.Is = Label(W, N, Day);
 		ExpireTickets(N, static_cast<double>(Day) * 1440.0);
 		for (Tie& T : N.Ties)
 		{
@@ -3014,6 +3078,7 @@ void Sim::NewMonth(World& W, int Day)
 		}
 		N.Ties.erase(std::remove_if(N.Ties.begin(), N.Ties.end(), [](const Tie& T) { return T.Strength < 0.05f; }), N.Ties.end());
 	}
+	scene::Month(W, Day); // Update 4 (§3.6 R3, §6 PA-23): the quick fade (no-op until G2)
 	TeamRiverLine(W, Day);
 	// The rival sites (update 2 §5.9): the regulars who rose to their stakes open accounts, and the site teams sign.
 	SitesMonth(W, Day);
@@ -3142,6 +3207,7 @@ void Sim::NewYear(World& W, int Calendar, int Day)
 	W.HeroCardPrev = W.HeroCardTop;
 	W.HeroCardTop = CardNone;
 	W.HeroCircuit = 0.0;
+	story::Year(W, Calendar, Day); // Update 4 (§3.16 R2, §6 PA-23): Rookie of the Year (no-op until G2)
 }
 
 // ------------------------------------------------------------------ the badges' calendar (next_segment_spec §5.3)
@@ -3245,6 +3311,7 @@ void Sim::Review(World& W, int Day)
 			N.ReviewMonth = Key;
 		}
 	}
+	crowd::Review(W, Day); // Update 4 (§5.7 R1, §6 PA-23): the crowd's Verified rule (no-op until G4)
 }
 
 void Sim::HallOfFame(World& W, int Day)

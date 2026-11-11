@@ -153,6 +153,17 @@ struct Sim
 	static std::string UniqueName(World& W, Rng& R, const std::string& Country, bool Pro);
 	static void MakeSkills(Npc& N, Rng& R, double Base);
 	static Npc Rookie(World& W, Rng& R, int Day);
+	/**
+	 * Update 4 (SPEC v1.7 §3.2.2, §6 PA-28): the part of Rookie after the arrival pick (age, traits, skills, money, habits, the first
+	 * step), from R in Rookie's order, so Rookie's draws are byte-identical. G2's Sim::Arrive calls it with the moment's cause.
+	 */
+	static void RookieBody(World& W, Rng& R, int Day, Arrival Came, int With, Npc& N);
+	/** Update 4 (§3.2.2 R9; G/WorldArrive.cpp, W-arrive's at G2): the person a Scene Book moment brings, from the fork
+	 *  world/<seed>/arrive/<Day>/<M.Id>/<K>. A stub in Phase A (nothing calls it). */
+	static Npc Arrive(World& W, const SceneMoment& M, int Day, int K);
+	/** Update 4 (§5.4 R6, §5.7; G/WorldPromote.cpp, S-promote's at G4): a crowd record made a full record, its history carried; the
+	 *  new id. A stub in Phase A (-1; the crowd is empty). */
+	static int Promote(World& W, int Crowd, int Day, PromoteWhy Why);
 	static Npc Discover(World& W, const std::string& Name, const std::string& Country, double Strength, int Day, uint32_t Salt);
 	/** A buy-in they're comfortable with today (cents). */
 	static Chips Comfort(const Npc& N);

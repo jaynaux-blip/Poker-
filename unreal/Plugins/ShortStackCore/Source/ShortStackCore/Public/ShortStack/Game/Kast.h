@@ -585,6 +585,9 @@ struct Inputs
 	// ---- C-K's L5 (appended; filled by Session::KastInputsExtra, empty until it does): the Rerun videos the Room's lines name.
 	std::string VideoTitle;     // the video behind VideoBuzz (the most views in the last 48 world hours): a guest from Rerun says it
 	std::string RerunHeatTitle; // the video behind RerunHeat's newest bump: Heat's why line ("Your video ... got pushed hard")
+	// ---- Update 4 (SPEC v1.7 §3.16 R7, §6 PA-21; appended, empty until G2): one storied opponent at the hero's table a stream.
+	std::string StoryName; // their name
+	std::string StoryBeat; // the beat the chat names
 };
 
 /**

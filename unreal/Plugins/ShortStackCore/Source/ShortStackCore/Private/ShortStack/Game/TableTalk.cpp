@@ -1361,6 +1361,12 @@ Said Line(Moment M, const Context& C)
 			{
 				return Said();
 			}
+			if (T == "tpi" && Self->TpiRank <= 0)
+			{
+				// Update 4 (SPEC v1.7 §3.16 R6, §6 PA-31): the riser's own brag (W-story's own.tpi lines, G2) only from a TPI rank. No such
+				// line exists before G2, and LiveVoice::TpiRank is 0.
+				return Said();
+			}
 			if (T == "friend" || T == "rival")
 			{
 				// Only to someone they're tied to that way (TieKind: Friend, HomeGame, TravelPartner talk; Rival needles).

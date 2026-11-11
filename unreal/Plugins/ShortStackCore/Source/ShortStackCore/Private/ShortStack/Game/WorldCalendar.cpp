@@ -257,6 +257,10 @@ const char* ArrivalName(Arrival A)
 	case Arrival::HomeGame: return "Home game";
 	case Arrival::Watched: return "Watched";
 	case Arrival::Streamer: return "Streamer";
+	// Update 4 (SPEC v1.7 §3.2.2, §6 PA-20): the Scene Book's causes (none before G2).
+	case Arrival::Festival: return "Festival";
+	case Arrival::Satellite: return "Satellite";
+	case Arrival::ForYou: return "Came for you";
 	case Arrival::Count: break;
 	}
 	return "";
@@ -336,6 +340,7 @@ const char* MemoryText(MemoryKind K)
 	case MemoryKind::PaidLate: return "You were late paying them";
 	case MemoryKind::Welched: return "You never paid them";
 	case MemoryKind::WalkedOut: return "You walked out on a deal";
+	case MemoryKind::Watched: return "Signed up after watching you"; // Update 4 (§3.5 R4, §6 PA-20): none before G2
 	default: return "";
 	}
 }
@@ -345,7 +350,9 @@ const char* EventKindName(EventKind K)
 	static const char* const Names[static_cast<int>(EventKind::Count)] = {"NPCWonTournament", "NPCReachedFinalTable", "NPCWentBroke", "NPCMovedUpStakes", "NPCMovedDownStakes",
 		"NPCRetired", "NPCReturned", "NPCBreakout", "NPCQualifiedForMajor", "NPCEarnedSponsorship", "NPCReachedCareerMilestone", "NPCStartedStreaming", "NPCStreamMilestone",
 		"NPCDebut", "NPCDiscovered", "NPCBacked", "NPCRivalry", "NPCChampion", "NPCPlayerOfTheYear", "NPCTookBreak", "NPCHallOfFame", "WorldBoardReport", "WorldFirstWinner",
-		"NPCJoinedSite", "NPCSignedSiteTeam", "SiteLaunched", "SiteOverlay"};
+		"NPCJoinedSite", "NPCSignedSiteTeam", "SiteLaunched", "SiteOverlay",
+		// Update 4 (SPEC v1.7 §2.6.1, §3.13, §3.19; §6 PA-20).
+		"FestivalCrown", "TpiMark", "SceneEra"};
 	const int I = static_cast<int>(K);
 	return I >= 0 && I < static_cast<int>(EventKind::Count) ? Names[I] : "";
 }

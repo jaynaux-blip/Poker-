@@ -1153,6 +1153,14 @@ void Gather(const Session& S, TalkContext& C)
 				Known.insert(Id);
 			}
 		}
+		// Update 4 (SPEC v1.7 §3.16 R5, §6 PA-31): followed people and storied Embercrest locals and regulars (G2; empty until then).
+		for (const int StoryId : world::story::TownKnown(W))
+		{
+			if (StoryId != C.Npc)
+			{
+				Known.insert(StoryId);
+			}
+		}
 		const std::vector<world::WorldEvent>& Log = W.Events();
 		int Count = 0;
 		for (auto It = Log.rbegin(); It != Log.rend() && It->At >= Now - 3.0 * 1440.0 && Count < 3; ++It)

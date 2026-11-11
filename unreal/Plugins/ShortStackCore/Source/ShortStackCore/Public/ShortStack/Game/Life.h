@@ -152,6 +152,9 @@ struct LiveVoice
 	float Respect = 0.0f;
 	std::string Story; // what they can claim (their own world records); empty: nothing
 	std::vector<std::pair<std::string, int>> Ties; // name, tie kind
+	// Update 4 (SPEC v1.7 §3.16 R6, §6 PA-21, PA-31; appended, filled by live::DescribeField: 0 and false until G2): a riser's own brag.
+	int TpiRank = 0;     // their TPI rank (0: unranked)
+	bool Rising = false; // RISING (§3.13 R5)
 };
 
 /** A row of the month's room leaders (§5) as it stood at registration. */

@@ -654,11 +654,12 @@ Npc Sim::Rookie(World& W, Rng& R, int Day)
 	N.Hue = R.Int(360);
 	N.From = Origin::Rookie;
 	N.Home = RegionOf(N.Country);
-	// How they got here: most are new to the game; some bring a past with them.
-	static const int Weights[static_cast<int>(Arrival::Count)] = {0, 35, 10, 8, 10, 8, 12, 14, 3};
+	// How they got here: most are new to the game; some bring a past with them. (Today's causes, None to Streamer: Update 4's
+	// appended arrivals come only from the Scene Book's moments, SPEC v1.7 §3.2.2.)
+	static const int Weights[static_cast<int>(Arrival::Streamer) + 1] = {0, 35, 10, 8, 10, 8, 12, 14, 3};
 	int Pick = R.Int(100);
 	Arrival Came = Arrival::FirstTimer;
-	for (int K = 1; K < static_cast<int>(Arrival::Count); ++K)
+	for (int K = 1; K <= static_cast<int>(Arrival::Streamer); ++K)
 	{
 		Pick -= Weights[K];
 		if (Pick < 0)
@@ -693,6 +694,15 @@ Npc Sim::Rookie(World& W, Rng& R, int Day)
 			With = Pool[static_cast<size_t>(R.Int(static_cast<int>(Pool.size())))];
 		}
 	}
+	RookieBody(W, R, Day, Came, With, N);
+	return N;
+}
+
+void Sim::RookieBody(World& W, Rng& R, int Day, Arrival Came, int With, Npc& N)
+{
+	// Update 4 (SPEC v1.7 §6 PA-28): Rookie's body after the arrival pick, moved here verbatim (the same draws from R, in the same
+	// order). It reads nothing of the world today; G2's causes may.
+	(void)W;
 	const int MinAge = Came == Arrival::Comeback ? 30 : Came == Arrival::SiteClosed || Came == Arrival::LiveCrossover ? 22 : 18;
 	const int Age = Came == Arrival::CameOfAge ? 18 + R.Int(3)
 											   : static_cast<int>(sim::Clamp(std::round(static_cast<double>(MinAge) + std::fabs(R.Gauss(0.0, 7.0))), static_cast<double>(MinAge), 62.0));
@@ -776,7 +786,6 @@ Npc Sim::Rookie(World& W, Rng& R, int Day)
 	First.Day = Day;
 	First.Kind = StepKind::Joined;
 	N.Path.push_back(First);
-	return N;
 }
 
 Npc Sim::Discover(World& W, const std::string& Name, const std::string& Country, double Strength, int Day, uint32_t Salt)

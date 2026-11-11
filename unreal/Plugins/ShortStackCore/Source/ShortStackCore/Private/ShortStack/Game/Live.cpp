@@ -933,6 +933,7 @@ FieldNotes DescribeField(world::World& W, const Occurrence& O, const std::string
 			Field.push_back(Npc);
 			// How they sound and what they can honestly talk about (§4): only once core-room makes voices.
 			life::LiveVoice V = room::VoiceOf(W, Npc, HeroName);
+			world::story::VoiceStory(W, Npc, V.TpiRank, V.Rising); // Update 4 (§3.16 R6, §6 PA-31): 0 and false until G2
 			if (!V.Name.empty())
 			{
 				N.Voices.push_back(std::move(V));

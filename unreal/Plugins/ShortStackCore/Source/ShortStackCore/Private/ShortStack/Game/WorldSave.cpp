@@ -1364,6 +1364,12 @@ void World::Finish()
 		}
 		for (const Honor& H : Titles)
 		{
+			// Update 4 (SPEC v1.7 §2.6.1, §6 PA-25): a Player of the Series belt is no bracelet ("The Championship Online 2027 Player of
+			// the Series" would read as one below); no such Honor exists before G1.
+			if (IsCrownHonor(H))
+			{
+				continue;
+			}
 			if (H.Npc != N.Id)
 			{
 				continue;

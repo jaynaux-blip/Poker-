@@ -151,6 +151,12 @@ std::string TextWholeDollars(Chips C)
 /** How they arrived, in a sentence (the same every time for the same person). */
 std::string ArrivalText(const World& W, const Npc& N)
 {
+	// Update 4 (SPEC v1.7 §3.2.2, §6 PA-30): someone the Scene Book brought has their cause's line (G2). Nobody has a moment before
+	// then, so every line below is today's.
+	if (N.Moment > 0)
+	{
+		return scene::ArrivalLine(W, N);
+	}
 	const uint32_t H = Fnv1a(N.Name);
 	const int Years = std::max(1, (N.Arrived - N.Joined) / 365);
 	int Y = 0;
@@ -195,6 +201,9 @@ std::string ArrivalText(const World& W, const Npc& N)
 		}
 		return With ? "Signed up after watching " + With->Name + " at a televised final table." : "Signed up after a night of watching poker on TV.";
 	case Arrival::Streamer: return "Started a Kast channel on day one: learning poker live, one stream at a time.";
+	case Arrival::Festival:  // Update 4's causes (§6 PA-20): only the Scene Book brings them, and their line is scene::ArrivalLine's
+	case Arrival::Satellite:
+	case Arrival::ForYou:
 	case Arrival::None:
 	case Arrival::Count: break;
 	}
@@ -234,6 +243,7 @@ std::string StepText(const Step& S)
 	case StepKind::Retired: return "Retired.";
 	case StepKind::PlayerOfYear: return "Named " + S.What + " for " + std::to_string(YearOf(S.Day - 1)) + ".";
 	case StepKind::HallOfFame: return "Inducted into the Hall of Fame, class of " + std::to_string(S.Place > 0 ? S.Place : YearOf(S.Day)) + ".";
+	case StepKind::Noticed: // Update 4 (§5.7, §6 PA-20): G4's "made a name" step, never marked before then
 	case StepKind::Count: break;
 	}
 	return "";
@@ -360,6 +370,7 @@ Profile World::ProfileOf(int Id) const
 		Mo.Text = StepText(S);
 		Pr.Journey.push_back(std::move(Mo));
 	}
+	story::ProfileExtras(*this, N, Pr); // Update 4 (SPEC v1.7 §3.19, §6 PA-30): the card's story (no-op until G2)
 	return Pr;
 }
 
@@ -436,6 +447,12 @@ bool World::Headline(const WorldEvent& E, std::string& Title, std::string& Body,
 		Body = Grouped(E.Value) + " entries didn't cover the guarantee. The site paid the other " + TextWholeDollars(E.Amount) + ".";
 		Tag = "OVERLAY";
 		return true;
+	}
+	// Update 4 (SPEC v1.7 §3.13, §3.15 R3, §3.19; §6 PA-20, PA-30): the story's own lines (G2, true with FlagStory only). Neither kind
+	// is posted before G2, and FestivalCrown (G1) falls to the default below: false.
+	if (E.Kind == EventKind::TpiMark || E.Kind == EventKind::SceneEra)
+	{
+		return story::Headline(*this, E, Title, Body, Tag);
 	}
 	const Npc* N = Get(E.Npc);
 	if (!N)
@@ -613,6 +630,10 @@ bool World::Headline(const WorldEvent& E, std::string& Title, std::string& Body,
 		Tag = "KAST";
 		return true;
 	case EventKind::Debut:
+		if (N->Moment > 0)
+		{
+			return story::Headline(*this, E, Title, Body, Tag); // Update 4 (§3.11, §6 PA-30): a book arrival's debut (G2)
+		}
 		Title = "A new name: " + Who;
 		Body = "Fresh on the scene and already turning heads.";
 		Tag = "NEW FACE";
@@ -661,12 +682,6 @@ bool World::Headline(const WorldEvent& E, std::string& Title, std::string& Body,
 	}
 	default: return false; // going broke, taking a stake: nobody's business
 	}
-}
-
-void World::NewsExtras(net::SiteId /*Site*/, double /*Now*/, std::vector<net::NewsItem>& /*Items*/) const
-{
-	// Update 4 (SPEC v1.7 §6 PA-10): Network::News calls this after its world-log blocks. A no-op until G2 (W-story's RISING and
-	// NEW FACES posts; the body may move to W-story's own file with the stub).
 }
 
 std::string World::Describe(int Id) const
@@ -918,7 +933,12 @@ std::string World::Report() const
 		O << "  newcomers: " << Fresh << " in the last month;";
 		for (int K = 1; K < static_cast<int>(Arrival::Count); ++K)
 		{
-			O << " " << ArrivalName(static_cast<Arrival>(K)) << " " << Came[static_cast<size_t>(K)] << (K + 1 < static_cast<int>(Arrival::Count) ? "," : "");
+			// Update 4 (§6 PA-20): the Scene Book's causes (Festival, Satellite, ForYou) are listed once anyone arrived that way.
+			if (K > static_cast<int>(Arrival::Streamer) && Came[static_cast<size_t>(K)] == 0)
+			{
+				continue;
+			}
+			O << (K > 1 ? "," : "") << " " << ArrivalName(static_cast<Arrival>(K)) << " " << Came[static_cast<size_t>(K)];
 		}
 		O << "\n";
 	}

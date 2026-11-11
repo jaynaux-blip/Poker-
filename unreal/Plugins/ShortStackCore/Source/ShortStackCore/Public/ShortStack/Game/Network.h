@@ -184,6 +184,9 @@ struct Placing
 	Chips Prize = 0;
 	std::string Name;    // Player -2: their screen name
 	std::string Country; // and flag
+	/** Update 4 (SPEC v1.7 §5.4 R5, §6 PA-21; appended): a crowd member's seat keeps Player -2 and carries their serial (0: none;
+	 *  written on the res line only when non-zero, G4). */
+	uint32_t Crowd = 0;
 };
 
 struct EventResult

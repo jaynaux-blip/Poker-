@@ -2323,7 +2323,9 @@ void Director::FinalTableCalls(const Tournament& T)
 				return "representing " + std::string(B->Id == "luckypenny" ? "the " : "") + B->Short;
 			}
 		}
-		return std::string();
+		// Update 4 (SPEC v1.7 §3.16 R6, §6 PA-31): after badges and patches, a story honorific from public facts (G2; "" until then,
+		// Rank untouched).
+		return world::story::PaHonor(P.Name, Rank);
 	};
 	auto FormOf = [](const std::string& H) -> std::string {
 		const auto Ends = [&H](const std::string& Tail) { return H.size() >= Tail.size() && H.compare(H.size() - Tail.size(), Tail.size(), Tail) == 0; };

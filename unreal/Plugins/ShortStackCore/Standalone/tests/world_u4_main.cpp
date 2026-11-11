@@ -5,7 +5,10 @@
 // fixture) and "big" (1,100 days to the scene's 10,000, then to day 1,460) run outside ctest. The lead's file (A3's slice harness);
 // each track's checks are in its own file: _scene (W-arrive), _growth (W-growth), _story (W-story), u4_session.cpp (W-table, then
 // S-crowd), _crowd (S-crowd), _promote (S-promote), _scale (S-scale).
-// Phase A (§6 PA-48, the lead): the suite is registered and runs empty (A3 adds the slice harness in A-2).
+// Phase A (§6 PA-48, the lead): the suite is registered and runs empty (A3 adds the slice harness in A-2). The story-surfaces seat
+// harness (§6 PA-49, u4_seat_harness.h) is included so it compiles with the suite; W-table's fidelity_exact runs it at G2.
+#include "u4_seat_harness.h"
+
 #include <chrono>
 #include <cstdio>
 #include <string>
