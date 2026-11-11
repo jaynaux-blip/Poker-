@@ -1553,6 +1553,13 @@ void Draw(const Pen& P, Glyph G, const Tone& T)
 	case Glyph::Trophy: GTrophy(P, T); break;
 	case Glyph::Spade: GSpade(P, T); break;
 	case Glyph::Sprout: GSprout(P, T); break;
+	// Update 4 (§2.7.4; Phase A, §6 PA-44): the festivals' six, drawn as Star until F-look's bodies (G1).
+	case Glyph::Mirror:
+	case Glyph::PushButton:
+	case Glyph::Seal:
+	case Glyph::TwinStars:
+	case Glyph::Pennant:
+	case Glyph::Sceptre: GStar(P, T); break;
 	case Glyph::Count: break;
 	}
 }
@@ -1610,6 +1617,14 @@ enum class Frame : int
 	Snowcut,  // winter
 	Scallop,  // spring
 	Ornament, // the holidays
+	// Update 4 (SPEC v1.7 §2.7.4; Phase A, §6 PA-44): the festivals' frames, outlined as the medallion until F-look's bodies (G1); FrameOf
+	// returns none of them before (festart::LookFor's frame is read first from G1).
+	Arch,       // FEIGN
+	Tower,      // PUSH
+	Octagon,    // WRIT
+	Proscenium, // GRIT
+	Pavilion,   // PENNANT (v1.6)
+	Keyhole,    // REIGN (v1.6)
 };
 
 /** "win27" -> "win". */
@@ -1699,6 +1714,12 @@ std::vector<Vec2> FramePts(Frame F, float K)
 		break;
 	case Frame::Sunburst:
 	case Frame::Medallion:
+	case Frame::Arch: // Update 4's six (§6 PA-44): the medallion's outline until G1
+	case Frame::Tower:
+	case Frame::Octagon:
+	case Frame::Proscenium:
+	case Frame::Pavilion:
+	case Frame::Keyhole:
 		P = ArcPts(0.0f, 0.0f, 0.92f, 0.92f, 0.0f, TwoPiF - TwoPiF / 72.0f, 71);
 		break;
 	}

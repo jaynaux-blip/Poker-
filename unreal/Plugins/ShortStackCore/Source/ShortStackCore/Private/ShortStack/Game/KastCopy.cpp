@@ -1619,11 +1619,14 @@ std::string PeakLine(int Peak, int MomentAtPeak, const std::string& Clock)
 	{
 		return KcFill(AtMoment, {{"Peak", Grouped(Peak)}, {"At", OnRaid}, {"Time", Clock}});
 	}
-	if (MomentAtPeak < 0 || MomentAtPeak >= static_cast<int>(Moment::Count))
+	// A moment with no label yet reads the plain line (Update 4, Phase A, §6 PA-41: kast::Moment::Milestone's label is B-session's at
+	// G3, and nothing fires it before; every older moment has its label, so their lines are as they were).
+	const std::string At = MomentAtPeak < 0 || MomentAtPeak >= static_cast<int>(Moment::Count) ? std::string() : KcText(("k17.at." + std::to_string(MomentAtPeak)).c_str());
+	if (At.empty())
 	{
 		return KcFill(Plain, {{"Peak", Grouped(Peak)}, {"Time", Clock}});
 	}
-	return KcFill(AtMoment, {{"Peak", Grouped(Peak)}, {"At", KcText(("k17.at." + std::to_string(MomentAtPeak)).c_str())}, {"Time", Clock}});
+	return KcFill(AtMoment, {{"Peak", Grouped(Peak)}, {"At", At}, {"Time", Clock}});
 }
 
 std::string NewFollowersLine(int N, bool Best)

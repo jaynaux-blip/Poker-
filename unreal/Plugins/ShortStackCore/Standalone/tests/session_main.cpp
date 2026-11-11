@@ -6559,6 +6559,15 @@ size_t KastU3PartOf(const std::string& Text, size_t Start, size_t End)
 }
 
 /** The bytes of the creator update's Kast lines: kast\tmo whole, and the fields appended to the old kast\t lines. */
+// Update 4 (update 4 SPEC v1.7 §1.7, §3.21, §4.15.2; Phase A, §6 PA-43): the session's new lines are YOUR RUN's run\t (G3) and the
+// Notebook's nb\t (G2), each written only once its Update4LinesRead bit is set; together <= 8 KB (G3's share <= 6 KB, YourRunBytes).
+
+/** The bytes Update 4's session lines take (run\t and nb\t). */
+size_t LineBytesU4(const std::string& Text)
+{
+	return LineBytes(Text, {"run\t", "nb\t"});
+}
+
 size_t LineBytesKastU3(const std::string& Text)
 {
 	size_t Bytes = 0;

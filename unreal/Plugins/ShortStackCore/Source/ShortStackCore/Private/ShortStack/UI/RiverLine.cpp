@@ -1353,10 +1353,19 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 	{
 		VideoApp(Now); // Rerun (update 2 §4.8; RiverLineVideo.cpp, ui-video's)
 	}
+	else if (AppShown == App::Notebook)
+	{
+		NotebookApp(Now); // update 4 (§3.19.1): the Notebook (RiverLineNotebook.cpp, W-ui's at G2; never opened before it)
+	}
 	else
 	{
 		BankApp(Now);
 	}
+	// Update 4 (SPEC v1.7 §2.8.5, §5.9; Phase A, §6 PA-46, PA-47): the overlay stage, over the app's frame and under the toasts and the
+	// taskbar: the champion's, the belt's, a mark's and a title's moments and the strip's popover (RiverLineFestival.cpp, F-hubs at G1),
+	// then the light card (RiverLineCrowdCard.cpp, S-ui at G4). Both draw nothing before their gates.
+	FestivalOverlays(Now);
+	CrowdCard(Now);
 	// Badges earned since the laptop last looked (C10): taken once a frame, never under a time skip or a result card; each
 	// gets its toast (the session plays the sound and tells Kast's chat). Nor before the player logs in: the host draws the laptop
 	// behind the title screen too (the save loaded, nobody at the desk), where the toasts and their alert would go unseen.
@@ -2257,6 +2266,16 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 				ShowPlayer(Known->second, Now);
 			}
 		}
+		else if (!IsHero && S.FieldCrowd.count(Seat.Id) > 0)
+		{
+			// Update 4 (SPEC v1.7 §5.5 R3; Phase A, §6 PA-47): a crowd seat's name opens the light card (FieldCrowd is empty before G4).
+			const Ui::ClickState St = UI.Clickable("seatcrowd" + Seat.Id, Box);
+			NameHover = St.Hover;
+			if (St.Clicked)
+			{
+				ShowCrowd(Seat.Name, Now);
+			}
+		}
 		// The HUD line (g1-audit L10): on by default at a look that says so (RunItTwice's pro default), else Session::Hud.
 		const TPlayer* Pl = rlsites_detail::SitesHudOn(*this, S, Look) && !IsHero ? S.PlayerById(Seat.Id) : nullptr;
 		const std::string Hud = Pl && Pl->Hands >= 3 ? "VPIP " + std::to_string(static_cast<int>(JsRound(static_cast<double>(Pl->VpipHands) / Pl->Hands * 100.0))) + " \xC2\xB7 PFR " +
@@ -2528,6 +2547,12 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 				}
 			}
 		}
+		// Update 4 (SPEC v1.7 §3.17 R4; Phase A, §6 PA-47): the seat's one pill, over the bubble or the card (RiverLineStoryArt.cpp;
+		// no seat has one before G2).
+		if (Seat.Pill != 0)
+		{
+			DrawSeatPill(Seat, Box, Now);
+		}
 		C->SetAlpha(A0);
 		return;
 	}
@@ -2669,6 +2694,16 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 			ShowPlayer(Known->second, Now);
 		}
 	}
+	else if (!IsHero && S.FieldCrowd.count(Seat.Id) > 0)
+	{
+		// Update 4 (SPEC v1.7 §5.5 R3; Phase A, §6 PA-47): a crowd seat's name opens the light card (FieldCrowd is empty before G4).
+		const Ui::ClickState St = UI.Clickable("seatcrowd" + Seat.Id, Plate);
+		NameHover = St.Hover;
+		if (St.Clicked)
+		{
+			ShowCrowd(Seat.Name, Now);
+		}
+	}
 	UI.Text(Seat.Name, Plate.X + 62.0f, P.Y - 6.0f, Ts(16.0f, 700, Seat.IsRival ? Hex(0xff8da0) : NameHover ? pal::Accent : pal::Ink, Align::Left, Baseline::Alphabetic, false, Pw - 72.0f));
 	if (S.T && S.T->Spec.BountyCents > 0 && !S.T->Spec.MysteryBounty)
 	{
@@ -2685,6 +2720,12 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 	{
 		const double InBB = static_cast<double>(Seat.Stack) / Bb;
 		UI.Text(Fixed(InBB, InBB < 10.0 ? 1 : 0) + " BB", Plate.X + Pw - 12.0f, P.Y + 19.0f, Ts(13.0f, 500, pal::Muted, Align::Right));
+	}
+	// Update 4 (SPEC v1.7 §3.17 R4; Phase A, §6 PA-47): the plate's one pill, right of the name (RiverLineStoryArt.cpp; no seat has one
+	// before G2).
+	if (Seat.Pill != 0)
+	{
+		DrawSeatPill(Seat, Plate, Now);
 	}
 	C->SetAlpha(1.0f);
 
@@ -3928,6 +3969,12 @@ bool RiverLine::DebugOpen(const std::string& Args)
 			OpenApp(App::Video, Now);
 		}
 		return true;
+	}
+	if (Name == "notebook")
+	{
+		// Update 4 (SPEC v1.7 §3.19.1, §8.7; Phase A, §6 PA-50): ss.Laptop.Open notebook [tab], through the same command (never
+		// registered a second time). RiverLineNotebook.cpp's NotebookOpen (W-ui's at G2) opens nothing before then, so this says so.
+		return More <= 1 && NotebookOpen(More == 1 ? Words[1] : std::string(), Now);
 	}
 	if (Name == "burner")
 	{

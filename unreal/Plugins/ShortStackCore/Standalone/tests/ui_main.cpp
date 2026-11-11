@@ -2592,7 +2592,9 @@ void EventArtGallery()
 		ss::ui::DrawList L;
 		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
 		SheetBackground(C, "EVENT ART \xC2\xB7 GLYPHS", "Every motif, white on the night");
-		const int Count = static_cast<int>(ea::Glyph::Count);
+		// Update 4 (SPEC v1.7 §2.7.4; Phase A, §6 PA-44): the six festival glyphs appended before Count are drawn as Star until F-look's
+		// bodies, so the sheet stops at Sprout; G1 moves the bound back to Count with eventart_glyphs' re-baseline.
+		const int Count = static_cast<int>(ea::Glyph::Sprout) + 1;
 		for (int K = 0; K < Count; ++K)
 		{
 			const float X = 90.0f + static_cast<float>(K % 12) * 128.0f;

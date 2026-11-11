@@ -406,6 +406,9 @@ enum class Moment : int
 	// The creator update (SPEC_CREATORS §2.2, §2.3.5): the hero's table reaches three left (the Session fires it where it fires
 	// FinalTable). Inert until core-kastroom's Room: OnMoment ignores it.
 	Top3,
+	// Update 4 (SPEC v1.7 §4.5.2; Phase A, §6 PA-41): the hero is in the last 1,000 or 100 of a big field (hype {6.0, 3, Hyped, 0.0}
+	// and its line, B-session's at G3). Never fired before G3.
+	Milestone,
 	Count,
 };
 SHORTSTACKCORE_API const char* MomentName(Moment M);

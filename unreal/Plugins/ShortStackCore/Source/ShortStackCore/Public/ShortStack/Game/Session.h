@@ -2,7 +2,9 @@
 
 #include "ShortStack/AI/Grading.h"
 #include "ShortStack/Game/Badges.h"
+#include "ShortStack/Game/BigField.h"
 #include "ShortStack/Game/Chat.h"
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Fuse.h"
 #include "ShortStack/Game/Gear.h"
 #include "ShortStack/Game/Kast.h"
@@ -20,6 +22,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 
 namespace ss
@@ -50,6 +53,9 @@ enum class RightTab : int
 	Chat,
 	Payouts,
 	Stream, // Kast chat, while live
+	// Update 4 (SPEC v1.7 §4.7.1; Phase A, §6 PA-39): CHIP COUNTS, offered only at a modelled field's table (over 3,000), so every
+	// existing table and its tab bar stay as they are. Nothing selects it before G3 (B-ui's tab, B-session's Session::CountsView).
+	Counts,
 };
 
 enum class SoundId : int
@@ -90,6 +96,18 @@ enum class SoundId : int
 	KastRise,  // a rising airy shimmer, 0.35: Heat's tier-up at the commit
 	KastCall,  // a drum roll and a hit, 0.45: Hold or Crack's reveal
 	KastShine, // a bright milestone sting, 0.5: First Follower, the milestones
+	// Update 4 (SPEC v1.7 §2.7.6, §9.3; Phase A, §6 PA-36): nine cues, silent in Audio/Synth.cpp (an empty render, which the host never
+	// plays) and never selected or played until their gates write their bodies: the festivals' stings, the champion's and the applause
+	// under it (F-look, G1); the Notebook's pencil (W-ui, G2); the big field's beat and the crowd's swell and ooh (B-ui, G3).
+	FestRiver,     // RiverLine's festival sting: a three-note brass fanfare, 1.2 s
+	FestIgnite,    // Ignite's: a carnival organ hit with a cymbal swell, 0.9 s
+	FestRit,       // RunItTwice's: an inharmonic struck bell, 2.0 s
+	FestChampion,  // the champion's and the belt's moments: a rising major arpeggio into a held chord, 2.4 s
+	NbPencil,      // a new Notebook beat, FOLLOW, the PASSED YOU slide's end: a 40 ms band-passed transient
+	BigBeat,       // the big-field beats: a two-tone rising chime, 0.4 s
+	CrowdSwell,    // a broadcast final table forms: a pink-noise swell, 2.5 s
+	CrowdApplause, // under FestChampion and on the CHAMPION card: noise-burst applause, 3 s
+	CrowdOoh,      // a called all-in at a broadcast final table: a vowel-formant swell
 };
 
 /**
@@ -99,6 +117,38 @@ enum class SoundId : int
 struct StrikeConfirm
 {
 	bool Second = false;
+};
+
+/**
+ * Update 4 (SPEC v1.7 §3.17 R4; Phase A, §6 PA-38): the one pill an online seat plate shows, by priority (a lower value wins).
+ * Never saved; SeatVis::Pill holds it as a uint8_t. None until G2 (Session's PillFor, W-table's body in SessionTable4.cpp).
+ */
+enum class SeatPill : uint8_t
+{
+	None,
+	PassedYou,         // 30 days after they passed the hero in the TPI
+	Rival,
+	DefendingChampion, // G1's defending champion of any brand
+	CameForYou,        // the arrival's first 90 days
+	Following,
+	Rising,
+	NewFace,           // 60 days from arrival
+	Met,               // MET {n}x, n >= 2 (SeatVis::PillN)
+};
+
+/**
+ * Update 4 (SPEC v1.7 §2.8.5; Phase A, §6 PA-37): a moment the UI plays once (Session::PeekFestMoment; not saved, but the belt's and
+ * a mark's done keys in Life.Sites.Done). Kind: 1 a festival Main's title, 2 the belt, 3 another festival event, 4 a mark, 5 a
+ * championship's Mini or Micro title. None before G1 (F-world's body in SessionFest.cpp).
+ */
+struct FestMoment
+{
+	int Kind = 0;
+	fest::Brand Which = fest::Brand::None;
+	std::string Key;
+	Chips Prize = 0;
+	int Year = 0;
+	int Mark = 0, Rank = 0, Scorers = 0;
 };
 
 /** What the viewer sees at one seat of the hero's table. */
@@ -131,6 +181,11 @@ struct SeatVis
 	double DealtAt = 0.0;
 	/** The one badge the seat shows on the network (§5, rule C1): badge::Top in its Network scope; K == Count for none. */
 	badge::Badge Top;
+	// Update 4 (SPEC v1.7 §3.17 R4-R5; Phase A, §6 PA-38): the plate's one pill (a SeatPill; 0 none) with its count (MET {PillN}x), and
+	// the hero's notes line under the HUD line. BuildSeats sets them through PillFor and NoteFor: none and "" before G2.
+	uint8_t Pill = 0;
+	int16_t PillN = 0;
+	std::string Note;
 };
 
 /** Where an animated chip stack or card flies from or to. */
@@ -463,9 +518,11 @@ public:
 	 * Registers for any joinable listing (the network schedule builds them); pays the buy-in and opens the table. Returns ""
 	 * when it registered, else why not. Update 3 (W3; the gate lands with Phase A's core seams): a registration on any site a running deal's clause flags
 	 * (sponsor::WouldStrike) is refused without Confirm.Second (no table, no debit, no strike). RakeOverride >= 0 is the fee
-	 * the rake hooks see instead of the spec's FeeCents (FUSE's real fee, §2.6 F7).
+	 * the rake hooks see instead of the spec's FeeCents (FUSE's real fee, §2.6 F7). Update 4 (SPEC v1.7 §4.3.1; Phase A, §6 PA-39):
+	 * Pick is the register strip's tile for a field over 3,000 (EVERY HAND, KEY SPOTS, JUMP); None keeps today's table, and every
+	 * registration passes None until B-session's plans land (G3).
 	 */
-	SHORTSTACKCORE_API std::string RegisterEvent(const LobbyEvent& Listing, StrikeConfirm Confirm = {}, Chips RakeOverride = -1);
+	SHORTSTACKCORE_API std::string RegisterEvent(const LobbyEvent& Listing, StrikeConfirm Confirm = {}, Chips RakeOverride = -1, bigfield::Pick Pick = bigfield::Pick::None);
 
 	void DealerLine(const std::string& Text);
 	void SystemLine(const std::string& Text);
@@ -874,6 +931,41 @@ public:
 	SHORTSTACKCORE_API std::vector<int> IdeasSeen() const;
 	SHORTSTACKCORE_API void SeeIdeas(const std::vector<int>& IdeaIds);
 
+	// ------------------------------------------------------------ update 4 (update 4 SPEC v1.7 §6.4)
+	// Festival Season, the Long Way Up, the Big Field and the Scene at 10,000. Declared in Phase A and frozen after it (append-only,
+	// by patch to the lead); the bodies are the gates' tracks' (SessionFest.cpp, SessionStory.cpp, SessionTable4.cpp, SessionBig.cpp,
+	// and WorldScene.cpp and WorldGrowth.cpp for two debug bodies), stubs that keep today's behaviour until they land.
+	// ---- Festival Season (§2.8.5, §2.9: SessionFest.cpp, F-world at G1)
+	/** The champion's, the belt's, a mark's or a title's moment waiting to play (nullopt: none). Phase A: none. */
+	SHORTSTACKCORE_API std::optional<FestMoment> PeekFestMoment() const;
+	/** The moment was seen: the belt's and a mark's insert their done key ("festbelt:<key>", "festmark:<key>") into Life.Sites.Done. */
+	SHORTSTACKCORE_API void DoneFestMoment();
+	/** CheckCalendar's step, right after SitePlayStep: the belt and mark texts, the crown letter, crown tickets and step refunds, each
+	 *  keyed (idempotent across a skip and a reload). Phase A: nothing. */
+	SHORTSTACKCORE_API void FestStep(double From, double To);
+	// ---- The Long Way Up (§3.19: SessionStory.cpp, W-story and W-ui at G2)
+	/** The Notebook's taskbar icon (§3.19.1: from the first laptop open on world day 2). Phase A: false (the taskbar skips it). */
+	SHORTSTACKCORE_API bool NotebookShown() const;
+	/** The player card's fifth tab, STORY (§3.19.2). Phase A: false (the card keeps its four tabs). */
+	SHORTSTACKCORE_API bool StoryTabShown() const;
+	// ---- The Big Field (§4.7, §4.8, §4.10, §4.13: SessionBig.cpp, B-session at G3; RegisterEvent's Pick above)
+	/** Re-entry on an appended rival festival template (§4.13): pays through PayEntry and seats a fresh stack. "" or why not; Phase A:
+	 *  refuses. */
+	SHORTSTACKCORE_API std::string Reenter(const std::string& EventId);
+	/** Finishes every play-on now (WorldSkip, a scene exit's travel hook, the destructor; §4.10.3). Phase A: there are none. */
+	SHORTSTACKCORE_API void DrainPlayOns();
+	/** CHIP COUNTS at a modelled field's table, refreshed once a tick, never per frame (§4.7). Phase A: an empty view. */
+	SHORTSTACKCORE_API const bigfield::CountsView& CountsView() const;
+	/** The final-table broadcast kit's view of the table in front (§4.8.2). Phase A: off. */
+	SHORTSTACKCORE_API const bigfield::Broadcast& BroadcastView() const;
+	// ---- Debug (game/Update4Commands.cpp, §8.7): each body answers that it isn't built yet until its gate fills it.
+	SHORTSTACKCORE_API std::string DebugFest(const std::string& Args);   // ss.Fest.* (SessionFest.cpp, F-world, G1)
+	SHORTSTACKCORE_API std::string DebugScene(const std::string& Args);  // ss.Scene.*, ss.Turn.* (WorldScene.cpp, W-arrive, G2)
+	SHORTSTACKCORE_API std::string DebugStory(const std::string& Args);  // ss.Story.*, ss.Tpi.* (SessionStory.cpp, W-story, G2)
+	SHORTSTACKCORE_API std::string DebugGrowth(const std::string& Args); // ss.Growth.* (WorldGrowth.cpp, W-growth, G2)
+	SHORTSTACKCORE_API std::string DebugCrowd(const std::string& Args);  // ss.Crowd.* (SessionTable4.cpp, S-crowd, G4)
+	SHORTSTACKCORE_API std::string DebugBig(const std::string& Args);    // ss.Big.* (SessionBig.cpp, B-session, G3)
+
 	// Who is who in the tournament being played (player id -> country; regulars from the network).
 	std::map<std::string, std::string> FieldCountry;
 	std::set<std::string> FieldRegulars;
@@ -883,6 +975,9 @@ public:
 	std::set<int> FieldMet;
 	std::set<int> FieldGreeted;
 	std::vector<std::pair<int, Chips>> FieldPots;
+	/** Update 4 (SPEC v1.7 §5.5 R3; Phase A, §6 PA-38): the crowd's people in it, player id -> crowd serial (a seat's click opens the
+	 *  light card). Empty until G4 (NameCrowdSeats). */
+	std::map<std::string, uint32_t> FieldCrowd;
 	// Bounties and seats in the tournament being played.
 	std::map<std::string, Chips> Bounties; // player id -> bounty on their head (PKO)
 	Chips BountyWon = 0;
@@ -942,6 +1037,7 @@ private:
 		std::set<int> FieldMet;
 		std::set<int> FieldGreeted;
 		std::vector<std::pair<int, Chips>> FieldPots;
+		std::map<std::string, uint32_t> FieldCrowd; // Update 4 (§5.5): empty until G4
 		std::map<std::string, Chips> Bounties;
 		Chips BountyWon = 0;
 		int Knockouts = 0;
@@ -1100,6 +1196,36 @@ private:
 	void Conduct(sponsor::Breach Why, double World);
 	/** The player's badges (HeroBadges; SessionBadges.cpp keeps them). */
 	badge::Set HeroSet;
+	// Update 4's hooks in Session.cpp (SPEC v1.7; Phase A, §6 PA-38, PA-39), bodies in the gates' files: stubs that keep today's
+	// behaviour until they land. At the table (SessionTable4.cpp: W-table at G2, S-crowd's crowd branches at G4; §3.17, §5.5); the
+	// bodies check the day themselves (days 0-1 keep today's code, §3.17).
+	/** NameField's fresh faces: who in Who's shuffled order goes first, toward the player's table. Phase A: today's fresh-faces block,
+	 *  verbatim (G2: the seating rule, §3.17 R2). */
+	void SeatStoryRule(std::vector<int>& Who, int Today);
+	/** NameField's naming loops (the field's and FUSE's), right after a world person takes seat P (G2: seat fidelity, §3.17 R1).
+	 *  Phase A: nothing. */
+	void ApplyFidelity(TPlayer& P, const world::Npc& N);
+	/** Before handles::Field names the rest (G4: crowd names, §5.5 R1-R2): names the seats of Rest it fills, takes them out of Rest
+	 *  and their names into Taken (and FieldCountry, FieldCrowd). Phase A: nothing. */
+	void NameCrowdSeats(std::vector<size_t>& Rest, std::set<std::string>& Taken);
+	/** BuildSeats: the plate's one pill (a SeatPill; PillN the n of MET nx) and the hero's notes line (§3.17 R4-R5). Phase A: none, "". */
+	uint8_t PillFor(const std::string& PlayerId, int Today, int16_t& PillN);
+	std::string NoteFor(const std::string& PlayerId, int Today);
+	/** BuildSeats: a crowd seat at the player's table, its first time in this event (G4: World::CrowdMet, §5.5 R3). Phase A: nothing. */
+	void CrowdMet(const std::string& PlayerId, int Today);
+	/** WorldStep, after its news loop: the Director's notes through StoryText, and Mail (SessionStory.cpp, W-story at G2, §3.15 R6).
+	 *  Phase A: the world keeps none. */
+	void DrainStoryNotes();
+	/** The field plays on (§4.10.1; SessionBig.cpp, B-session at G3): a busted hero's modelled tournament, stepped until it finishes,
+	 *  then delivered to the world (KnownPlaces, KnownFinalTable). At most bigfield::kPlayOnMax; always empty in Phase A. */
+	struct PlayOn
+	{
+		std::unique_ptr<Tournament> T;
+		std::string EventId;
+		std::map<std::string, int> FieldNpc;
+		double HoldUntil = 0.0;
+	};
+	std::vector<PlayOn> PlayOns;
 
 	SessionHooks& Hooks;
 	std::set<std::string> TextsSeen;

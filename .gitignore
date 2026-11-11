@@ -18,6 +18,9 @@ unreal/*.code-workspace
 # and Epic's license doesn't allow redistributing them. Rebuild them with
 # unreal/Content/Python/backroom_cast.py (needs an Epic account sign-in for the MetaHuman cloud).
 unreal/Content/ShortStack/Cast/
+# Free third-party asset packs (Fab and CC0 imports, Update 4 SPEC v1.7 §9.1) stay local too: the repo is public, and each pack's
+# license is logged in the asset ledger instead.
+unreal/Content/ThirdParty/
 __pycache__/
 # Intermediate textures and review renders from art/blender/build.py
 art/build/

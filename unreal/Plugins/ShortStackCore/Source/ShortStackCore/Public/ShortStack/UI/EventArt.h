@@ -95,6 +95,14 @@ enum class Glyph : int
 	Trophy,
 	Spade,
 	Sprout,
+	// Update 4 (SPEC v1.7 §2.7.4; Phase A, §6 PA-44): the festivals' motifs (FEIGN's mirror, PUSH's button, WRIT's seal, GRIT's twin
+	// stars; v1.6: PENNANT's pennant, REIGN's sceptre). Drawn as Star until F-look's bodies (G1); no series picks them before.
+	Mirror,
+	PushButton,
+	Seal,
+	TwinStars,
+	Pennant,
+	Sceptre,
 	Count,
 };
 

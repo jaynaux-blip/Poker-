@@ -6,7 +6,10 @@
 // today's rate, VolumeScale and BuyInScale 1.0. Growth::Default is the record's own test (nothing writes a record before G2).
 #include "ShortStack/Game/WorldGrowth.h"
 
+#include "ShortStack/Game/Session.h"
 #include "ShortStack/Game/World.h"
+
+#include <string>
 
 namespace ss
 {
@@ -81,4 +84,11 @@ void TurnProOnResults(World& /*W*/, Npc& /*N*/, int /*Day*/)
 }
 } // namespace grow
 } // namespace world
+
+// ---- ss.Growth.* (game/Update4Commands.cpp, §3.26, §6 PA-50): W-growth's from G2
+
+std::string Session::DebugGrowth(const std::string& /*Args*/)
+{
+	return "Not built yet: Growth comes with Update 4's G2.";
+}
 } // namespace ss

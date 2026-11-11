@@ -28,6 +28,11 @@ namespace rlrit_detail
 {
 struct Access; // RiverLineRitLeague.cpp (ui-rit)
 }
+// Update 4 (SPEC v1.7 §2.8.1; Phase A, §6 PA-46): the festival hub's file reaches the client's private state the same way.
+namespace rlfest_detail
+{
+struct Access; // RiverLineFestival.cpp (F-hubs)
+}
 
 /**
  * RiverLine: the fictional poker site running on the laptop. Draws the boot
@@ -92,6 +97,9 @@ public:
 		PennyDrop, // the Lucky Penny's delivery app: order food, eat and drink at home
 		Mail,      // the companies' letters: sponsors, Lantern Row, Finch School (next_segment_spec §3.9; RiverLineMail.cpp)
 		Video,     // update 2 (G2): Rerun, the video site (RiverLineVideo.cpp, ui-video's)
+		// Update 4 (SPEC v1.7 §3.19.1, §12 WO-2; Phase A, §6 PA-47): the hero's Notebook, the tenth taskbar app after Rerun
+		// (RiverLineNotebook.cpp, W-ui's at G2). The taskbar shows it only while Session::NotebookShown(): never in Phase A.
+		Notebook,
 	};
 	/** Kast's pages. */
 	enum class KastPage : int
@@ -170,6 +178,11 @@ public:
 	void ShowStatsGraph(int Graph) { StatsGraph = Graph; }
 	/** The event panel's tab: 0 overview, 1 payouts, 2 players (or the final table). */
 	void ShowEventTab(int Tab) { DetailTab = Tab; }
+	/**
+	 * Update 4 (SPEC v1.7 §5.9; Phase A, §6 PA-47): the light card of a crowd regular by name, over any page (from a seat plate, a
+	 * result row, a race row or a TPI list). RiverLineCrowdCard.cpp, S-ui's at G4: a stub that opens nothing before it.
+	 */
+	SHORTSTACKCORE_API void ShowCrowd(const std::string& Name, double Now);
 	KastPage CurrentKastPage() const { return KastShown; }
 	/** Update 2 (G3): the poker site the lobby shows (RiverLine until the rivals open). */
 	net::SiteId SiteShown = net::SiteId::RiverLine;
@@ -182,6 +195,7 @@ public:
 private:
 	friend struct rlignite_detail::Access;
 	friend struct rlrit_detail::Access;
+	friend struct rlfest_detail::Access;
 	// Update 3 (SPEC §1.11, §7.2): the poker client's frame. ClientFrame is today's TopBar and screen switch, verbatim; Draw
 	// calls it with Preview false, StreamPreview with Preview true (no player card, autoplay panel, AutoClosePanel, pointer
 	// holds or toasts). It branches first to a revamped rival's own frame (RiverLineIgnite.cpp, RiverLineRit.cpp); the
@@ -396,6 +410,23 @@ private:
 	void SiteCashier(double Now);
 	void PokerButton(const Rect& R, double Now);
 	void RewardsCard(const Rect& R, double Now);
+	// Update 4 (SPEC v1.7; declared in Phase A, §6 PA-46, PA-47; side state beside the class, as Mail's). Stubs that draw nothing until
+	// their gates. The festival hub, its moments and the Career page's pins (RiverLineFestival.cpp, F-hubs at G1, §2.8): Draw calls
+	// FestivalOverlays at its overlay stage; SeriesPage, IgniteFrame and RitSeriesPage route a festival series to FestivalHub from G1.
+	void FestivalHub(const Rect& R, const fest::Festival& F, double Now);
+	void FestivalOverlays(double Now);
+	void CareerPins(const Rect& R, double Now);
+	// The Notebook (RiverLineNotebook.cpp, W-ui at G2, §3.19.1): the app, and ss.Laptop.Open notebook [tab] (false: nothing opened).
+	void NotebookApp(double Now);
+	bool NotebookOpen(const std::string& Tab, double Now);
+	// The plate's one pill and the Notebook's taskbar mark (RiverLineStoryArt.cpp, W-ui at G2, §3.17 R4): DrawSeat calls DrawSeatPill
+	// only for a seat whose Pill isn't 0 (never in Phase A).
+	void DrawSeatPill(const SeatVis& Seat, const Rect& Plate, double Now);
+	void NotebookIcon(const Rect& R);
+	// The player card's STORY tab, its fifth (RiverLineCardStory.cpp, W-ui at G2, §3.19.2): Card is the card's rect.
+	void CardStory(const world::Profile& P, const Rect& Card, double Now);
+	// The light card's draw, over any page after the app's frame (RiverLineCrowdCard.cpp, S-ui at G4, §5.9).
+	void CrowdCard(double Now);
 
 	float GradeLabel(Grade G, const std::string& Rest, float X, float Y, const TextStyle& Style, bool Draw = true);
 	float ArrowText(const std::string& Left, const std::string& Right, float X, float Y, const TextStyle& Style);

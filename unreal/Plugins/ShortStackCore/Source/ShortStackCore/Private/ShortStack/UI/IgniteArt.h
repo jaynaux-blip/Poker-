@@ -6,6 +6,7 @@
 // and the gatekeepers stay single-sourced.
 #pragma once
 
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Game/SitePlay.h"
@@ -157,6 +158,10 @@ struct IgniteBand
 	bool Fireworks = false;  // the Sunday Blaze is running (Sun 7-9 PM)
 	bool Wildfire = false;   // the series is running: bunting and bonfires
 	uint64_t SkinKey = 0;    // Skin::Current().Key(), mixed into the static layer's cache key
+	// Update 4 (SPEC v1.7 §2.7.4; Phase A, §6 PA-45): a festival Live on Ignite (FEIGN's arch, PUSH's tower, PENNANT's pavilion) and
+	// its day of how many; None and 0 until F-look's band (G1).
+	fest::Brand Fest = fest::Brand::None;
+	int FestDay = 0, FestDays = 0;
 };
 /** The static skyline (the sky, the bay's far shore, the attractions' bodies, the deck and the water), cached per time bucket and skin. */
 void IgniteBoardwalkStatic(Canvas& C, const IgniteBand& B);

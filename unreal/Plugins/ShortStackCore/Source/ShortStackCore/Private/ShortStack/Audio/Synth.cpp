@@ -990,6 +990,19 @@ std::vector<float> Render(SoundId Id, float Volume, uint32_t Seed)
 	case SoundId::KastCall:
 	case SoundId::KastShine:
 		return CueRender(Id, V, R);
+	// Update 4 (SPEC v1.7 §9.3; Phase A, §6 PA-36): nine cues, silent until their gates write their bodies (F-look the four stings and
+	// CrowdApplause at G1, W-ui NbPencil at G2, B-ui BigBeat, CrowdSwell and CrowdOoh at G3). An empty render: the host plays nothing
+	// (UNightOneAudio::PlayPcm returns on an empty buffer), and nothing selects them before then.
+	case SoundId::FestRiver:
+	case SoundId::FestIgnite:
+	case SoundId::FestRit:
+	case SoundId::FestChampion:
+	case SoundId::NbPencil:
+	case SoundId::BigBeat:
+	case SoundId::CrowdSwell:
+	case SoundId::CrowdApplause:
+	case SoundId::CrowdOoh:
+		return std::vector<float>();
 	case SoundId::Win:
 		for (int I = 0; I < 8; ++I)
 		{

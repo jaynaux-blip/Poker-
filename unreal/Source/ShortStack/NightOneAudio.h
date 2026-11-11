@@ -7,6 +7,7 @@
 #include "NightOneAudio.generated.h"
 
 class UAudioComponent;
+class USoundBase;
 class USoundWaveProcedural;
 
 /**
@@ -73,6 +74,9 @@ public:
 
 private:
 	void PlayPcm(const std::vector<float>& Samples, float Volume, bool bAmbience = false, const FVector* At = nullptr, bool bVoice = false);
+	/** Update 4 (SPEC v1.7 §9.1 item 7; Phase A, §6 PA-36): a free asset's cue in place of a synthesized one, as an effect; At places it
+	 *  in the world. Play and PlayAt reach it only for a cue whose soft path is set and whose asset is there (none in Phase A). */
+	void PlayAsset(USoundBase* Sound, float Volume, const FVector* At);
 	float AmbienceLevel() const { return bMuted ? 0.0f : MasterVolume * AmbienceVolume; }
 
 	UPROPERTY(Transient)

@@ -448,6 +448,15 @@ struct State
 	 */
 	uint32_t Update3LinesRead = 0;
 
+	// ---- update 4 (update 4 SPEC v1.7 §1.7, §3.21, §4.15-§4.16): the session's two new line families, each written only once its
+	// Update4LinesRead bit is set: YOUR RUN's run\t (bigfield::WriteLines, G3) and the Notebook's nb\tseen (G2). G1 writes no session
+	// line (§12 FD-1), so bit 1 is unused.
+	/**
+	 * Not saved: Update4Line bits. A bit is set when the save had a line of its family, or when the feature first has state (the first
+	 * qualifying result; the Notebook's first open); NewCareer sets every bit (the SegShift precedent). Never in AfterParse (S10).
+	 */
+	uint32_t Update4LinesRead = 0;
+
 	SHORTSTACKCORE_API void Record(double At, const std::string& Label, Chips Amount, int Kind);
 	int TicketsFor(const std::string& TemplateId) const;
 };
@@ -475,6 +484,13 @@ enum Update3Line : uint32_t
 	// a kast\tmo line was read, by NewCareer, or at the first Stream::Start under the new model (Session::KastAfterStart);
 	// never in AfterParse, by the stream preview, by opening a Kast page or by Offline. Phase A-K: nothing sets it yet.
 	U3Kast = 4,
+};
+
+/** Bits of State::Update4LinesRead (update 4 SPEC v1.7 §1.7; Phase A, §6 PA-43): each feature writes its lines only once its bit is set. */
+enum Update4Line : uint32_t
+{
+	U4Run = 2,      // run\t: YOUR RUN (bigfield::WriteLines; B-session, G3)
+	U4Notebook = 4, // nb\tseen: the Notebook (W-ui, G2); an old save gets it the first time the Notebook opens
 };
 
 /**

@@ -7,6 +7,7 @@
 // disabled: nothing calls it, so World::Regulars stays empty and EmbercrestRegulars keeps today's per-day sort.
 #include "ShortStack/Game/WorldScene.h"
 
+#include "ShortStack/Game/Session.h"
 #include "ShortStack/Game/World.h"
 #include "ShortStack/Rng.h"
 #include "WorldSim.h"
@@ -121,4 +122,11 @@ std::vector<std::pair<int, int>> World::NewFacesWeek(net::SiteId /*Site*/, int /
 	return {};
 }
 } // namespace world
+
+// ---- ss.Scene.* and ss.Turn.* (game/Update4Commands.cpp, §3.26, §6 PA-50): W-arrive's from G2 (the held turn's switch is theirs)
+
+std::string Session::DebugScene(const std::string& /*Args*/)
+{
+	return "Not built yet: the Scene and the held turn come with Update 4's G2.";
+}
 } // namespace ss

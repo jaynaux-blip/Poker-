@@ -10,8 +10,10 @@
 #include "ShortStack/Equity.h"
 #include "ShortStack/Evaluator.h"
 #include "ShortStack/Game/Badges.h"
+#include "ShortStack/Game/BigField.h"
 #include "ShortStack/Game/Body.h"
 #include "ShortStack/Game/Coach.h"
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Handles.h"
 #include "ShortStack/Game/Live.h"
@@ -439,6 +441,13 @@ std::string SaveData::Serialize() const
 		video::WriteLines(L, Update2);
 		site::WriteLines(L, Update2);
 		Out << Update2;
+	}
+	{
+		// Update 4 (SPEC v1.7 §4.15.2; Phase A, §6 PA-43): YOUR RUN's run\t lines, written only once Update4LinesRead & U4Run is set
+		// (bigfield::WriteLines, B-session's body at G3: nothing before it), after Update 2's and before the world's.
+		std::string Update4;
+		bigfield::WriteLines(L, Update4);
+		Out << Update4;
 	}
 	for (const std::string& Note : WorldNotes)
 	{
@@ -1019,6 +1028,15 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 		{
 			// Update 2 (§6.4): autoplay, Rerun, the rival sites: their own lines (each sets its Update2LinesRead bit).
 		}
+		else if (bigfield::ReadLine(P, D.Life))
+		{
+			// Update 4 (SPEC v1.7 §4.15.2; Phase A, §6 PA-43): YOUR RUN's run\t, reserved (B-session's reader keeps it and sets U4Run at
+			// G3; until then the line is dropped, as any line the session doesn't know is).
+		}
+		else if (P.size() >= 2 && P[0] == "nb" && P[1] == "seen")
+		{
+			// Update 4 (SPEC v1.7 §3.21; Phase A, §6 PA-43): the Notebook's nb\tseen, reserved (W-ui's reader at G2; dropped until then).
+		}
 		else if (shop::ReadLine(P, D.Life))
 		{
 			// Northside: closet, fit, groom, visit, pawn, meal (§7.3).
@@ -1067,10 +1085,11 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 const char* SoundName(SoundId Id)
 {
 	static const char* const Names[] = {"chip", "chips", "card", "flip", "check", "fold", "turn", "win", "level", "bust", "click", "alert", "move", "allin", "bubble", "cash", "mail",
-		"igspark", "igpop", "igtick", "igfuse", "igboom", "ritblip", "ritflap", "ritbell", "ritstamp", "ritrank", "kastalert", "kastrise", "kastcall", "kastshine"};
+		"igspark", "igpop", "igtick", "igfuse", "igboom", "ritblip", "ritflap", "ritbell", "ritstamp", "ritrank", "kastalert", "kastrise", "kastcall", "kastshine",
+		"festriver", "festignite", "festrit", "festchampion", "nbpencil", "bigbeat", "crowdswell", "crowdapplause", "crowdooh"};
 	// A name for every id: the creator update's four (SPEC_CREATORS §5.4) came after RitRank without one, so SoundName read past
-	// the table for them.
-	static_assert(sizeof(Names) / sizeof(Names[0]) == static_cast<size_t>(SoundId::KastShine) + 1, "SoundName needs a name for every SoundId");
+	// the table for them. Update 4's nine (SPEC v1.7 §9.3; Phase A, §6 PA-36) follow KastShine.
+	static_assert(sizeof(Names) / sizeof(Names[0]) == static_cast<size_t>(SoundId::CrowdOoh) + 1, "SoundName needs a name for every SoundId");
 	return Names[static_cast<int>(Id)];
 }
 
@@ -1469,6 +1488,9 @@ void Session::WorldStep()
 			StoryText(Key, RivalName, It->Kind == world::EventKind::PlayerOfYear ? "player of the year. told you I never log off." : "gg. " + It->What + ". your move.");
 		}
 	}
+	// Update 4 (SPEC v1.7 §3.15 R6; Phase A, §6 PA-38): the Story Director's notes, after the news loop (SessionStory.cpp: none before
+	// G2).
+	DrainStoryNotes();
 	WorldNewsAt = LivingWorld.Clock();
 }
 
@@ -1553,6 +1575,8 @@ void Session::NewCareer(const hero::Character& Who, world::Start S)
 	// Update 3 (§1.8 S2): and every one of Update 3's. Each writer still writes only what holds something, so a new career's
 	// save has no new line until a feature has state.
 	Life.Update3LinesRead = life::U3SitePlay | life::U3Video;
+	// Update 4 (SPEC v1.7 §1.7; Phase A, §6 PA-43): and every one of Update 4's (nothing writes them before G2 and G3).
+	Life.Update4LinesRead = life::U4Run | life::U4Notebook;
 	// The creator update (SPEC_CREATORS §8.1): a new career's Kast is the new model's from the start (SessionKast.cpp).
 	KastNewCareer();
 	Person = Who;
@@ -1908,8 +1932,10 @@ void Session::Register(int Index)
 	RegisterEvent(L[static_cast<size_t>(Index)]);
 }
 
-std::string Session::RegisterEvent(const LobbyEvent& Listing, StrikeConfirm Confirm, Chips RakeOverride)
+std::string Session::RegisterEvent(const LobbyEvent& Listing, StrikeConfirm Confirm, Chips RakeOverride, bigfield::Pick /*Pick*/)
 {
+	// Update 4 (SPEC v1.7 §4.3.1; Phase A, §6 PA-39): the register strip's Pick is read from G3 (B-session: the table's plan for a field
+	// over 3,000); every registration passes None until then, and None is today's table.
 	// Update 3 (§7.2): the reason is returned ("" registered), so a refusal is observable.
 	if (!CanAfford(Listing))
 	{
@@ -2164,6 +2190,9 @@ void Session::BuildSeats()
 {
 	const TTable& Table = T->Tables.at(TableId);
 	Seats.assign(Table.Seats.size(), SeatVis());
+	// Update 4 (SPEC v1.7 §3.17 R4-R5, §5.5 R3; Phase A, §6 PA-38): the day the plate's pill and notes read (their bodies keep days 0-1
+	// as today).
+	const int Today = net::DayOf(WorldMinutes());
 	for (size_t S = 0; S < Table.Seats.size(); ++S)
 	{
 		const int Idx = Table.Seats[S];
@@ -2207,6 +2236,14 @@ void Session::BuildSeats()
 			V.Top = *Top;
 		}
 		V.Stack = P.Stack;
+		// Update 4 (§3.17 R4-R5, §5.5 R3; Phase A, §6 PA-38): one pill per plate and the hero's notes (none and "" before G2), and a crowd
+		// seat met at the player's table (none before G4). SessionTable4.cpp.
+		V.Pill = PillFor(P.Id, Today, V.PillN);
+		V.Note = NoteFor(P.Id, Today);
+		if (!P.IsHero && FieldCrowd.count(P.Id) > 0)
+		{
+			CrowdMet(P.Id, Today);
+		}
 	}
 }
 
@@ -3766,6 +3803,7 @@ void Session::SwapActive(TableRun& Run)
 	swap(FieldMet, Run.FieldMet);
 	swap(FieldGreeted, Run.FieldGreeted);
 	swap(FieldPots, Run.FieldPots);
+	swap(FieldCrowd, Run.FieldCrowd); // Update 4 (§5.5; Phase A, §6 PA-38): empty until G4
 	swap(Bounties, Run.Bounties);
 	swap(BountyWon, Run.BountyWon);
 	swap(Knockouts, Run.Knockouts);
@@ -5675,6 +5713,10 @@ std::vector<life::Mark> Session::Marks(double From, double To) const
 	Out.insert(Out.end(), Videos.begin(), Videos.end());
 	const std::vector<life::Mark> Sites = site::Marks(Life.Sites, From, To);
 	Out.insert(Out.end(), Sites.begin(), Sites.end());
+	// Update 4 (SPEC v1.7 §2.9.1; Phase A, §6 PA-37): every festival's opening and Main from its Announced phase, account or not
+	// (fest::Marks: none before G1).
+	const std::vector<life::Mark> FestMarks = fest::Marks(From, To, WorldMinutes());
+	Out.insert(Out.end(), FestMarks.begin(), FestMarks.end());
 	std::stable_sort(Out.begin(), Out.end(), [](const life::Mark& A, const life::Mark& B) { return A.At < B.At; });
 	return Out;
 }
@@ -5854,6 +5896,7 @@ void Session::NameField()
 	FieldMet.clear();
 	FieldGreeted.clear();
 	FieldPots.clear();
+	FieldCrowd.clear(); // Update 4 (§5.5; Phase A, §6 PA-38): empty until G4
 	// Update 3 (§2.6 F7, §1.9; dormant until G2): a FUSE seats two Ignite members online that hour, keyed on its tier and the
 	// tier's ordinal (fuse::SeatsFor), never this field's own Rng, so a reload seats the same two. The world planned no FUSE:
 	// nobody joins one in its books.
@@ -5891,6 +5934,8 @@ void Session::NameField()
 			{
 				FieldPros.insert(P.Id);
 			}
+			// Update 4 (SPEC v1.7 §3.17 R1; Phase A, §6 PA-38): FUSE's seats get the same fidelity overwrite (nothing before G2).
+			ApplyFidelity(P, *Member);
 		}
 		// Fewer members online than seats: a screen name for the rest, drawn from the FUSE's own id.
 		Rng Fr(FuseId + ":fuseseat");
@@ -5949,20 +5994,9 @@ void Session::NameField()
 		}
 	}
 	Nr.Shuffle(Who);
-	// Fresh faces first: a name or two the player has never seen before, at their own table.
-	{
-		const int Today = net::DayOf(WorldMinutes());
-		int Fresh = 0;
-		for (size_t K = 0; K < Who.size() && Fresh < 2; ++K)
-		{
-			const world::Npc* N = LivingWorld.Get(Who[K]);
-			if (N && N->Came != world::Arrival::None && Today - N->Arrived <= 60 && !LivingWorld.BondWith(N->Id))
-			{
-				std::swap(Who[static_cast<size_t>(Fresh)], Who[K]);
-				++Fresh;
-			}
-		}
-	}
+	// Fresh faces first: a name or two the player has never seen before, at their own table. Update 4 (SPEC v1.7 §3.17 R2; Phase A,
+	// §6 PA-38): the block lives in SessionTable4.cpp as SeatStoryRule, verbatim until G2's seating rule (days 0-1 keep it).
+	SeatStoryRule(Who, net::DayOf(WorldMinutes()));
 	// Seats by how the engine's bots play: each person takes the one most like them. A few open at the player's own
 	// table (the faces of the night); the rest are somewhere in the room.
 	std::map<int, std::vector<size_t>> SeatsBy;
@@ -6050,6 +6084,8 @@ void Session::NameField()
 		{
 			FieldPros.insert(P.Id);
 		}
+		// Update 4 (SPEC v1.7 §3.17 R1; Phase A, §6 PA-38): seat fidelity, the person's own profile (nothing before G2; never Nr).
+		ApplyFidelity(P, *N);
 	}
 	std::vector<size_t> Rest;
 	for (size_t I = 0; I < T->Players.size(); ++I)
@@ -6060,6 +6096,9 @@ void Session::NameField()
 			Rest.push_back(I);
 		}
 	}
+	// Update 4 (SPEC v1.7 §5.5 R1-R2; Phase A, §6 PA-38): the crowd names what it fills of the rest first (nothing before G4; its own
+	// fork, never Nr).
+	NameCrowdSeats(Rest, Taken);
 	const std::vector<handles::Identity> Ids = handles::Field(static_cast<int>(Rest.size()), Nr, Taken);
 	for (size_t K = 0; K < Rest.size() && K < Ids.size(); ++K)
 	{
@@ -6107,6 +6146,27 @@ void Session::ReportToWorld()
 		if (P.KnockedOutBy == Hero.Id && P.Busted)
 		{
 			Rp.HeroKnockedOut.push_back(It->second);
+		}
+		// Update 4 (SPEC v1.7 §3.17 R5; Phase A, §6 PA-38): what the player's tables saw of them, the engine's per-seat counters
+		// (World::NoteObserved keeps nothing before G2).
+		Rp.Seen.push_back({It->second, P.Hands, P.VpipHands, P.PfrHands});
+	}
+	// Update 4 (SPEC v1.7 §5.5 R4; Phase A, §6 PA-38): the crowd's places and who was still in (FieldCrowd is empty before G4; the world
+	// reads them from G4).
+	for (const TPlayer& P : T->Players)
+	{
+		const auto It = FieldCrowd.find(P.Id);
+		if (It == FieldCrowd.end())
+		{
+			continue;
+		}
+		if (P.Busted && P.Place > 0)
+		{
+			Rp.CrowdPlaces.push_back({It->second, P.Place});
+		}
+		else if (!P.Busted)
+		{
+			Rp.CrowdStillIn.push_back(It->second);
 		}
 	}
 	const auto By = FieldNpc.find(Hero.KnockedOutBy);
@@ -6203,6 +6263,12 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 		Life.Thirst = std::min(100.0, Life.Thirst + StepHours * life::ThirstPerHour * Rate);
 	}
 	const int Today = static_cast<int>(std::floor(To / net::MinutesPerDay));
+	// Update 4 (SPEC v1.7 §3.5 R1; Phase A, §6 PA-38): Kast's reach for the world's wake, once for each world day the step crosses
+	// (a skip runs every calendar day, so it is skip-invariant), with the channel's follower count. A no-op before G2.
+	for (int ReachDay = static_cast<int>(std::floor(From / net::MinutesPerDay)) + 1; ReachDay <= Today; ++ReachDay)
+	{
+		LivingWorld.NoteReach(ReachDay, Channel.Followers);
+	}
 	// (Not within a day of a real meal: she'd have heard about it.)
 	if (!WasHungry && Life.Hunger >= 75.0 && To >= Life.RealMealAt + net::MinutesPerDay)
 	{
@@ -6429,6 +6495,9 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 	SiteStep(From, To);
 	// Update 3 (§1.1): the rival sites' loops after the sites' own step; it steps only a book that already exists.
 	SitePlayStep(From, To);
+	// Update 4 (SPEC v1.7 §2.9.3; Phase A, §6 PA-37): Festival Season's texts, letters and crown tickets, right after the sites' loops
+	// (SessionFest.cpp: nothing before G1).
+	FestStep(From, To);
 	StakeStep(From, To);
 	BadgeStep(From, To);
 	BondTexts(From, To);

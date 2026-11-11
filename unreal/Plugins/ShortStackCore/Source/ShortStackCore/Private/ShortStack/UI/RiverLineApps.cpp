@@ -47,6 +47,7 @@ AppBrand BrandOf(RiverLine::App A)
 	case RiverLine::App::PennyDrop: return {"Penny Drop", 0xe23a4f, 0xa3122a};
 	case RiverLine::App::Mail: return {"Mail", 0x2f5d9e, 0x1f2a3a};
 	case RiverLine::App::Video: return {"Rerun", videoart::Marigold, videoart::Ink}; // update 2 §4.2: marigold on ink
+	case RiverLine::App::Notebook: return {"Notebook", 0xf7f2e7, 0x3a3a3a}; // update 4 §3.19.1: paper and graphite (shown from G2)
 	default: return {"RiverLine", 0x27d3c3, 0x1a8fd8};
 	}
 }
@@ -340,6 +341,12 @@ void RiverLine::AppIcon(App A, float X, float Y, float Sz)
 		videoart::Logo(*C, {X, Y, Sz, Sz});
 		return;
 	}
+	if (A == App::Notebook)
+	{
+		// Update 4 (SPEC v1.7 §3.19.1; Phase A, §6 PA-47): the Notebook's own mark (RiverLineStoryArt.cpp, W-ui's at G2).
+		NotebookIcon({X, Y, Sz, Sz});
+		return;
+	}
 	const AppBrand B = BrandOf(A);
 	const Rect R{X, Y, Sz, Sz};
 	C->FillRoundRect(R, Sz * 0.26f, Paint::Linear({X, Y}, {X + Sz, Y + Sz}, Hex(B.Col), Hex(B.Col2)));
@@ -406,7 +413,8 @@ void RiverLine::AppIcon(App A, float X, float Y, float Sz)
 		C->FillRoundRect({Cx - Sz * 0.26f, Cy - Sz * 0.17f, Sz * 0.52f, Sz * 0.34f}, Sz * 0.04f, W);
 		C->StrokePolyline({{Cx - Sz * 0.24f, Cy - Sz * 0.14f}, {Cx, Cy + Sz * 0.04f}, {Cx + Sz * 0.24f, Cy - Sz * 0.14f}}, false, Hex(B.Col), Sz * 0.05f, true);
 		break;
-	case App::Video: break; // drawn above (videoart::Logo)
+	case App::Video: break;    // drawn above (videoart::Logo)
+	case App::Notebook: break; // drawn above (NotebookIcon)
 	}
 }
 
@@ -447,11 +455,16 @@ void RiverLine::Taskbar(const Rect& R, double Now)
 	C->FillRect(R, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Hex(0x0c1422), Hex(0x060a12)));
 	C->FillRect({R.X, R.Y, R.W, 1.0f}, Rgba(255, 255, 255, 0.08f));
 	const life::Context Ctx = S.LifeContext();
-	// Rerun, the ninth (update 2 §4.8, §5.11), after Mail; its dot reads Rerun's own record of what's been seen.
-	const App Apps[9] = {App::RiverLine, App::ShiftLink, App::Burner, App::Bank, App::GearDrop, App::Kast, App::PennyDrop, App::Mail, App::Video};
+	// Rerun, the ninth (update 2 §4.8, §5.11), after Mail; its dot reads Rerun's own record of what's been seen. Update 4 (SPEC v1.7
+	// §3.19.1; Phase A, §6 PA-47): the Notebook, the tenth, only while the session shows it (never in Phase A: the bar is today's).
+	const App Apps[10] = {App::RiverLine, App::ShiftLink, App::Burner, App::Bank, App::GearDrop, App::Kast, App::PennyDrop, App::Mail, App::Video, App::Notebook};
 	float X = R.X + 8.0f;
 	for (const App A : Apps)
 	{
+		if (A == App::Notebook && !S.NotebookShown())
+		{
+			continue;
+		}
 		const AppBrand B = BrandOf(A);
 		if (A == App::RiverLine)
 		{

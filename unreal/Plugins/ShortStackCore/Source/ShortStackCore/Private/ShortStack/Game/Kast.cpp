@@ -355,7 +355,7 @@ bool KastTimedOut(const std::map<std::string, double>& TimedOutUntil, const std:
 }
 
 const char* const MomentNames[] = {"Register", "AllIn", "WonAllIn", "LostAllIn", "BadBeat", "BigPot", "Knockout", "Bubble", "InTheMoney", "FinalTable", "Win", "Bust", "Cashed", "BestPlay", "Blunder", "Rival", "LevelUp",
-	"Top3"};
+	"Top3", "Milestone"};
 static_assert(sizeof(MomentNames) / sizeof(MomentNames[0]) == static_cast<size_t>(Moment::Count), "a name for every Moment");
 
 /** How hard a moment hits: hype added, chat lines it sets off. */

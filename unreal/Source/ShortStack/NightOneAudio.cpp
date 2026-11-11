@@ -3,7 +3,9 @@
 #include "Components/AudioComponent.h"
 #include "Sound/SoundAttenuation.h"
 #include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
 #include "Sound/SoundWaveProcedural.h"
+#include "UObject/SoftObjectPath.h"
 
 namespace NightOneAudioDetail
 {
@@ -27,6 +29,33 @@ void Queue(USoundWaveProcedural* Wave, const float* Samples, int32 Count, float 
 		Pcm[I] = static_cast<int16>(FMath::Clamp(Samples[I] * Gain, -1.0f, 1.0f) * 32767.0f);
 	}
 	Wave->QueueAudio(reinterpret_cast<const uint8*>(Pcm.GetData()), Pcm.Num() * static_cast<int32>(sizeof(int16)));
+}
+
+/**
+ * Update 4 (SPEC v1.7 §9.1 item 7, §9.3; Phase A, §6 PA-36): the cues a free asset can replace, each a soft object path under
+ * /Game/ThirdParty/ (unreal/Content/ThirdParty/, git-ignored: the repo is public). Every path is empty in Phase A, so every cue plays
+ * its synthesized body; a gate's art owner fills one in the same change as its ledger row (F-look the bell and the applause at G1,
+ * W-ui the pencil at G2, B-ui the crowd's swell and ooh at G3). A path whose asset isn't there (a fresh clone) falls back to the
+ * synthesized body, as an empty one does.
+ */
+const TCHAR* SoftCuePath(ss::SoundId Id)
+{
+	switch (Id)
+	{
+	case ss::SoundId::FestRit:
+	case ss::SoundId::CrowdApplause:
+	case ss::SoundId::NbPencil:
+	case ss::SoundId::CrowdSwell:
+	case ss::SoundId::CrowdOoh:
+	default: return nullptr;
+	}
+}
+
+/** The asset to play for a cue: null when it has no soft path or its asset isn't there (the synthesized body plays). */
+USoundBase* SoftCue(ss::SoundId Id)
+{
+	const TCHAR* Path = SoftCuePath(Id);
+	return Path ? Cast<USoundBase>(FSoftObjectPath(FString(Path)).TryLoad()) : nullptr;
 }
 } // namespace NightOneAudioDetail
 
@@ -241,10 +270,29 @@ void UNightOneAudio::PlayPcm(const std::vector<float>& Samples, float Volume, bo
 	}
 }
 
+void UNightOneAudio::PlayAsset(USoundBase* Sound, float Volume, const FVector* At)
+{
+	const float Level = Volume * MasterVolume * EffectsVolume;
+	UAudioComponent* Shot = At ? UGameplayStatics::SpawnSoundAtLocation(this, Sound, *At, FRotator::ZeroRotator, Level, 1.0f, 0.0f, Attenuation, nullptr, true)
+										   : UGameplayStatics::SpawnSound2D(this, Sound, Level, 1.0f, 0.0f, nullptr, false, true);
+	if (Shot)
+	{
+		OneShots.Add(Shot);
+		OneShotEnds.Add(HeartClock + static_cast<double>(Sound->GetDuration()) + 0.2);
+	}
+}
+
 void UNightOneAudio::Play(ss::SoundId Id, float Volume)
 {
 	if (!bMuted)
 	{
+		// Update 4 (§9.1 item 7; Phase A, §6 PA-36): a free asset in place of the synthesized body when its soft path is set and the
+		// asset is there (no path is set in Phase A).
+		if (USoundBase* Asset = NightOneAudioDetail::SoftCue(Id))
+		{
+			PlayAsset(Asset, Volume, nullptr);
+			return;
+		}
 		PlayPcm(ss::audio::Render(Id, Volume, Seed++), 1.0f);
 	}
 }
@@ -253,6 +301,11 @@ void UNightOneAudio::PlayAt(ss::SoundId Id, const FVector& At, float Volume)
 {
 	if (!bMuted)
 	{
+		if (USoundBase* Asset = NightOneAudioDetail::SoftCue(Id))
+		{
+			PlayAsset(Asset, Volume, &At);
+			return;
+		}
 		PlayPcm(ss::audio::Render(Id, Volume, Seed++), 1.0f, false, &At);
 	}
 }

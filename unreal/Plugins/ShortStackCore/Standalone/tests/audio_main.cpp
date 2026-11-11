@@ -448,6 +448,20 @@ void OneShots()
 		const ss::SoundId Id = static_cast<ss::SoundId>(I);
 		Check(ss::SoundName(Id), Render(Id, 1.0f, 7u + static_cast<uint32_t>(I)), 0.01f);
 	}
+	// Update 4 (SPEC v1.7 §9.3; Phase A, §6 PA-36): the nine cues after KastShine render nothing until their gates write their bodies.
+	// Each gate moves its ids into the loop above and out of this one (31 cues become 40 by G3).
+	{
+		std::string Loud;
+		for (int I = static_cast<int>(ss::SoundId::FestRiver); I <= static_cast<int>(ss::SoundId::CrowdOoh); ++I)
+		{
+			const ss::SoundId Id = static_cast<ss::SoundId>(I);
+			if (!Render(Id, 1.0f, 7u + static_cast<uint32_t>(I)).empty() || !Render(Id, 0.4f, 2u).empty())
+			{
+				Loud += std::string(Loud.empty() ? "" : ", ") + ss::SoundName(Id);
+			}
+		}
+		Expect(Loud.empty(), "Update 4's nine cues are silent until their gates (Phase A)", Loud.empty() ? std::string("festriver to crowdooh") : Loud);
+	}
 	Check("buzz", Render(Effect::Buzz, 1u), 0.05f);
 	Check("canopen", Render(Effect::CanOpen, 2u), 0.02f);
 	Check("heartbeat", Render(Effect::Thump, 3u), 0.05f);

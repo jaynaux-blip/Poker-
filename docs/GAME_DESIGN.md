@@ -508,7 +508,7 @@ The best item in each slot counts (a 1080p webcam replaces the 720p one; buying 
   - Late registration, re-entries, rebuys and add-ons.
   - PKO bounties, where half of each bounty you collect is added to the bounty on your own head.
   - Top-heavy payouts with about 15% of the field paid, plus guarantees and overlays.
-- **Simulating a huge field:** your own table (or tables) plays out hand by hand. The rest of a 10,000-player field runs on a fast statistical "shadow sim." It keeps the total chip count constant and keeps stack sizes and bust-outs per level realistic. The lobby (players left, average stack, chip leader, your rank) always looks believable.
+- **Simulating a huge field (planned):** your own table (or tables) plays out hand by hand. The rest of a 10,000-player field runs on a fast statistical "shadow sim." It keeps the total chip count constant and keeps stack sizes and bust-outs per level realistic. The lobby (players left, average stack, chip leader, your rank) always looks believable. Not built yet: today every table of the player's field is dealt and fields over 3,000 stay locked; Update 4's Big Field brings the modelled tables that open them.
 - **Table balancing and breaking** follows real procedure. You get moved, new faces arrive and your reads start over.
 - **ICM:** once you've learned the skill, the game can show ICM pressure on your decisions from the bubble onward. Final table payouts use a proper ICM model.
 - **Deals:** at final tables, NPCs may propose a chop. You negotiate between an ICM chop, a chip chop or a custom split. NPC personalities bluff about how willing they are.

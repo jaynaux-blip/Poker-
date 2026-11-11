@@ -33,8 +33,9 @@ namespace ss
  * Fidelity:
  * - High: the events the player plays. The player's own tables are dealt hand by hand; the World seats the
  *   people it registered there and takes their real finishing places back afterwards.
- * - Medium: majors (series main events, the Championship, the Summit, ring and bracelet events). Final tables
- *   are played out between the people at them (heads-up battles and eliminations become rivalries and news).
+ * - Medium (planned, not built: Update 4's P1 list, SPEC v1.7 §11.1): majors (series main events, the Championship, the
+ *   Summit, ring and bracelet events) would have their final tables played out between the people at them. Until then a
+ *   major resolves as the Light level below does.
  * - Light: every other event. Each tracked entrant's finish is drawn from a skill-weighted distribution
  *   against the field's strength; nobody else in the field is simulated.
  * - Long: days with nobody to watch cost one planning pass and one resolution per event; weeks, months and

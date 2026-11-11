@@ -456,9 +456,12 @@ void RiverLine::PlayerCard(double Now)
 	const float Mw = R.X + R.W - 26.0f - Mx;
 	{
 		const size_t Earned = P.Awards.size() + Held.Held.size();
-		const std::string Tabs[4] = {"OVERVIEW", "JOURNEY", Earned == 0 ? std::string("TROPHIES & BADGES") : "TROPHIES & BADGES \xC2\xB7 " + std::to_string(Earned), "STATS"};
+		// Update 4 (SPEC v1.7 §3.19.2; Phase A, §6 PA-47): a fifth tab, STORY, after STATS while the session shows it (never before G2:
+		// the card keeps its four).
+		const bool Story = S.StoryTabShown();
+		const std::string Tabs[5] = {"OVERVIEW", "JOURNEY", Earned == 0 ? std::string("TROPHIES & BADGES") : "TROPHIES & BADGES \xC2\xB7 " + std::to_string(Earned), "STATS", "STORY"};
 		float Tx = Mx + Mw;
-		for (int K = 3; K >= 0; --K)
+		for (int K = Story ? 4 : 3; K >= 0; --K)
 		{
 			const float Tw = UI.Measure(Tabs[K], 11.0f, 800) + 26.0f;
 			Tx -= Tw;
@@ -474,6 +477,17 @@ void RiverLine::PlayerCard(double Now)
 			NetSpaced(*C, Tabs[K], Tr.X + Tw / 2.0f, Tr.Y + 17.0f, 11.0f, 800, On ? CardInk() : pal::Muted, 1.2f, Align::Center);
 			Tx -= 8.0f;
 		}
+	}
+	if (CardTab == 4)
+	{
+		// Update 4 (SPEC v1.7 §3.19.2; Phase A, §6 PA-47): the STORY tab (RiverLineCardStory.cpp, W-ui's at G2; never open before it).
+		CardStory(P, R, Now);
+		C->SetAlpha(A0);
+		if (Outside.Clicked && !Inside.Hover)
+		{
+			CardShown = -1;
+		}
+		return;
 	}
 	if (CardTab == 1 || CardTab == 2 || CardTab == 3)
 	{

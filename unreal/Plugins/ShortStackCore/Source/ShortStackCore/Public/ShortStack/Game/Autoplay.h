@@ -46,6 +46,9 @@ enum class Target : int
 	Result,
 	Hands,
 	Closing,
+	// Update 4 (SPEC v1.7 §4.3.2; Phase A, §6 PA-40): the next big-field beat (§4.5). Offered only at a modelled field's table; the
+	// reader's clamp (G/Autoplay.cpp:159), TargetName and the panel stay today's until B-session's bodies (G3).
+	NextMoment,
 };
 /** Stop rules (§2.6.4). Saved: append-only bits. */
 enum Stop : uint32_t
@@ -55,6 +58,11 @@ enum Stop : uint32_t
 	StopMyAllIn = 4,
 	StopBigPot = 8,
 	StopPremium = 16,
+	// Update 4 (SPEC v1.7 §4.3.2-§4.3.3; Phase A, §6 PA-40): appended bits, outside AutoStopMask (G/Autoplay.cpp:162) and SetAutoplay's
+	// mask (G/SessionAuto.cpp:160) until G3, so nothing sets or saves them before then.
+	StopPayJump = 32,   // into the money, then each final-table place while the plan holds the seat
+	StopKnownFace = 64, // the rival, a followed or a bonded person sits down at the hero's table
+	StopShort = 128,    // 10 big blinds or fewer (re-arms above 15)
 };
 /** One table's plan: the style, watching or skipping, the watch speed (1, 2, 4, 8), the skip's target and the stops. */
 struct TableAuto
@@ -65,6 +73,9 @@ struct TableAuto
 	Target To = Target::Bubble;
 	int Hands = 0;
 	uint32_t Stops = StopFinalTable | StopBubble;
+	/** Update 4 (SPEC v1.7 §4.3.2; Phase A, §6 PA-40): online only, after a stop the skip resumes with the same target (not in RunText).
+	 *  Never set before G3 (KEY SPOTS and JUMP). */
+	bool Resume = false;
 };
 /**
  * A run (from autoplay turning on for a table until the event ends): the plan's own tilt (quantized to 1e-3), the
@@ -98,6 +109,10 @@ struct Prefs
 	uint32_t Stops = StopFinalTable | StopBubble;
 	double Form = 70.0;
 	int FormWeek = -1, WeekDecisions = 0;
+	/** Update 4 (SPEC v1.7 §4.3.1; Phase A, §6 PA-40): the register strip's last tile (a bigfield::Pick: 0 never chosen, so KEY SPOTS is
+	 *  preselected). Saved as autoplay\tpref's trailing field only when non-zero (B-session's writer and reader, G3), so an old save's
+	 *  line stays byte-identical until a pick. */
+	uint8_t BigPick = 0;
 };
 /** Everything autoplay keeps on the career (life::State::Auto). */
 struct Book
