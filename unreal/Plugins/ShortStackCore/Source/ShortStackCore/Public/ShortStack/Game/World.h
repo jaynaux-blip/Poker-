@@ -1388,6 +1388,99 @@ public:
 	SHORTSTACKCORE_API void Finish();
 
 private:
+	// ---- Update 4 (SPEC v1.7 §3.7, §6 PA-33, PA-35; track A3's block, step A-2): the held turn's state and counters, the HoldGuard,
+	// and the hour's and the day's caches. G/WorldHero.cpp owns all of it. Index-based and copyable: a copy taken mid-hold drains to
+	// the same world as the original (WorldPreview's copy, a snapshot).
+public:
+	/** The held turn's counters (§3.7 R4's structural checks, ss.Turn.Trace): since the world was made or ResetTurnStats; not saved. */
+	struct TurnStats
+	{
+		int Calls = 0;            // AdvanceTo calls that ran any of a target
+		int Holds = 0;            // of them, the ones that returned holding
+		int Drains = 0;           // DrainHold calls that finished a hold
+		int Units = 0;            // turn units run (ByUnit by kind)
+		int HourSlices = 0;       // hour slices run (the resolves and the hour mark between units)
+		int MaxUnitsPerCall = 0;  // the most units one AdvanceTo ran (a drain is unbudgeted: MaxDrainUnits)
+		int MaxDrainUnits = 0;
+		int MaxWalked = 0;        // the most people one unit's per-person loop walked
+		int Clones = 0;           // roster pages cloned (A2's pages report each, PA-34)
+		int MaxClonesPerCall = 0; // the most pages one AdvanceTo cloned
+		int GuardTrips = 0;       // HoldGuard violations
+		double MaxCallMs = 0.0;   // the longest AdvanceTo
+		std::array<int, static_cast<size_t>(TurnUnit::Count)> ByUnit{};
+	};
+	TurnStats TurnCounters() const
+	{
+		TurnStats S = HeldTurn.Stats;
+		S.GuardTrips = TurnGuardTrips;
+		return S;
+	}
+	void ResetTurnStats()
+	{
+		HeldTurn.Stats = TurnStats();
+		TurnGuardTrips = 0;
+	}
+	/** §6.6's forced budget: SS_TURN_BUDGET from the environment, in ms (unset or not a number: unlimited; always unlimited in an
+	 *  Unreal build). The session applies it to its world; World never applies it by itself. */
+	SHORTSTACKCORE_API static double ForcedTurnBudgetMs();
+	/** Whether this build's turn units are A2's range splits (G/WorldSim.h's PlanBegin ... NewDayClose, SS_WORLDSIM_TURN_PIECES), or
+	 *  PlanDay and NewDay run whole, one unit each. */
+	SHORTSTACKCORE_API static bool TurnUnitsRanged();
+	/** The HoldGuard's sink (test builds, §3.7 R3): called with the method's name when a guarded World method runs while the world
+	 *  holds a turn and no drain is running. Null (the default) prints and aborts; a test sets one to count its planted calls. Returns
+	 *  the sink it replaces. */
+	using HoldGuardSink = void (*)(const char* Method);
+	SHORTSTACKCORE_API static HoldGuardSink SetHoldGuardSink(HoldGuardSink Sink);
+
+private:
+	enum class TurnPhase : uint8_t
+	{
+		Begin, // the next hour slice's start
+		Plan,  // tomorrow's registrations (PlanDay's units)
+		Hour,  // the slice's cancellations, results and hour mark
+		Day,   // a midnight's turn (NewDay's units)
+	};
+	/** The AdvanceTo calls in progress: each requested time is its own target, finished in order the way its own call would have
+	 *  finished it (the same hour slices, the same Rev rule), so a turn spread over frames ends as it would have in one. */
+	struct TurnHold
+	{
+		std::vector<double> Targets;   // requested and not reached yet, oldest first: Holding() while any
+		TurnPhase Phase = TurnPhase::Begin;
+		bool Started = false;          // Targets.front()'s PlannedBefore is taken
+		bool Changed = false;          // the target's Rev rule (AdvanceTo's Changed)
+		bool Running = false;          // the machine is running (AdvanceTo or DrainHold): the HoldGuard passes
+		int PlannedBefore = 0;
+		int Day = 0;                   // the hour slice's locals
+		double DayEnd = 0.0;
+		double NextHour = 0.0;
+		double Limit = 0.0;
+		std::array<uint32_t, 8> Cur{}; // the turn's cursor (the piece and the range over A2's splits, or the whole-turn fallback's)
+		int ClonesNow = 0;             // pages cloned in this call (NoteTurnClone's; over A2's pages, PageClones() counts them)
+		TurnStats Stats;
+	};
+	TurnHold HeldTurn;
+	mutable int TurnGuardTrips = 0;
+	/** A page clone, counted against TurnBudgetMs (PA-34; a slice stops after 8): for a roster without A2's PageClones() counter. */
+	void NoteTurnClone()
+	{
+		++HeldTurn.ClonesNow;
+		++HeldTurn.Stats.Clones;
+	}
+	/** Runs the targets under a budget (ms; unlimited or Drain: to the last). False: stopped with a target left (holding). */
+	bool RunTurn(double BudgetMs, bool Drain);
+	/** The next unit of PlanDay(Day) or NewDay(Day): its kind and the people it walked (TurnUnit::Count: the turn is done). */
+	TurnUnit TurnPlanUnit(int Day, int& Walked);
+	TurnUnit TurnDayUnit(int Day, int& Walked);
+	/** Every non-display World method begins with it: a call while holding, outside a drain, reaches the sink (§3.7 R3). */
+	void HoldGuard(const char* Method) const;
+	// PA-33's hour item: Night Shift's hour-ago values, most first, ranked once when the hour-ago map moves (RankBefore looks up).
+	mutable std::vector<double> NightAgoSorted;
+	mutable double NightAgoHour = -2.0;
+	mutable size_t NightAgoSize = 0;
+	mutable bool NightAgoBuilt = false;
+	// PA-33's day item: EmbercrestRegulars' answer, kept until the revision, the planned day, the people or the version moves.
+	mutable std::vector<int> RegularsMemo;
+	mutable std::array<int64_t, 5> RegularsKey{{-1, -1, -1, -1, -1}};
 	friend struct Sim;
 	// Update 4 (SPEC v1.7 §6.2): how the new modules reach World. Each is defined in its module's .cpp and holds the module's
 	// private reads and writes; nothing else gains access.

@@ -9,9 +9,13 @@
 #include "WorldSim.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <iterator>
+#include <limits>
 
 namespace ss
 {
@@ -72,119 +76,533 @@ int MinimumField(const std::string& Id)
 	const live::Occurrence O = live::FindOccurrence(Id);
 	return O.Valid() ? O.T->MinEntrants : 0;
 }
+
+/** Update 4 (SPEC v1.7 §3.7 R4, §6 PA-35): the most roster pages one slice clones before it stops (with a finite budget). */
+constexpr int HeroTurnCloneCap = 8;
+/** And the people a ranged unit walks (§3.7 R2: ranges of 500, of PlanDay's shuffled order or of ids). */
+constexpr int HeroTurnRange = 500;
+
+/** Milliseconds since a time (the held turn's budget). */
+double HeroTurnMs(std::chrono::steady_clock::time_point Since)
+{
+	return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Since).count();
+}
+
+/** The HoldGuard's sink, process-wide (World::SetHoldGuardSink). */
+World::HoldGuardSink& HeroHoldSink()
+{
+	static World::HoldGuardSink Sink = nullptr;
+	return Sink;
+}
 } // namespace worldhero_detail
 
 using namespace worldhero_detail;
 
 // ------------------------------------------------------------------ time
 
+// Update 4 (SPEC v1.7 §3.7, §6 PA-35; track A3): the held turn. AdvanceTo queues the time it's asked for as a target and runs the
+// targets in order, each the way its own call always ran it: hour slices to the next hour, the day's end or the target, each opened
+// by tomorrow's registrations (PlanDay's units) and a midnight closed by the day's turn (NewDay's units), and Rev moved once at the
+// target's end if anything changed. With a finite TurnBudgetMs the run stops after any unit once the budget is spent (or a slice has
+// cloned HeroTurnCloneCap roster pages), with the clock at the held instant; the next AdvanceTo, or a DrainHold, picks up exactly
+// there. Unlimited (Phase A's default) never stops, so one call runs its target whole, as before. The units are A2's range splits
+// (G/WorldSim.h's PlanBegin/PlanPeople/PlanEnd/PlanSort and NewDayOpen ... NewDayClose, with SS_WORLDSIM_TURN_PIECES defined there)
+// or, without them, PlanDay and NewDay whole.
+
 void World::AdvanceTo(double To)
 {
-	if (!Created || To <= Now)
+	if (!Created)
 	{
 		return;
 	}
-	// The revision moves only when something the boards show did (the clock moves every frame; a ranking of the
-	// world is kept until the world itself changes).
-	const int PlannedBefore = Planned;
-	bool Changed = false;
-	while (Now < To)
+	// The time the world has been asked to reach: past it, a target of its own (at or before it, nothing new: as before, an
+	// earlier time changes nothing).
+	const double Reached = HeldTurn.Targets.empty() ? Now : HeldTurn.Targets.back();
+	if (To > Reached)
 	{
-		const int Day = sim::DayAt(Now);
-		const double DayEnd = static_cast<double>(Day + 1) * 1440.0;
-		const double NextHour = (std::floor(Now / 60.0) + 1.0) * 60.0;
-		const double Limit = std::min({To, DayEnd, NextHour});
-		// Tomorrow's registrations are open.
-		Sim::PlanDay(*this, Day + 1);
-		// A live event short of its stated minimum is called off when its cards should go in the air (R6): nobody plays
-		// it or pays for it. One the player is in is their own room's to call (the session tells the world).
-		for (size_t K = 0; K < Queue.size();)
+		HeldTurn.Targets.push_back(To);
+	}
+	if (!HeldTurn.Targets.empty() && !HeldTurn.Running)
+	{
+		RunTurn(TurnBudgetMs, false);
+	}
+}
+
+bool World::RunTurn(double BudgetMs, bool Drain)
+{
+	const std::chrono::steady_clock::time_point SliceStart = std::chrono::steady_clock::now();
+	const bool Budgeted = !Drain && BudgetMs < std::numeric_limits<double>::infinity();
+	HeldTurn.Running = true;
+	HeldTurn.ClonesNow = 0;
+	int Units = 0;
+	bool Stopped = false;
+	// The roster pages this call has cloned (A2's pages count them; without them, NoteTurnClone).
+#if defined(SS_WORLDSIM_TURN_PIECES)
+	const uint64_t ClonesBefore = PageClones();
+	auto Cloned = [&]() { return static_cast<int>(PageClones() - ClonesBefore); };
+#else
+	auto Cloned = [&]() { return HeldTurn.ClonesNow; };
+#endif
+	// After each unit (and slice): has this call spent its budget?
+	auto Spent = [&]() { return Budgeted && (BudgetMs <= 0.0 || Cloned() >= HeroTurnCloneCap || HeroTurnMs(SliceStart) >= BudgetMs); };
+	auto Unit = [&](TurnUnit U, int Walked) {
+		++Units;
+		++HeldTurn.Stats.Units;
+		++HeldTurn.Stats.ByUnit[static_cast<size_t>(U)];
+		HeldTurn.Stats.MaxWalked = std::max(HeldTurn.Stats.MaxWalked, Walked);
+		return Spent();
+	};
+	while (!HeldTurn.Targets.empty() && !Stopped)
+	{
+		const double To = HeldTurn.Targets.front();
+		if (!HeldTurn.Started)
 		{
-			const Pending& P = Queue[K];
-			const int Minimum = !P.Online && P.HeroPlace == 0 && P.Start <= Limit ? MinimumField(P.Id) : 0;
-			const int Came = std::max(P.Entries, static_cast<int>(P.Who.size()));
-			if (Came < Minimum)
-			{
-				const std::string Id = P.Id;
-				Cancel(Id, P.Start, Came);
-				Changed = true;
-				continue;
-			}
-			++K;
+			// The revision moves only when something the boards show did (the clock moves every frame; a ranking of the
+			// world is kept until the world itself changes).
+			HeldTurn.Started = true;
+			HeldTurn.PlannedBefore = Planned;
+			HeldTurn.Changed = false;
+			HeldTurn.Phase = TurnPhase::Begin;
 		}
-		// Everything that finishes by then.
-		std::vector<Pending> Later;
-		size_t Done = 0;
-		for (; Done < Queue.size() && Queue[Done].End <= Limit; ++Done)
+		while (!Stopped)
 		{
-			Pending& P = Queue[Done];
-			if (P.HeroPlace < 0 && Limit < P.Start + 2.0 * 1440.0)
+			if (HeldTurn.Phase == TurnPhase::Begin)
 			{
-				// The player is still at the tables: the result waits for them (not forever: a table walked away from
-				// is decided without them).
-				P.End = Limit + 15.0;
-				Later.push_back(std::move(P));
-				continue;
-			}
-			if (P.HeroPlace < 0)
-			{
-				P.HeroPlace = 0;
-				HeroIn.erase(P.Id);
-			}
-			if (!P.Online)
-			{
-				// Who played it, a while longer (Entered): the block's people don't change their night once it's decided.
-				std::vector<int>& Who = Played[P.Id].second;
-				Played[P.Id].first = P.End;
-				Who.clear();
-				for (const Entry& E : P.Who)
+				if (!(Now < To))
 				{
-					Who.push_back(E.Npc);
+					break;
+				}
+				HeldTurn.Day = sim::DayAt(Now);
+				HeldTurn.DayEnd = static_cast<double>(HeldTurn.Day + 1) * 1440.0;
+				HeldTurn.NextHour = (std::floor(Now / 60.0) + 1.0) * 60.0;
+				HeldTurn.Limit = std::min({To, HeldTurn.DayEnd, HeldTurn.NextHour});
+				HeldTurn.Cur = {};
+				HeldTurn.Phase = TurnPhase::Plan;
+			}
+			if (HeldTurn.Phase == TurnPhase::Plan)
+			{
+				// Tomorrow's registrations are open.
+				for (;;)
+				{
+					int Walked = 0;
+					const TurnUnit U = TurnPlanUnit(HeldTurn.Day + 1, Walked);
+					if (U == TurnUnit::Count)
+					{
+						break;
+					}
+					if (Unit(U, Walked))
+					{
+						Stopped = true;
+						break;
+					}
+				}
+				if (Stopped)
+				{
+					break;
+				}
+				HeldTurn.Phase = TurnPhase::Hour;
+			}
+			if (HeldTurn.Phase == TurnPhase::Hour)
+			{
+				const double Limit = HeldTurn.Limit;
+				++HeldTurn.Stats.HourSlices;
+				// A live event short of its stated minimum is called off when its cards should go in the air (R6): nobody plays
+				// it or pays for it. One the player is in is their own room's to call (the session tells the world).
+				for (size_t K = 0; K < Queue.size();)
+				{
+					const Pending& P = Queue[K];
+					const int Minimum = !P.Online && P.HeroPlace == 0 && P.Start <= Limit ? MinimumField(P.Id) : 0;
+					const int Came = std::max(P.Entries, static_cast<int>(P.Who.size()));
+					if (Came < Minimum)
+					{
+						const std::string Id = P.Id;
+						Cancel(Id, P.Start, Came);
+						HeldTurn.Changed = true;
+						continue;
+					}
+					++K;
+				}
+				// Everything that finishes by then.
+				std::vector<Pending> Later;
+				size_t Done = 0;
+				for (; Done < Queue.size() && Queue[Done].End <= Limit; ++Done)
+				{
+					Pending& P = Queue[Done];
+					if (P.HeroPlace < 0 && Limit < P.Start + 2.0 * 1440.0)
+					{
+						// The player is still at the tables: the result waits for them (not forever: a table walked away from
+						// is decided without them).
+						P.End = Limit + 15.0;
+						Later.push_back(std::move(P));
+						continue;
+					}
+					if (P.HeroPlace < 0)
+					{
+						P.HeroPlace = 0;
+						HeroIn.erase(P.Id);
+					}
+					if (!P.Online)
+					{
+						// Who played it, a while longer (Entered): the block's people don't change their night once it's decided.
+						std::vector<int>& Who = Played[P.Id].second;
+						Played[P.Id].first = P.End;
+						Who.clear();
+						for (const Entry& E : P.Who)
+						{
+							Who.push_back(E.Npc);
+						}
+					}
+					Sim::Resolve(*this, P);
+				}
+				Queue.erase(Queue.begin(), Queue.begin() + static_cast<std::ptrdiff_t>(Done));
+				HeldTurn.Changed = HeldTurn.Changed || Done > 0;
+				for (auto It = Played.begin(); It != Played.end();)
+				{
+					It = It->second.first < Limit - 2.0 * 1440.0 ? Played.erase(It) : std::next(It);
+				}
+				if (!Later.empty())
+				{
+					for (Pending& P : Later)
+					{
+						Queue.push_back(std::move(P));
+					}
+					std::stable_sort(Queue.begin(), Queue.end(), [](const Pending& A, const Pending& B) { return A.End < B.End; });
+				}
+				Now = Limit;
+				if (Now >= HeldTurn.NextHour)
+				{
+					NightPointsHourAgo = NightPoints;
+					NightHour = Now;
+					HeldTurn.Changed = true;
+					// Update 4 (SPEC v1.7 §2.6.1, §3.2 R2; §6 PA-24): the festival crown, and the Scene Book's 09:00 step (no-ops until G1 and G2).
+					FestHour(*this, Now);
+					scene::Hour(*this, Now);
+				}
+				HeldTurn.Cur = {};
+				HeldTurn.Phase = Now >= HeldTurn.DayEnd ? TurnPhase::Day : TurnPhase::Begin;
+				// A slice is a stopping point too (a skip's hours of results, or a load's catch-up, spread over frames like units;
+				// §3.7 R2 counts the 09:00 slice like a unit). Not a unit: the structural checks count units.
+				if (Now < To && Spent())
+				{
+					Stopped = true;
+					break;
 				}
 			}
-			Sim::Resolve(*this, P);
-		}
-		Queue.erase(Queue.begin(), Queue.begin() + static_cast<std::ptrdiff_t>(Done));
-		Changed = Changed || Done > 0;
-		for (auto It = Played.begin(); It != Played.end();)
-		{
-			It = It->second.first < Limit - 2.0 * 1440.0 ? Played.erase(It) : std::next(It);
-		}
-		if (!Later.empty())
-		{
-			for (Pending& P : Later)
+			if (HeldTurn.Phase == TurnPhase::Day)
 			{
-				Queue.push_back(std::move(P));
+				// The day's turn, unit by unit.
+				for (;;)
+				{
+					int Walked = 0;
+					const TurnUnit U = TurnDayUnit(HeldTurn.Day + 1, Walked);
+					if (U == TurnUnit::Count)
+					{
+						break;
+					}
+					HeldTurn.Changed = true;
+					if (Unit(U, Walked))
+					{
+						Stopped = true;
+						break;
+					}
+				}
+				if (Stopped)
+				{
+					break;
+				}
+				HeldTurn.Changed = true;
+				HeldTurn.Phase = TurnPhase::Begin;
 			}
-			std::stable_sort(Queue.begin(), Queue.end(), [](const Pending& A, const Pending& B) { return A.End < B.End; });
 		}
-		Now = Limit;
-		if (Now >= NextHour)
+		if (Stopped)
 		{
-			NightPointsHourAgo = NightPoints;
-			NightHour = Now;
-			Changed = true;
-			// Update 4 (SPEC v1.7 §2.6.1, §3.2 R2; §6 PA-24): the festival crown, and the Scene Book's 09:00 step (no-ops until G1 and G2).
-			FestHour(*this, Now);
-			scene::Hour(*this, Now);
+			break;
 		}
-		if (Now >= DayEnd)
+		// The target is reached.
+		if (HeldTurn.Changed || Planned != HeldTurn.PlannedBefore)
 		{
-			Sim::NewDay(*this, Day + 1);
-			Changed = true;
+			++Rev;
 		}
+		HeldTurn.Targets.erase(HeldTurn.Targets.begin());
+		HeldTurn.Started = false;
+		HeldTurn.Phase = TurnPhase::Begin;
 	}
-	if (Changed || Planned != PlannedBefore)
+	HeldTurn.Running = false;
+#if defined(SS_WORLDSIM_TURN_PIECES)
+	HeldTurn.Stats.Clones += Cloned(); // (NoteTurnClone counts them as they happen otherwise)
+#endif
+	if (Drain)
 	{
-		++Rev;
+		HeldTurn.Stats.MaxDrainUnits = std::max(HeldTurn.Stats.MaxDrainUnits, Units);
 	}
+	else
+	{
+		++HeldTurn.Stats.Calls;
+		HeldTurn.Stats.Holds += Stopped ? 1 : 0;
+		HeldTurn.Stats.MaxUnitsPerCall = std::max(HeldTurn.Stats.MaxUnitsPerCall, Units);
+		HeldTurn.Stats.MaxClonesPerCall = std::max(HeldTurn.Stats.MaxClonesPerCall, Cloned());
+		HeldTurn.Stats.MaxCallMs = std::max(HeldTurn.Stats.MaxCallMs, HeroTurnMs(SliceStart));
+	}
+	return !Stopped;
+}
+
+TurnUnit World::TurnPlanUnit(int Day, int& Walked)
+{
+#if defined(SS_WORLDSIM_TURN_PIECES)
+	// A2's split (G/WorldSim.h): PlanDay(W, Day) is while (PlanBegin) { PlanPeople(all); PlanEnd; } PlanSort. The cursor: [0] the
+	// piece (0 open, 1 ranges, 2 insert, 3 done), [1] the range's start, [2] the open plan's people. The first range runs with the
+	// open (one unit: PlanDay), each further range of Sim's TurnRange is a unit (PlanDay), and the insertion with the next open or the
+	// sort is one (PlanInsert). With nothing to plan only the sort runs (it's called every slice, as before), and that's no unit.
+	std::array<uint32_t, 8>& C = HeldTurn.Cur;
+	if (C[0] == 3)
+	{
+		return TurnUnit::Count;
+	}
+	if (C[0] == 2)
+	{
+		Sim::PlanEnd(*this);
+		if (Sim::PlanBegin(*this, Day))
+		{
+			C[0] = 1;
+			C[1] = 0;
+			C[2] = static_cast<uint32_t>(Sim::PlanCount(*this));
+		}
+		else
+		{
+			Sim::PlanSort(*this);
+			C[0] = 3;
+		}
+		return TurnUnit::PlanInsert;
+	}
+	if (C[0] == 0)
+	{
+		if (!Sim::PlanBegin(*this, Day))
+		{
+			Sim::PlanSort(*this);
+			C[0] = 3;
+			return TurnUnit::Count;
+		}
+		C[0] = 1;
+		C[1] = 0;
+		C[2] = static_cast<uint32_t>(Sim::PlanCount(*this));
+	}
+	const int From = static_cast<int>(C[1]);
+	const int To = std::min(static_cast<int>(C[2]), From + HeroTurnRange);
+	if (To > From)
+	{
+		Sim::PlanPeople(*this, From, To);
+	}
+	Walked = To - From;
+	C[1] = static_cast<uint32_t>(To);
+	C[0] = To >= static_cast<int>(C[2]) ? 2u : 1u;
+	return TurnUnit::PlanDay;
+#else
+	// Without A2's splits: PlanDay whole, one unit when it plans a day (it's called every slice, as before: with nothing to plan it
+	// only keeps the queue in order, and isn't a unit).
+	if (HeldTurn.Cur[0] != 0)
+	{
+		return TurnUnit::Count;
+	}
+	HeldTurn.Cur[0] = 1;
+	const bool Plans = Day > Planned;
+	Walked = Plans ? static_cast<int>(People().size()) : 0;
+	Sim::PlanDay(*this, Day);
+	return Plans ? TurnUnit::PlanDay : TurnUnit::Count;
+#endif
+}
+
+TurnUnit World::TurnDayUnit(int Day, int& Walked)
+{
+#if defined(SS_WORLDSIM_TURN_PIECES)
+	// A2's split (G/WorldSim.h): NewDay(W, Day) is NewDayOpen; the month (when W.Turn.MonthTurned: NewMonthOpen, NewMonthPeople by
+	// ranges, NewMonthClose); the week (when NewDayWeek: NewWeekOpen, NewWeekPeople by ranges, NewWeekClose); NewDayCalendar and
+	// scene::Day; NewDayPeople by ranges; NewDayClose and Ranks; story::Day. Each piece is a unit, glue joined to its neighbour; each
+	// loop's size is the roster's when the loop starts. The cursor: [0] the piece, [1] the range's start, [2] the loop's size.
+	std::array<uint32_t, 8>& C = HeldTurn.Cur;
+	enum : uint32_t
+	{
+		PcOpen,
+		PcMonthOpen,
+		PcMonthPeople,
+		PcMonthClose,
+		PcWeekOpen,
+		PcWeekPeople,
+		PcWeekClose,
+		PcScene,
+		PcDayPeople,
+		PcClose,
+		PcDirector,
+		PcDone,
+	};
+	auto Ranges = [&](void (*Piece)(World&, int, int, int), uint32_t Next) {
+		const int From = static_cast<int>(C[1]);
+		const int To = std::min(static_cast<int>(C[2]), From + HeroTurnRange);
+		if (To > From)
+		{
+			Piece(*this, Day, From, To);
+		}
+		Walked = To - From;
+		C[1] = static_cast<uint32_t>(To);
+		if (To >= static_cast<int>(C[2]))
+		{
+			C[0] = Next;
+		}
+	};
+	auto Loop = [&](uint32_t Piece) {
+		C[0] = Piece;
+		C[1] = 0;
+		C[2] = static_cast<uint32_t>(People().size());
+	};
+	switch (C[0])
+	{
+	case PcOpen:
+		Sim::NewDayOpen(*this, Day);
+		C[0] = Turn.MonthTurned ? PcMonthOpen : PcWeekOpen;
+		return TurnUnit::NewDayPeople;
+	case PcMonthOpen:
+		Sim::NewMonthOpen(*this, Day);
+		Loop(PcMonthPeople);
+		return TurnUnit::NewMonthPeople;
+	case PcMonthPeople:
+		Ranges(&Sim::NewMonthPeople, PcMonthClose);
+		return TurnUnit::NewMonthPeople;
+	case PcMonthClose:
+		Sim::NewMonthClose(*this, Day);
+		C[0] = PcWeekOpen;
+		return TurnUnit::NewMonthPeople;
+	case PcWeekOpen:
+		if (!Sim::NewDayWeek(*this, Day))
+		{
+			C[0] = PcScene;
+			return TurnDayUnit(Day, Walked);
+		}
+		Sim::NewWeekOpen(*this, Day);
+		Loop(PcWeekPeople);
+		return TurnUnit::NewWeekPeople;
+	case PcWeekPeople:
+		Ranges(&Sim::NewWeekPeople, PcWeekClose);
+		return TurnUnit::NewWeekPeople;
+	case PcWeekClose:
+		Sim::NewWeekClose(*this, Day);
+		C[0] = PcScene;
+		return TurnUnit::KeeperWeek;
+	case PcScene:
+		Sim::NewDayCalendar(*this, Day);
+		scene::Day(*this, Day);
+		Loop(PcDayPeople);
+		return TurnUnit::SceneDay;
+	case PcDayPeople:
+		Ranges(&Sim::NewDayPeople, PcClose);
+		return TurnUnit::NewDayPeople;
+	case PcClose:
+		Sim::NewDayClose(*this, Day);
+		Sim::Ranks(*this);
+		C[0] = PcDirector;
+		return TurnUnit::Ranks;
+	case PcDirector:
+		story::Day(*this, Day);
+		C[0] = PcDone;
+		return TurnUnit::DirectorDay;
+	default: return TurnUnit::Count;
+	}
+#else
+	// Without A2's splits: NewDay whole, one unit (its per-person loops walk everyone).
+	if (HeldTurn.Cur[0] != 0)
+	{
+		return TurnUnit::Count;
+	}
+	HeldTurn.Cur[0] = 1;
+	Walked = static_cast<int>(People().size());
+	Sim::NewDay(*this, Day);
+	return TurnUnit::NewDayPeople;
+#endif
+}
+
+bool World::TurnUnitsRanged()
+{
+#if defined(SS_WORLDSIM_TURN_PIECES)
+	return true;
+#else
+	return false;
+#endif
+}
+
+double World::ForcedTurnBudgetMs()
+{
+#if defined(UE_BUILD_DEBUG) || defined(UE_BUILD_DEVELOPMENT) || defined(UE_BUILD_TEST) || defined(UE_BUILD_SHIPPING)
+	return std::numeric_limits<double>::infinity(); // (a test switch: the game's budget is the session's, §3.7 R1)
+#else
+	const char* Text = std::getenv("SS_TURN_BUDGET");
+	if (!Text || !*Text)
+	{
+		return std::numeric_limits<double>::infinity();
+	}
+	char* End = nullptr;
+	const double Ms = std::strtod(Text, &End);
+	return End != Text && *End == '\0' && Ms >= 0.0 ? Ms : std::numeric_limits<double>::infinity();
+#endif
+}
+
+World::HoldGuardSink World::SetHoldGuardSink(HoldGuardSink Sink)
+{
+	HoldGuardSink& Slot = HeroHoldSink();
+	const HoldGuardSink Was = Slot;
+	Slot = Sink;
+	return Was;
+}
+
+bool World::Holding() const
+{
+	// §3.7, PA-35: a target is still to reach (a turn stopped mid-way at its budget). Never with an unlimited budget.
+	return !HeldTurn.Targets.empty();
+}
+
+void World::DrainHold()
+{
+	// §3.7 R3, PA-35: every target asked for so far, to the end, now: the world stands where the calls that asked for them would have
+	// left it. (Inside the machine already: nothing to do.)
+	if (HeldTurn.Targets.empty() || HeldTurn.Running)
+	{
+		return;
+	}
+	++HeldTurn.Stats.Drains;
+	RunTurn(std::numeric_limits<double>::infinity(), true);
+}
+
+void World::HoldGuard(const char* Method) const
+{
+	// The HoldGuard (§3.7 R3, rev-code M2): a non-display method called while the world holds a turn, outside the machine, would read
+	// or change a half-turned world. The caller drains first (Session's drain-on-touch); this catches the calls a grep misses. Display
+	// reads never check (the allowlist: BoardValue, RankBefore, Leaders, RoomLeaders, CircuitRank, CardCutLine, PlayerOfYearTitles,
+	// HallClass, HallScore, HallEligible, Holding, TurnCounters and the inline views in World.h). Test builds report to the sink, or
+	// abort; an Unreal build only counts.
+	if (HeldTurn.Targets.empty() || HeldTurn.Running)
+	{
+		return;
+	}
+	++TurnGuardTrips;
+#if !(defined(UE_BUILD_DEBUG) || defined(UE_BUILD_DEVELOPMENT) || defined(UE_BUILD_TEST) || defined(UE_BUILD_SHIPPING))
+	if (const HoldGuardSink Sink = HeroHoldSink())
+	{
+		Sink(Method);
+		return;
+	}
+	std::fprintf(stderr, "HoldGuard: World::%s called while the world holds a turn (drain first, SPEC v1.7 §3.7 R3)\n", Method);
+	std::fflush(stderr);
+	std::abort();
+#else
+	(void)Method;
+#endif
 }
 
 void World::Simulate(int DayCount)
 {
 	if (DayCount > 0)
 	{
-		AdvanceTo(Now + static_cast<double>(DayCount) * 1440.0);
+		// From the time the world has been asked to reach, and to the end (a debug run, and WorldPreview's copy, want all of it).
+		const double From = HeldTurn.Targets.empty() ? Now : HeldTurn.Targets.back();
+		AdvanceTo(From + static_cast<double>(DayCount) * 1440.0);
+		DrainHold();
 	}
 }
 
@@ -192,18 +610,21 @@ void World::Simulate(int DayCount)
 
 const net::EventResult* World::ResultOf(const std::string& EventId) const
 {
+	HoldGuard("ResultOf");
 	const auto It = Results.find(EventId);
 	return It == Results.end() ? nullptr : &It->second;
 }
 
 const Cancellation* World::CancellationOf(const std::string& EventId) const
 {
+	HoldGuard("CancellationOf");
 	const auto It = Cancelled.find(EventId);
 	return It == Cancelled.end() ? nullptr : &It->second;
 }
 
 void World::Cancel(const std::string& EventId, double At, int Entrants)
 {
+	HoldGuard("Cancel");
 	if (!Created || Results.count(EventId) > 0)
 	{
 		return; // (an event already decided stays decided: its winner was paid)
@@ -224,6 +645,7 @@ void World::Cancel(const std::string& EventId, double At, int Entrants)
 
 bool World::FinishIn(const std::string& EventId, int Npc, int& Place, Chips& Prize) const
 {
+	HoldGuard("FinishIn");
 	const auto It = FieldPlaces.find(EventId);
 	if (It == FieldPlaces.end())
 	{
@@ -243,6 +665,7 @@ bool World::FinishIn(const std::string& EventId, int Npc, int& Place, Chips& Pri
 
 std::string World::NextEmbercrest(int Npc, double From) const
 {
+	HoldGuard("NextEmbercrest");
 	const int Today = sim::DayAt(From);
 	for (int Day = Today; Day <= Today + 1; ++Day)
 	{
@@ -266,6 +689,9 @@ std::string World::NextEmbercrest(int Npc, double From) const
 
 void World::EnsurePlanned(int Day)
 {
+	// Update 4 (SPEC v1.7 §3.7, §6 PA-35): a held turn first finishes (the plan, and the clock it's checked against, are the finished
+	// world's).
+	DrainHold();
 	// Tomorrow at most: registrations further out don't exist yet (and looking doesn't change the world).
 	if (Created && Day > Planned && Day <= sim::DayAt(Now) + 1)
 	{
@@ -275,6 +701,7 @@ void World::EnsurePlanned(int Day)
 
 std::vector<int> World::RegisteredNow(const std::string& EventId) const
 {
+	HoldGuard("RegisteredNow");
 	std::vector<int> Out;
 	for (const Pending& P : Queue)
 	{
@@ -292,12 +719,14 @@ std::vector<int> World::RegisteredNow(const std::string& EventId) const
 
 std::vector<int> World::Entered(const std::string& EventId) const
 {
+	HoldGuard("Entered");
 	const auto It = Played.find(EventId);
 	return It != Played.end() ? It->second.second : RegisteredNow(EventId);
 }
 
 std::vector<int> World::Registered(const std::string& EventId)
 {
+	HoldGuard("Registered");
 	std::vector<int> Out;
 	const int Day = EventDay(EventId);
 	if (Day >= 0)
@@ -353,13 +782,28 @@ int World::RankBefore(net::Board B, int Npc) const
 	{
 		const auto Mine = NightPointsHourAgo.find(Npc);
 		const double V = Mine == NightPointsHourAgo.end() ? 0.0 : Mine->second;
-		int Rank = 1;
-		for (const auto& It : NightPointsHourAgo)
-		{
-			Rank += It.second > V ? 1 : 0;
-		}
 		// Nothing an hour ago is no rank at all (update 2 §3.6): the row reads NEW.
-		return V > 0.0 ? Rank : 0;
+		if (!(V > 0.0))
+		{
+			return 0;
+		}
+		// 1 + how many had more. Update 4 (SPEC v1.7 §6 PA-33): the hour-ago values are ranked once when they move (the hour mark
+		// copies them, a new night clears them, a load reads them), not counted again for every row of the board: O(log m) a row.
+		if (!NightAgoBuilt || NightAgoHour != NightHour || NightAgoSize != NightPointsHourAgo.size())
+		{
+			NightAgoSorted.clear();
+			NightAgoSorted.reserve(NightPointsHourAgo.size());
+			for (const auto& It : NightPointsHourAgo)
+			{
+				NightAgoSorted.push_back(It.second);
+			}
+			std::sort(NightAgoSorted.begin(), NightAgoSorted.end(), std::greater<double>());
+			NightAgoHour = NightHour;
+			NightAgoSize = NightPointsHourAgo.size();
+			NightAgoBuilt = true;
+		}
+		const auto Ahead = std::lower_bound(NightAgoSorted.begin(), NightAgoSorted.end(), V, std::greater<double>());
+		return 1 + static_cast<int>(Ahead - NightAgoSorted.begin());
 	}
 	// 0: nothing on the board a day ago (Sim::Ranks), or someone who wasn't in the world yet. RanksYesterday ends at Live: a
 	// rival's board (update 2 §5.8, appended after it) keeps its ranks in the site maps, so it has none here.
@@ -374,14 +818,14 @@ int World::RankBefore(net::Board B, int Npc) const
 std::vector<int> World::Leaders(Rep R, int Count) const
 {
 	std::vector<int> Order;
-	for (const Npc& N : Roster)
+	for (const Npc& N : People())
 	{
 		if (N.St != Status::Retired)
 		{
 			Order.push_back(N.Id);
 		}
 	}
-	std::stable_sort(Order.begin(), Order.end(), [&](int A, int B) { return Roster[static_cast<size_t>(A)].RepOf(R) > Roster[static_cast<size_t>(B)].RepOf(R); });
+	std::stable_sort(Order.begin(), Order.end(), [&](int A, int B) { return People()[static_cast<size_t>(A)].RepOf(R) > People()[static_cast<size_t>(B)].RepOf(R); });
 	if (static_cast<int>(Order.size()) > Count)
 	{
 		Order.resize(static_cast<size_t>(std::max(0, Count)));
@@ -393,6 +837,7 @@ std::vector<int> World::Leaders(Rep R, int Count) const
 
 void World::HeroEntered(const std::string& EventId, const std::string& EventName)
 {
+	HoldGuard("HeroEntered");
 	if (!Created || Cancelled.count(EventId) > 0)
 	{
 		return;
@@ -436,6 +881,7 @@ void World::HeroEntered(const std::string& EventId, const std::string& EventName
 
 int World::PlannedEntries(const std::string& EventId)
 {
+	HoldGuard("PlannedEntries");
 	if (Cancelled.count(EventId) > 0)
 	{
 		return 0; // called off: nobody plays it
@@ -464,6 +910,7 @@ int World::PlannedEntries(const std::string& EventId)
 
 void World::Join(const std::string& EventId, int Npc)
 {
+	HoldGuard("Join");
 	Pending* P = FindPending(Queue, EventId);
 	if (!P || !Get(Npc))
 	{
@@ -485,6 +932,7 @@ void World::Join(const std::string& EventId, int Npc)
 
 void World::GrantAward(int Npc, bool Ring, bool Main)
 {
+	HoldGuard("GrantAward");
 	if (!Created || (Npc != -1 && !Get(Npc)))
 	{
 		return;
@@ -522,7 +970,7 @@ void World::GrantAward(int Npc, bool Ring, bool Main)
 	A.Event = T ? T->Name : Pick->Name;
 	A.Prize = T ? T->GtdCents / 5 : 0;
 	A.Entries = T ? T->Field : 0;
-	A.Tourney = Npc == -1 ? HeroBook.Events : Roster[static_cast<size_t>(Npc)].Stats.Events;
+	A.Tourney = Npc == -1 ? HeroBook.Events : People()[static_cast<size_t>(Npc)].Stats.Events;
 	if (Npc == -1)
 	{
 		HeroTrophies.push_back(A);
@@ -530,7 +978,7 @@ void World::GrantAward(int Npc, bool Ring, bool Main)
 	}
 	else
 	{
-		world::Npc& N = Roster[static_cast<size_t>(Npc)];
+		world::Npc& N = Edit(Npc);
 		N.Awards.push_back(A);
 		N.Bracelets += Ring ? 0 : 1;
 		N.Rings += Ring ? 1 : 0;
@@ -541,6 +989,7 @@ void World::GrantAward(int Npc, bool Ring, bool Main)
 
 void World::SetPlannedEntries(const std::string& EventId, int Entries)
 {
+	HoldGuard("SetPlannedEntries");
 	if (!Created)
 	{
 		return;
@@ -564,6 +1013,7 @@ void World::SetPlannedEntries(const std::string& EventId, int Entries)
 
 void World::KnownPlaces(const std::string& EventId, const std::vector<std::pair<int, int>>& Places)
 {
+	HoldGuard("KnownPlaces");
 	Pending* P = Created ? FindPending(Queue, EventId) : nullptr;
 	if (!P)
 	{
@@ -596,6 +1046,7 @@ void World::KnownPlaces(const std::string& EventId, const std::vector<std::pair<
 
 void World::HeroFinished(const std::string& EventId, int Place, Chips Prize, const TableReport& Report)
 {
+	HoldGuard("HeroFinished");
 	if (!Created)
 	{
 		return;
@@ -742,6 +1193,7 @@ void World::HeroFinished(const std::string& EventId, int Place, Chips Prize, con
 
 void World::BackRoomNight(double At, const std::vector<std::string>& Names, Chips HeroNet)
 {
+	HoldGuard("BackRoomNight");
 	for (const std::string& Name : Names)
 	{
 		const int Id = Find(Name);
@@ -756,6 +1208,7 @@ void World::BackRoomNight(double At, const std::vector<std::string>& Names, Chip
 
 void World::EmbercrestDone(double At, const std::vector<std::pair<std::string, int>>& Places, int HeroPlace, int FieldSize)
 {
+	HoldGuard("EmbercrestDone");
 	const int Day = sim::DayAt(At - 6.0 * 60.0); // it starts at 7 PM and can run past midnight
 	const std::string Id = "embercrest@" + std::to_string(Day);
 	Registered(Id);
@@ -891,6 +1344,7 @@ void Sim::Fade(World& W)
 
 void World::Remember(int Npc, MemoryKind Kind, const std::string& Where, Chips Amount, double At)
 {
+	HoldGuard("Remember");
 	const world::Npc* N = Get(Npc);
 	if (!N)
 	{
@@ -956,6 +1410,7 @@ void World::Remember(int Npc, MemoryKind Kind, const std::string& Where, Chips A
 
 void World::Lent(int Npc, bool Repaid, double At)
 {
+	HoldGuard("Lent");
 	if (!Get(Npc))
 	{
 		return;
@@ -970,6 +1425,7 @@ void World::Lent(int Npc, bool Repaid, double At)
 
 bool World::Bumped(int Npc, double At)
 {
+	HoldGuard("Bumped");
 	if (!Get(Npc))
 	{
 		return false;
@@ -993,6 +1449,7 @@ bool World::Bumped(int Npc, double At)
 
 const Bond* World::BondWith(int Npc) const
 {
+	HoldGuard("BondWith");
 	const auto It = HeroBonds.find(Npc);
 	return It == HeroBonds.end() ? nullptr : &It->second;
 }
@@ -1043,7 +1500,7 @@ std::vector<std::pair<int, double>> World::RoomLeaders(const std::string& Venue,
 		}
 	};
 	Consider(-1, HeroRoomRec);
-	for (const Npc& N : Roster)
+	for (const Npc& N : People())
 	{
 		if (!N.Faded)
 		{
@@ -1075,7 +1532,7 @@ int World::CircuitRank(int Npc) const
 	// Ahead: more points, or as many and an earlier id (the player's -1 is ahead of everyone on a tie).
 	int Rank = 1;
 	Rank += Npc >= 0 && HeroCircuit >= Mine ? 1 : 0;
-	for (const world::Npc& O : Roster)
+	for (const world::Npc& O : People())
 	{
 		if (O.Id != Npc && !O.Faded && O.CircuitPoints > 0.0 && (O.CircuitPoints > Mine || (O.CircuitPoints == Mine && O.Id < Npc)))
 		{
@@ -1093,12 +1550,12 @@ double World::CardCutLine(int Tier) const
 	}
 	const size_t Cut = static_cast<size_t>(badge::CardTop[Tier - 1]);
 	std::vector<double> All;
-	All.reserve(Roster.size() + 1);
+	All.reserve(People().size() + 1);
 	if (HeroCircuit > 0.0)
 	{
 		All.push_back(HeroCircuit);
 	}
-	for (const Npc& N : Roster)
+	for (const Npc& N : People())
 	{
 		if (!N.Faded && N.CircuitPoints > 0.0)
 		{
@@ -1206,14 +1663,16 @@ bool World::HallEligible(int Npc, int Year) const
 
 void World::HeroMoney(int Npc, Chips Cents, MemoryKind Kind, const std::string& Where, double At, bool Early)
 {
-	world::Npc* N = Created && Npc >= 0 && Npc < static_cast<int>(Roster.size()) ? &Roster[static_cast<size_t>(Npc)] : nullptr;
-	if (!N || N->Faded)
+	HoldGuard("HeroMoney");
+	const world::Npc* Seen = Created && Npc >= 0 && Npc < static_cast<int>(People().size()) ? &People()[static_cast<size_t>(Npc)] : nullptr;
+	if (!Seen || Seen->Faded)
 	{
 		return;
 	}
 	// Their money (private): what they can't cover simply isn't there to lose.
-	N->Bankroll = std::max<Chips>(0, N->Bankroll + Cents);
-	N->PeakRoll = std::max(N->PeakRoll, N->Bankroll);
+	world::Npc& N = Edit(Npc);
+	N.Bankroll = std::max<Chips>(0, N.Bankroll + Cents);
+	N.PeakRoll = std::max(N.PeakRoll, N.Bankroll);
 	++Rev;
 	++HeroRev;
 	if (Kind == MemoryKind::PaidLate && Cents != 0)
@@ -1247,6 +1706,7 @@ void World::HeroMoney(int Npc, Chips Cents, MemoryKind Kind, const std::string& 
 
 std::vector<int> World::Backers(int Max) const
 {
+	HoldGuard("Backers");
 	std::vector<int> Out;
 	const Chips Abi = HeroBook.PaidAbi();
 	if (!Created || Max <= 0 || Abi <= 0)
@@ -1279,17 +1739,28 @@ std::vector<int> World::Backers(int Max) const
 
 std::vector<int> World::EmbercrestRegulars() const
 {
+	HoldGuard("EmbercrestRegulars");
 	// Update 4 (SPEC v1.7 §3.18 R1, §6 PA-52): the pinned list once G2 sets it when the book opens (scene::PinRegulars). Never set in
 	// Phase A (the pin is disabled), so today's rule below answers.
 	if (!Regulars.empty())
 	{
 		return Regulars;
 	}
+	// Update 4 (SPEC v1.7 §6 PA-33): today's rule is a sort of the roster, so its answer is kept per planned day and revision: the
+	// world's people change only inside a turn (PlanDay plans tomorrow under a new Planned, and the turn's end moves Rev) or through a
+	// call that moves Rev (HeroMoney, GrantAward), and a load or a migration moves the version or the roster's size. Inside the turn
+	// it's always worked out fresh (the roster is mid-change), and not kept.
+	const std::array<int64_t, 5> Key{{static_cast<int64_t>(Rev), static_cast<int64_t>(Planned), static_cast<int64_t>(People().size()), static_cast<int64_t>(LoadedVersion),
+		static_cast<int64_t>(WorldSeed)}};
+	if (!HeldTurn.Running && Key == RegularsKey)
+	{
+		return RegularsMemo;
+	}
 	// Not who's playing this week (a break or a broke spell doesn't change who the room's regulars are). The room's
 	// own locals, then the town's live players, then its online players who've had the money for a live game (their
 	// best bankroll only grows, so they stay).
 	std::vector<std::pair<uint64_t, int>> Pool;
-	for (const Npc& N : Roster)
+	for (const Npc& N : People())
 	{
 		if (!N.Faded && N.St != Status::Retired && N.From != Origin::Cast && !N.Rival && N.Home == Region::Americas && N.Country == "US" &&
 			(N.Live >= LiveLevel::Local || N.PeakRoll >= 100000))
@@ -1304,11 +1775,17 @@ std::vector<int> World::EmbercrestRegulars() const
 	{
 		Out.push_back(Pool[I].second);
 	}
+	if (!HeldTurn.Running)
+	{
+		RegularsMemo = Out;
+		RegularsKey = Key;
+	}
 	return Out;
 }
 
 std::string World::SpokenGreeting(int Npc, uint32_t Salt) const
 {
+	HoldGuard("SpokenGreeting");
 	const Bond* B = BondWith(Npc);
 	if (!B || B->Memories.empty())
 	{
@@ -1355,6 +1832,7 @@ std::string World::SpokenGreeting(int Npc, uint32_t Salt) const
 
 std::string World::Greeting(int Npc, uint32_t Salt) const
 {
+	HoldGuard("Greeting");
 	const Bond* B = BondWith(Npc);
 	const world::Npc* N = Get(Npc);
 	if (!B || !N || B->Memories.empty())
@@ -1399,28 +1877,20 @@ std::string World::Greeting(int Npc, uint32_t Salt) const
 
 void World::KnownFinalTable(const std::string& /*EventId*/, const std::vector<KnownSeat>& /*Seats*/)
 {
+	HoldGuard("KnownFinalTable");
 	// §4.10.2, PA-32: no field plays on before G3 (B-session: the seats into Pending::KnownFt, which Resolve then reads).
 }
 
 void World::HeroBullet(const std::string& /*EventId*/)
 {
+	HoldGuard("HeroBullet");
 	// §4.13.1 rule 5, PA-32: no re-entry before G3 (B-session: one entry and its share of the pool on the pending event).
 }
 
 int World::HeroBullets(const std::string& /*EventId*/) const
 {
+	HoldGuard("HeroBullets");
 	return 0;
-}
-
-bool World::Holding() const
-{
-	// §3.7, PA-35: the held turn is off in Phase A (A3's machine in A-2): every turn runs whole inside AdvanceTo, as today.
-	return false;
-}
-
-void World::DrainHold()
-{
-	// §3.7, PA-35: nothing is ever held in Phase A, so there is nothing to finish.
 }
 } // namespace world
 } // namespace ss
