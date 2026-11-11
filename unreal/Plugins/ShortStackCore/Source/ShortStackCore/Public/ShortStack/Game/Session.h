@@ -387,6 +387,13 @@ public:
 	virtual void GearChanged(const std::string& /*ItemId*/, bool /*Owned*/) {}
 	/** The stream went live or ended (an ON AIR light, the ring light coming on). */
 	virtual void OnAir(bool /*Live*/) {}
+	/**
+	 * Update 4 (SPEC v1.7 §3.7, §6 PA-35; LEAD_CALLS Q-4): a named profiler scope opening (Begin true) or closing around the session's
+	 * world work, for Insights: "SS.World.Slice" (the frame's AdvanceTo), "SS.World.Turn" (a drain finishing a held turn at once) and
+	 * "SS.Save.Snapshot" (a background save's frozen world). Every opening is closed in the same call, nested, on the game thread. The
+	 * game module may map it to a CPU profiler scope; the default does nothing.
+	 */
+	virtual void Scope(const char* /*Name*/, bool /*Begin*/) {}
 };
 
 /**
@@ -1098,6 +1105,9 @@ private:
 	std::shared_ptr<const world::World> WorldSnap; // the same, frozen, for a host that saves in the background
 	double WorldSavedAt = -1.0e9;
 	int WorldSavedRev = -1;
+	// Update 4 (SPEC v1.7 §3.7 R5, §6 PA-35): a save asked for while the world's turn held, written the frame the turn completes
+	// (WorldStep); any save that runs clears it. Never set while TurnBudgetMs is unlimited (Phase A).
+	bool bSaveAfterHold = false;
 	void StartWorld(const SaveData* Loaded, world::Start S = world::Start::Established);
 	void WorldStep();
 	void WorldNote(const std::vector<std::string>& Fields);

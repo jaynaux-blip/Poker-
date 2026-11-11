@@ -1,4 +1,5 @@
 #include "ShortStack/Game/Session.h"
+#include "SessionHold.h"
 #include "../StrictFloat.h"
 
 #include "ShortStack/Game/Badges.h"
@@ -275,6 +276,7 @@ void Session::BadgeStep(double /*From*/, double To)
 	const int Due = ReviewDue(To);
 	if (Life.BadgeMonth < Due)
 	{
+		session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): the review reads the world's record of the player
 		Life.VerifiedHeld = badge::VerifiedNow(badge::OfHero(*this));
 		Life.BadgeMonth = Due;
 	}
@@ -284,6 +286,7 @@ void Session::BadgeStep(double /*From*/, double To)
 std::string Session::DebugBadge(const std::string& Args)
 {
 	using namespace session_badges_detail;
+	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): a grant writes the world, a describe reads it
 	const std::vector<std::string> W = Words(Args);
 	const std::string Cmd = W.empty() ? std::string() : Lower(W[0]);
 	const double Clock = WorldMinutes();

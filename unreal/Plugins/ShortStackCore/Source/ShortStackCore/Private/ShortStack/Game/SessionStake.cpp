@@ -1,4 +1,5 @@
 #include "ShortStack/Game/Session.h"
+#include "SessionHold.h"
 #include "../StrictFloat.h"
 
 #include "ShortStack/Game/Coach.h"
@@ -322,6 +323,7 @@ std::string Session::CounterStake(const std::string& OfferId, int Lever)
 
 std::string Session::ListAction(const std::string& EventId, int Permille, int MarkupPermille)
 {
+	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): the record and the view read the world
 	const rep::Public Rec = Record();
 	const stake::View V = session_stake_detail::ViewOf(*this, Rec);
 	const double World = WorldMinutes();
@@ -346,6 +348,7 @@ std::string Session::CancelListing(const std::string& EventId)
 
 std::string Session::ProposeSwap(const std::string& EntryId, const std::string& Partner, int Permille)
 {
+	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): the record and the view read the world
 	const rep::Public Rec = Record();
 	const stake::View V = session_stake_detail::ViewOf(*this, Rec);
 	const std::string Not = stake::ProposeSwap(Life.Stakes, V, EntryId, Partner, Permille);
@@ -443,6 +446,7 @@ void Session::StakeStep(double From, double To)
 	if (To - B.LookedAt >= 10.0 || B.LookedAt > To)
 	{
 		B.LookedAt = To;
+		session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): the record and the view read the world
 		Rec = Record();
 		V = session_stake_detail::ViewOf(*this, Rec);
 		Viewed = true;
@@ -455,6 +459,7 @@ void Session::StakeStep(double From, double To)
 	// A package's period end reads the record (its review).
 	if (!Viewed && std::any_of(B.Deals.begin(), B.Deals.end(), [To](const stake::Deal& D) { return D.K == stake::Kind::Package && D.State == stake::DealOpen && D.NextChop <= To; }))
 	{
+		session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): the record and the view read the world
 		Rec = Record();
 		V = session_stake_detail::ViewOf(*this, Rec);
 		Viewed = true;
@@ -698,6 +703,7 @@ void Session::StakeWorld()
 	{
 		return;
 	}
+	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): drain-on-touch (a whole world anyway, R6)
 	// Money and memories to the people, once each (World::HeroMoney, core-world's); the applied ones go at the next prune.
 	for (stake::Flow& F : B.ToWorld)
 	{

@@ -1,4 +1,5 @@
 #include "ShortStack/Game/Session.h"
+#include "SessionHold.h"
 #include "../StrictFloat.h"
 
 #include "ShortStack/Game/Format.h"
@@ -230,6 +231,7 @@ std::string Session::CounterDeal(const std::string& ContractId, int Lever)
 		return "That's not something they'd move on.";
 	}
 	const double World = WorldMinutes();
+	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): the counter reads the world's record of the player
 	const std::string Why = sponsor::Counter(Life.Sponsors, Record(), session_sponsor_detail::Resolve(Life.Sponsors, ContractId, World), static_cast<sponsor::Lever>(Lever), World);
 	if (Why.empty())
 	{
@@ -254,6 +256,7 @@ std::string Session::GiveNotice(const std::string& ContractId)
 std::string Session::AskForRaise(const std::string& ContractId)
 {
 	const double World = WorldMinutes();
+	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): the ask reads the world's record of the player
 	const std::string Why = sponsor::AskForRaise(Life.Sponsors, Record(), session_sponsor_detail::Resolve(Life.Sponsors, ContractId, World), World);
 	if (Why.empty())
 	{
@@ -343,6 +346,7 @@ void Session::SponsorStep(double From, double To)
 	{
 		return; // nothing due before then (a look, a review, a reply, a perk); every change outside the step resets it
 	}
+	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): something is due: the step reads the record
 	session_sponsor_detail::MarkSiteTitles(B, Life, History);
 	std::vector<std::pair<std::string, std::string>> Texts;
 	sponsor::StepContext Ctx;
@@ -395,6 +399,7 @@ std::string Session::DebugSponsor(const std::string& Args)
 	const double World = WorldMinutes();
 	sponsor::Book& B = Life.Sponsors;
 	B.NextAt = 0.0;
+	session_hold_detail::HoldDrain(LivingWorld, Hooks); // Update 4 (§3.7 R3, PA-35): the verbs read the world's record of the player
 	if (Cmd == "standing" && W.size() >= 2)
 	{
 		// A standing to test with (not saved), and the block road at the store, so Ray has something to say.
