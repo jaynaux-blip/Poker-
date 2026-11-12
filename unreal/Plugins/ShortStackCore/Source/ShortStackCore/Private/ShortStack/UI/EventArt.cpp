@@ -12,6 +12,12 @@
 // G1 F-look FL-3 (§2.7.5, §2.8.7): festart's FestTrophy, FestBelt and FestPin (UH/FestivalArt.h) have their bodies here, beside the
 // pens: the eight new trophies, Ring Rush's ring and the Championship Online's bracelet (today's art), the two title objects, the ten
 // belts and the pins, each one cached fragment. Nothing calls them outside tests until F-hubs' case, moments and pin wall.
+// G1 F-look FL-7 (§2.7.2's motion column, §2.7.7): the crest's own motions through SeriesCrest's Time (seconds since the hub opened, or
+// since what set the motion off): Ring Rush's ring spins once, PENNANT's dome bulbs chase once, REIGN's motif turns a quarter and back
+// like a key, WRIT's seal presses in. Each is an excursion that starts and ends at rest and runs live only while 0 < Time < its length;
+// at rest (Time <= 0, or past its run) a crest is drawn exactly as before, from its cached layers, so a still is any settled Time. Event
+// emblems never move. The Championship Online's Clasp: a glint over the cached bracelet while FestTrophy's Time runs (the champion's
+// moment). Nothing calls them with a running Time before F-hubs' hub and moments.
 #include "ShortStack/UI/EventArt.h"
 
 #include "ShortStack/Game/Festival.h"
@@ -2085,6 +2091,48 @@ void Rays(const Pen& P, const Metal& M, double Time, float Reach)
 	Glow(P, 0.0f, 0.0f, 1.5f * Reach, Fade(M.Mid, 0.5f));
 }
 
+// Update 4 (§2.7.2's motion column, §2.7.7; G1 F-look FL-7): a festival crest's own motion, a closed form of SeriesCrest's Time.
+enum class FestCrestMove : uint8_t
+{
+	None,
+	RingTurn,  // Ring Rush: the hanging ring spins once on hub open
+	DomeChase, // PENNANT (PavilionChase): the dome's bulbs chase once on hub open and once per finished event
+	KeyTurn,   // REIGN: the key turns once on hub open (the motif turns a quarter and back in its keyhole)
+	SealPress, // WRIT: the seal presses down on Main day (F-hubs passes a running Time on Main day only)
+};
+
+FestCrestMove FestCrestMoveOf(fest::Brand B)
+{
+	switch (B)
+	{
+	case fest::Brand::RingRush: return FestCrestMove::RingTurn;
+	case fest::Brand::Pennant: return FestCrestMove::DomeChase;
+	case fest::Brand::Reign: return FestCrestMove::KeyTurn;
+	case fest::Brand::Writ: return FestCrestMove::SealPress;
+	default: return FestCrestMove::None;
+	}
+}
+
+/** How long a brand's crest motion runs (seconds of Time); 0: its crest doesn't move. */
+double FestCrestSeconds(fest::Brand B)
+{
+	switch (FestCrestMoveOf(B))
+	{
+	case FestCrestMove::RingTurn: return 1.2;
+	case FestCrestMove::DomeChase: return 1.1;
+	case FestCrestMove::KeyTurn: return 1.0;
+	case FestCrestMove::SealPress: return 0.7;
+	default: return 0.0;
+	}
+}
+
+/** Where a brand's crest motion is at Time (0..1); 0, at rest, before it starts and once it has run (an excursion: its ends are rest). */
+float FestCrestPhaseOf(fest::Brand B, double Time)
+{
+	const double D = FestCrestSeconds(B);
+	return D > 0.0 && Time > 0.0 && Time < D ? static_cast<float>(Time / D) : 0.0f;
+}
+
 struct CrestLook
 {
 	Frame Shape = Frame::Medallion;
@@ -2105,6 +2153,9 @@ struct CrestLook
 	festart::Rim RimKind = festart::Rim::ByStakes;                // ByStakes: Rim (AlloyFor) as today
 	uint32_t Kit = 0, Accent = 0, Accent2 = 0, Gold = 0, Felt = 0; // the look's art colours (0xRRGGBB)
 	bool Wave = false;                                            // RCOP's silver wave band
+	// G1 F-look FL-7: the series crest's motion (SeriesCrest sets its brand; event emblems keep None) and, while it runs, its phase.
+	fest::Brand FestWhich = fest::Brand::None;
+	float FestPhase = 0.0f;
 };
 
 // The field's enamel. Update 4 (§2.7.4): a festival's look carries no enamel token, so a festival crest keeps these too (RiverLine's
@@ -2282,13 +2333,28 @@ std::vector<Vec2> FestBulbSpots(Frame F)
 	return Out;
 }
 
-/** The bulbs (Arch, Tower, Pavilion): lamps in the look's Gold, lit from the middle. */
-void FestBulbs(const Pen& P, Frame F, const Color& Lamp)
+/** The bulbs (Arch, Tower, Pavilion): lamps in the look's Gold, lit from the middle. Chase (G1 FL-7, PENNANT's PavilionChase, 0..1 while it
+ *  runs): a light running round the bulbs one by one, a halo on each as it passes. */
+void FestBulbs(const Pen& P, Frame F, const Color& Lamp, float Chase = 0.0f)
 {
 	for (const Vec2& Q : FestBulbSpots(F))
 	{
 		const Vec2 Spot = P.P(Q.X, Q.Y);
 		Disc(P, Q.X, Q.Y, 0.046f, Paint::Radial(Spot, 0.0f, Spot, 0.046f * P.S, Lift(Lamp, 0.6f), 0.55f, Lamp, Sink(Lamp, 0.45f)));
+	}
+	if (Chase > 0.0f)
+	{
+		const std::vector<Vec2> Spots = FestBulbSpots(F);
+		const float Head = Chase * (Fl(static_cast<double>(Spots.size())) + 2.0f) - 1.0f;
+		for (size_t K = 0; K < Spots.size(); ++K)
+		{
+			const float On = 1.0f - std::fabs(Fl(static_cast<double>(K)) - Head) / 1.5f;
+			if (On > 0.0f)
+			{
+				Disc(P, Spots[K].X, Spots[K].Y, 0.095f, Fade(Lift(Lamp, 0.85f), 0.45f * On));
+				Disc(P, Spots[K].X, Spots[K].Y, 0.05f, Fade(Lift(Lamp, 0.85f), On));
+			}
+		}
 	}
 }
 
@@ -2370,7 +2436,7 @@ void FestCrestDress(const Pen& P, const CrestLook& L, bool Rich)
 	}
 	if (Rich)
 	{
-		FestBulbs(P, L.Shape, Hex(L.Gold));
+		FestBulbs(P, L.Shape, Hex(L.Gold), FestCrestMoveOf(L.FestWhich) == FestCrestMove::DomeChase ? L.FestPhase : 0.0f);
 	}
 }
 
@@ -2436,8 +2502,61 @@ uint64_t CrestKey(const CrestLook& L, float Size)
 
 void CrestLayers(Canvas& C, const CrestLook& L, float Cx, float Cy, float Size, double Time, int Which);
 
+/** Ring Rush's RingTurn (G1 FL-7): the hanging ring spins once about its upright (its width the turn's cosine), eased in and out. */
+void FestRingTurn(const Pen& P, const Metal& M, const Color& Stone, float Phase)
+{
+	const float E = Phase * Phase * (3.0f - 2.0f * Phase);
+	const float Turn = std::cos(TwoPiF * E);
+	const float Sx = Turn >= 0.0f ? std::max(Turn, 0.05f) : std::min(Turn, -0.05f);
+	Canvas& C = *P.Cv;
+	C.Save();
+	C.Translate(P.X, 0.0f);
+	C.Scale(Sx, 1.0f);
+	C.Translate(-P.X, 0.0f);
+	HangingRing(P, M, Stone);
+	C.Restore();
+}
+
+/** REIGN's KeyTurn (the motif turns a quarter and back in its keyhole) and WRIT's seal press (the seal pressed in and let go, its shadow
+ *  tucked under it, a Signal Red ring spreading from the impression); G1 FL-7, drawn only while the motion runs. */
+void FestCrestMotif(const Pen& P, const CrestLook& L, FestCrestMove Move, float Mv, float Mk, const Tone& Emboss)
+{
+	const float Bump = std::sin(PiF * L.FestPhase);
+	Canvas& C = *P.Cv;
+	if (Move == FestCrestMove::KeyTurn)
+	{
+		const Vec2 O = P.P(0.0f, Mv);
+		C.Save();
+		C.Translate(O.X, O.Y);
+		C.Rotate(HalfPiF * Bump);
+		C.Translate(-O.X, -O.Y);
+		Draw(P.At(0.02f, Mv + 0.05f, Mk), L.Motif, Shadowed(0.45f));
+		Draw(P.At(0.0f, Mv, Mk), L.Motif, Emboss);
+		C.Restore();
+		return;
+	}
+	const float K = Mk * (1.0f - 0.14f * Bump);
+	const float Up = 1.0f - 0.8f * Bump;
+	Draw(P.At(0.02f * Up, Mv + 0.05f * Up, K), L.Motif, Shadowed(0.45f));
+	Draw(P.At(0.0f, Mv, K), L.Motif, Emboss);
+	const float Spread = 0.3f + 0.45f * L.FestPhase;
+	Hoop(P, 0.0f, Mv, Spread, Spread, Fade(Hex(L.Accent), 0.55f * (1.0f - L.FestPhase)), 0.03f);
+}
+
 void Crest(Canvas& C, const CrestLook& L, float Cx, float Cy, float Size, double Time)
 {
+	const float Moving = FestCrestPhaseOf(L.FestWhich, Time);
+	if (Moving > 0.0f && !FestLowDetail(L, Size))
+	{
+		// G1 FL-7 (§2.7.7): a festival crest's motion runs live, every layer drawn straight on; at rest it is the cached crest below.
+		CrestLook Live = L;
+		Live.FestPhase = Moving;
+		for (const int Layer : {CrestShadow, CrestRays, CrestBehind, CrestSun, CrestBadge, CrestGlints})
+		{
+			CrestLayers(C, Live, Cx, Cy, Size, Time, Layer);
+		}
+		return;
+	}
 	const uint64_t Key = CrestKey(L, Size);
 	const auto Still = [&](int Layer) {
 		C.Cached(Key * 131 + static_cast<uint64_t>(Layer), Cx, Cy, [&](Canvas& At) { CrestLayers(At, L, 0.0f, 0.0f, Size, 0.0, Layer); });
@@ -2580,8 +2699,16 @@ void CrestLayers(Canvas& C, const CrestLook& L, float Cx, float Cy, float Size, 
 	const float Mv = Banner ? -0.1f : 0.0f;
 	const float Mk = Banner ? 0.46f : 0.56f;
 	const Tone Emboss{M.Hi, M.Mid, Sink(M.Lo, 0.55f), Stone, Hex(0xffffff)};
-	Draw(P.At(0.02f, Mv + 0.05f, Mk), L.Motif, Shadowed(0.45f));
-	Draw(P.At(0.0f, Mv, Mk), L.Motif, Emboss);
+	const FestCrestMove Move = L.FestPhase > 0.0f ? FestCrestMoveOf(L.FestWhich) : FestCrestMove::None;
+	if (Move == FestCrestMove::KeyTurn || Move == FestCrestMove::SealPress)
+	{
+		FestCrestMotif(P, L, Move, Mv, Mk, Emboss); // G1 FL-7: REIGN's key, WRIT's seal
+	}
+	else
+	{
+		Draw(P.At(0.02f, Mv + 0.05f, Mk), L.Motif, Shadowed(0.45f));
+		Draw(P.At(0.0f, Mv, Mk), L.Motif, Emboss);
+	}
 
 	// In front: the bracelet, the banner, the crown, the ring, the diamond, the format's seal, the glints.
 	if (L.Bracelet)
@@ -2598,7 +2725,11 @@ void CrestLayers(Canvas& C, const CrestLook& L, float Cx, float Cy, float Size, 
 		Draw(P.At(0.02f, -1.02f, 0.4f), Glyph::Crown, Shadowed(0.4f));
 		Draw(P.At(0.0f, -1.06f, 0.4f), Glyph::Crown, Regal);
 	}
-	if (L.Ring)
+	if (L.Ring && L.FestPhase > 0.0f && FestCrestMoveOf(L.FestWhich) == FestCrestMove::RingTurn)
+	{
+		FestRingTurn(P, M, Hex(0xff4d6d), L.FestPhase); // G1 FL-7: Ring Rush's ring spins once
+	}
+	else if (L.Ring)
 	{
 		HangingRing(P, M, Hex(0xff4d6d));
 	}
@@ -3557,6 +3688,30 @@ void FestTrophyArt(Canvas& C, fest::Brand B, float Size, bool Lod, const std::ve
 	}
 }
 
+/** How long a trophy's motion runs (seconds of FestTrophy's Time): The Championship Online's Clasp (§2.7.2: at the champion's moment);
+ *  0 for every other trophy and title object (G1 FL-7). */
+double FestClaspSeconds(fest::Brand B, int Tier)
+{
+	return B == fest::Brand::Tco && Tier == 0 ? 0.9 : 0.0;
+}
+
+/** Where the Clasp is at Time (0..1); 0 at rest (before it starts, once it has run, and on the silhouette). */
+float FestClaspPhase(fest::Brand B, int Tier, bool Lod, double Time)
+{
+	const double D = FestClaspSeconds(B, Tier);
+	return !Lod && D > 0.0 && Time > 0.0 && Time < D ? static_cast<float>(Time / D) : 0.0f;
+}
+
+/** The Clasp (G1 FL-7): the bracelet's clasp, at the band's right-hand end, clicks shut: a platinum glow and a glint that pop and fade
+ *  over the cached bracelet. */
+void FestClaspGlint(Canvas& C, float Cx, float Cy, float Size, float Phase)
+{
+	const Pen P = Pen{&C, Cx, Cy, Size * 0.5f * FestTrophyFit}.At(0.0f, FestBraceletDv, FestBraceletK);
+	const float Pop = std::sin(PiF * Phase);
+	Glow(P, 0.88f, -0.12f, 0.36f * Pop + 0.02f, Fade(Hex(0xcfd6e3), 0.7f * Pop));
+	Glint(P, 0.88f, -0.12f, 0.06f + 0.2f * Pop, Fade(Hex(0xffffff), Pop));
+}
+
 /** A belt's dress (§2.7.5's belt column): the strap's two tones and pattern, the buckle's metal, plate, field and motif. */
 struct FestBeltLook
 {
@@ -4017,6 +4172,7 @@ void SeriesCrest(Canvas& C, const net::SeriesInfo& S, float Cx, float Cy, float 
 	const bool Year = Last.size() == 4 && std::isdigit(static_cast<unsigned char>(Last[0])) != 0;
 	L.Banner = Year ? Last : S.Short;
 	FestDress(L, SeriesLook);
+	L.FestWhich = SeriesLook != nullptr ? SeriesLook->Which : fest::Brand::None; // G1 FL-7: the series crest's motion (§2.7.7)
 	Crest(C, L, Cx, Cy, Size, Time);
 }
 void Trophy(Canvas& C, const world::Award& A, float Cx, float Cy, float Size, double Time)
@@ -4096,10 +4252,11 @@ void Champion(AvatarSpec& Pic, const std::vector<world::Award>& Awards)
 } // namespace eventart
 
 // Update 4 (SPEC v1.7 §2.7.5, §2.8.7; G1 F-look FL-3): the festivals' trophies, belts and pins, declared in UH/FestivalArt.h and drawn
-// here beside eventart_detail's pens. Each is one cached fragment (a second draw adds only the copy); Time moves nothing.
+// here beside eventart_detail's pens. Each is one cached fragment (a second draw adds only the copy); Time moves nothing but The
+// Championship Online's Clasp (G1 FL-7), a glint drawn over the fragment while it runs.
 namespace festart
 {
-void FestTrophy(Canvas& C, fest::Brand B, float Cx, float Cy, float Size, double /*Time*/, bool Lod, const std::vector<int>& Fields, int Tier)
+void FestTrophy(Canvas& C, fest::Brand B, float Cx, float Cy, float Size, double Time, bool Lod, const std::vector<int>& Fields, int Tier)
 {
 	// A brand with no trophy at this tier draws nothing (Tier 1: only PENNANT's and REIGN's title objects; RCOP has none, §2.8.5).
 	if (B <= fest::Brand::None || B >= fest::Brand::Count || Size <= 0.0f || fest::TrophyName(B, Tier)[0] == '\0')
@@ -4108,6 +4265,11 @@ void FestTrophy(Canvas& C, fest::Brand B, float Cx, float Cy, float Size, double
 	}
 	C.Cached(eventart::eventart_detail::FestTrophyKey(B, Size, Lod, Fields, Tier), Cx, Cy,
 		[&](Canvas& At) { eventart::eventart_detail::FestTrophyArt(At, B, Size, Lod, Fields, Tier); });
+	const float Clasp = eventart::eventart_detail::FestClaspPhase(B, Tier, Lod, Time);
+	if (Clasp > 0.0f)
+	{
+		eventart::eventart_detail::FestClaspGlint(C, Cx, Cy, Size, Clasp);
+	}
 }
 
 void FestBelt(Canvas& C, fest::Brand B, float Cx, float Cy, float Size, double /*Time*/, bool Lod)

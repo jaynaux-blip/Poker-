@@ -18,6 +18,11 @@
 // every word the attractions paint is listed). Draws the band straight onto its own canvases, emits nothing.
 // G1 FL-5, fix round 1: FestCopyUi's art half screens §1.2 item 5's avoided words after the fill (FestArtInventory's only screen for
 // them), and FestBandstand finds no booth back wall under the arch. Test-only.
+// G1 FL-7 (F-look): FestCrestLowDetail's FL-7 half (QF-10, no new check name), FestMotionsLook: the stills sub-assertion (with Still every
+// word-mark and banner draws its settled frame; every crest motion rests outside its run), the motions moving and settling (WRIT's flap,
+// FEIGN's bob, PUSH's gauge per world minute, GRIT's curtains, RCOP's waves per world minute, Summer Slam's rays, REIGN's door-light, the
+// crests' ring, key, seal and dome chase, the Clasp), the word-marks (face, caps, twice print, tracking, FEIGN's letters, the underlines,
+// 1k vertices and 40 runs at 46) and the banner (inside its rect, 6k vertices settled, cached ground). Draws, emits nothing.
 #include "UiSeg.h"
 #include "CopyLint.h"
 #include "Trademarks.h"
@@ -60,6 +65,10 @@ std::vector<Vec2> FramePts(Frame F, float K);
 uint64_t FestTrophyKey(fest::Brand B, float Size, bool Lod, const std::vector<int>& Fields, int Tier);
 uint64_t FestBeltKey(fest::Brand B, float Size, bool Lod);
 uint64_t FestPinKey(fest::Brand B, int Grade, world::FestMark Mark, float Size);
+// G1 FL-7: the crest motions' and the Clasp's clocks (FestCrestLowDetail's stills sub-assertion reads where each rests).
+float FestCrestPhaseOf(fest::Brand B, double Time);
+double FestCrestSeconds(fest::Brand B);
+double FestClaspSeconds(fest::Brand B, int Tier);
 } // namespace eventart_detail
 } // namespace eventart
 // UI/IgniteArt.cpp's (G1 FL-5): the cache key of the attraction's bulbs row for a band (FestBandBudget asks Canvas::IsCached for it), and
@@ -73,6 +82,11 @@ namespace festart
 namespace festart_detail
 {
 const char* FestHubSign();
+// G1 FL-7: when the word-mark's and the banner's motions settle (their stills' clocks), and their settled fragments' cache keys.
+double FestWordSettle(const FestivalLook& L, const std::string& Text);
+double FestBannerSettle(const FestivalLook& L);
+uint64_t FestWordMarkKey(const FestivalLook& L, const std::string& Shown, float Size, int Minute);
+uint64_t FestBannerKey(const FestivalLook& L, const Rect& R, int Layer, int Minute);
 } // namespace festart_detail
 } // namespace festart
 } // namespace ui
@@ -653,8 +667,12 @@ bool HoldsCentreLook(const std::vector<ss::ui::Vec2>& P)
  * does; the six festival glyphs and frames draw their own bodies (not the star, not the medallion). Printed: each look's counts and the
  * crest cache (3 sizes x 10 looks x 2 scales). QF-3: a series F-net flags as a festival finds the look of its own brand (vacuous until
  * F-net's calendar).
- * Planted bug: SlotOf unstripped ("ignite.feign26" reads "ignite": every rival festival loses its look).
+ * G1 FL-7 (QF-10, accepted: no new check name): the stills sub-assertion and the word-marks, FestMotionsLook below.
+ * Planted bug: SlotOf unstripped ("ignite.feign26" reads "ignite": every rival festival loses its look). FL-7's: Curtains animating while
+ * Still.
  */
+void FestMotionsLook();
+
 void FestCrestLowDetail()
 {
 	namespace ea = ss::ui::eventart;
@@ -779,6 +797,7 @@ void FestCrestLowDetail()
 		}
 	}
 	std::printf("  crest: %d series flagged Festival (F-net's data) each find their own brand's look\n", Flagged);
+	FestMotionsLook();
 }
 
 /** One drawing of a cached festival piece on a fresh canvas at Scale: whether its Key was cached before and after the drawing, whether
@@ -837,6 +856,466 @@ ArtRunLook RunArtLook(const std::function<void(ss::ui::Canvas&)>& Paint, uint64_
 	}
 	R.Height = Bottom > Top ? Bottom - Top : 0.0f;
 	return R;
+}
+
+// ------------------------------------------------------------------ G1 FL-7: the word-marks, the banner and the motions (QF-10)
+
+/** One drawing on a fresh 1600 x 962 canvas at Scale: its vertices and text runs (kept) and a fingerprint of all of it (geometry, colours,
+ *  indices, and each run's text, place, size, face and colour: a letter that bobs or flaps changes it). */
+struct MarkRunLook
+{
+	std::vector<ss::ui::Vertex> Verts;
+	std::vector<ss::ui::TextItem> Runs;
+	uint64_t Hash = 0;
+};
+
+MarkRunLook RunMarkLook(const std::function<void(ss::ui::Canvas&)>& Paint, float Scale = 1.0f)
+{
+	ui_test::TableMeasurer M;
+	ss::ui::DrawList L;
+	ss::ui::Canvas C(L, M, 1600.0f, 962.0f, Scale);
+	Paint(C);
+	MarkRunLook R;
+	uint64_t H = ListPrintLook(L);
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type != ss::ui::DrawCmd::Kind::Text)
+		{
+			continue;
+		}
+		const ss::ui::TextItem& T = Cmd.Text;
+		const float F[8] = {T.X, T.Y, T.BaselineY, T.SizePx, T.Col.R, T.Col.G, T.Col.B, T.Col.A};
+		const int Face = static_cast<int>(T.Face);
+		H = FnvLook(H, F, sizeof(F));
+		H = FnvLook(H, &Face, sizeof(Face));
+		H = FnvLook(H, T.Text.data(), T.Text.size());
+		R.Runs.push_back(T);
+	}
+	R.Verts = L.Vertices;
+	R.Hash = H;
+	return R;
+}
+
+/** A festival's name per look, as F-net prints them (the word-mark prints the festival's name). */
+std::string MarkNameLook(Brand B)
+{
+	static const char* const Names[] = {"", "RCOP 2026", "Ring Rush 2027", "The Championship Online 2027", "Summer Slam 2027", "FEIGN 2026", "PUSH 2027",
+		"WRIT 2027", "GRIT 2027", "PENNANT 2027", "REIGN 2027"};
+	return Names[static_cast<int>(B)];
+}
+
+/** §2.8.2's banner rect in the look's host (RunItTwice's in brackets there). */
+ss::ui::Rect BannerRectLook(Brand B)
+{
+	return HostLook(B) == SiteId::RunItTwice ? ss::ui::Rect{232.0f, 144.0f, 1344.0f, 196.0f} : ss::ui::Rect{24.0f, 132.0f, 1552.0f, 204.0f};
+}
+
+/** The word-mark at the hub banner's size and place (§2.8.2: 46 at x 210, baseline 196). */
+MarkRunLook MarkLook(Brand B, double Time, float Day, bool Still, float Scale = 1.0f)
+{
+	const std::string Name = MarkNameLook(B);
+	return RunMarkLook([&](ss::ui::Canvas& C) { festart::FestWordMark(C, festart::LookOf(B), Name, 210.0f, 196.0f, 46.0f, Time, Day, Still); }, Scale);
+}
+
+MarkRunLook BannerLook(Brand B, double SinceOpen, float Day, bool MainDay, bool Still, float Scale = 1.0f)
+{
+	const ss::ui::Rect R = BannerRectLook(B);
+	return RunMarkLook([&](ss::ui::Canvas& C) { festart::FestBanner(C, festart::LookOf(B), R, SinceOpen, Day, MainDay, Still); }, Scale);
+}
+
+MarkRunLook CrestAtLook(Brand B, float Size, double Time)
+{
+	const ss::net::SeriesInfo S = CrestSeriesLook(B);
+	return RunMarkLook([&](ss::ui::Canvas& C) { ss::ui::eventart::SeriesCrest(C, S, 200.0f, 200.0f, Size, Time); });
+}
+
+MarkRunLook TrophyAtLook(Brand B, float Size, double Time, bool Lod)
+{
+	return RunMarkLook([&](ss::ui::Canvas& C) { festart::FestTrophy(C, B, 200.0f, 200.0f, Size, Time, Lod); });
+}
+
+/** A word-mark's readable runs (Hot White, or FEIGN's pink and mint letters), left to right. */
+std::vector<ss::ui::TextItem> ReadableLook(const MarkRunLook& R, const festart::FestivalLook& L)
+{
+	std::vector<ss::ui::TextItem> Out;
+	for (const ss::ui::TextItem& T : R.Runs)
+	{
+		const uint32_t C = RgbLook(T.Col);
+		if (C == 0xffffff || (L.Which == Brand::Feign && (C == L.Accent || C == L.Accent2)))
+		{
+			Out.push_back(T);
+		}
+	}
+	std::stable_sort(Out.begin(), Out.end(), [](const ss::ui::TextItem& A, const ss::ui::TextItem& B) { return A.X < B.X; });
+	return Out;
+}
+
+/** The vertices wearing Rgb at alpha MinA or more: how many, and their mean x and y. */
+struct InkAtLook
+{
+	int N = 0;
+	float X = 0.0f, Y = 0.0f;
+};
+
+InkAtLook InkLook(const MarkRunLook& R, uint32_t Rgb, float MinA)
+{
+	InkAtLook Out;
+	for (const ss::ui::Vertex& V : R.Verts)
+	{
+		if (V.Col.A >= MinA && RgbLook(V.Col) == Rgb)
+		{
+			++Out.N;
+			Out.X += V.X;
+			Out.Y += V.Y;
+		}
+	}
+	if (Out.N > 0)
+	{
+		Out.X /= static_cast<float>(Out.N);
+		Out.Y /= static_cast<float>(Out.N);
+	}
+	return Out;
+}
+
+/** Whether Key is cached at scale 1 (a fresh canvas asks the thread's cache). */
+bool CachedLook(uint64_t Key)
+{
+	ui_test::TableMeasurer M;
+	ss::ui::DrawList L;
+	ss::ui::Canvas C(L, M, 1600.0f, 962.0f, 1.0f);
+	return C.IsCached(Key);
+}
+
+/**
+ * FestCrestLowDetail's FL-7 half (QF-10, accepted; §2.7.1, §2.7.2's word-mark and motion columns, §2.7.7; PLAN_FLOOK FL-7):
+ * - The stills: with Still, every word-mark and banner draws its settled frame (the draw list at its motion's end) at any clock, on Main
+ *   day and off; every crest motion (Ring Rush's ring, PENNANT's dome, REIGN's key, WRIT's seal) rests before it starts and once it has
+ *   run (a crest's still is a settled Time), and only The Championship Online's trophy moves (the Clasp).
+ * - The motions move and settle: WRIT's letters flap in one by one; FEIGN's bob on a slow sine within 8% of the size; PUSH's gauge fills on
+ *   open to the day's progress (its needle at the day's share of the bar), moving once a world minute, each minute's settled mark one
+ *   cached fragment; GRIT's curtains part; RCOP's waves rise and climb through the day, cached per world minute; Summer Slam's rays turn
+ *   for good; REIGN's door-light comes up on Main day only; the crests' motions run once and come back to the crest at rest; PENNANT's
+ *   dome chase lights its bulbs one by one; the Clasp glints over the cached bracelet and never on the silhouette.
+ * - The word-marks (§2.7.2): each look's face (BlackItalic, BoldCondensed, or the site's bold title face), the festival's name spelled in
+ *   capitals where the look sets caps and as written for RiverLine's four, RunItTwice's three twice-printed (a Signal Red under-copy at
+ *   the site's offset), WRIT and REIGN tracked wide (0.28 of the size), FEIGN's funhouse letters, PENNANT's stitched underline and PUSH's
+ *   gauge, no underline on the other eight, at most 1k vertices and 40 runs at 46 (printed at both scales: F-hubs' hub budget).
+ * - The banner: inside its rect (Summer Slam's rays are clipped to it), at most 6k vertices settled at both scales (printed), its ground
+ *   one cached fragment, the ten looks' banners distinct, no text.
+ * Planted bug: Curtains animating while Still (FestBanner reads SinceOpen for GRIT's curtains).
+ */
+void FestMotionsLook()
+{
+	namespace fd = festart::festart_detail;
+	namespace ead = ss::ui::eventart::eventart_detail;
+	const double Clocks[] = {-1.0, 0.0, 0.1, 0.3, 0.55, 0.9, 1.25, 2.0, 7.3};
+	const float Day = 0.4f; // 9:36 AM (world minute 576)
+
+	// The stills.
+	for (const Brand B : AllLook)
+	{
+		const festart::FestivalLook& L = festart::LookOf(B);
+		const std::string Who = std::string(" (") + NameLook(B) + ")";
+		const double WordEnd = fd::FestWordSettle(L, MarkNameLook(B));
+		const double BannerEnd = fd::FestBannerSettle(L);
+		const uint64_t Word = MarkLook(B, WordEnd, Day, false).Hash;
+		const uint64_t Banner[2] = {BannerLook(B, BannerEnd, Day, false, false).Hash, BannerLook(B, BannerEnd, Day, true, false).Hash};
+		bool WordStill = true;
+		bool BannerStill = true;
+		for (const double T : Clocks)
+		{
+			WordStill = WordStill && MarkLook(B, T, Day, true).Hash == Word;
+			for (int Main = 0; Main < 2; ++Main)
+			{
+				BannerStill = BannerStill && BannerLook(B, T, Day, Main == 1, true).Hash == Banner[Main];
+			}
+		}
+		ExpectLook(WordStill, "FestCrestLowDetail (stills): with Still the word-mark draws its settled frame (the one at its motion's end) at any clock" + Who);
+		ExpectLook(BannerStill, "FestCrestLowDetail (stills): with Still the banner draws its settled frame (the one at its motions' end) at any clock, on Main day and off" + Who);
+		const double CrestEnd = ead::FestCrestSeconds(B);
+		const bool Rests = ead::FestCrestPhaseOf(B, -1.0) == 0.0f && ead::FestCrestPhaseOf(B, 0.0) == 0.0f && ead::FestCrestPhaseOf(B, CrestEnd) == 0.0f &&
+			ead::FestCrestPhaseOf(B, CrestEnd + 5.0) == 0.0f;
+		const bool Moves = CrestEnd > 0.0 && ead::FestCrestPhaseOf(B, CrestEnd * 0.5) > 0.0f;
+		const bool Owns = B == Brand::RingRush || B == Brand::Pennant || B == Brand::Reign || B == Brand::Writ;
+		ExpectLook(Rests && Moves == Owns,
+			"FestCrestLowDetail (stills): the crest's motion rests before it starts and once it has run, and runs between (Ring Rush's ring, PENNANT's dome, REIGN's key, "
+			"WRIT's seal; no other crest moves)" + Who);
+		const double ClaspEnd = ead::FestClaspSeconds(B, 0);
+		ExpectLook((ClaspEnd > 0.0) == (B == Brand::Tco) && ead::FestClaspSeconds(B, 1) == 0.0, "FestCrestLowDetail (stills): only The Championship Online's trophy moves (the Clasp)" + Who);
+		std::printf("  stills: %-11s word-mark settles at %.2f s, banner at %.2f s, crest motion runs %.2f s, trophy %.2f s\n", NameLook(B), WordEnd, BannerEnd, CrestEnd, ClaspEnd);
+	}
+
+	// WRIT's flap: tiles first, the letters flapping in one by one, then the mark holds.
+	{
+		const festart::FestivalLook& L = festart::LookOf(Brand::Writ);
+		const double End = fd::FestWordSettle(L, MarkNameLook(Brand::Writ));
+		const MarkRunLook Before = MarkLook(Brand::Writ, -0.5, Day, false);
+		const MarkRunLook Early = MarkLook(Brand::Writ, 0.3, Day, false);
+		const MarkRunLook Settled = MarkLook(Brand::Writ, End, Day, false);
+		const size_t Shown = ReadableLook(Early, L).size();
+		const size_t All = ReadableLook(Settled, L).size();
+		std::printf("  motions: WRIT's flap: %zu of %zu letters at 0.3 s (%zu vertices of tiles), all at %.2f s\n", Shown, All, Early.Verts.size(), End);
+		ExpectLook(ReadableLook(Before, L).empty() && !Before.Verts.empty() && Shown > 0 && Shown < All && !Early.Verts.empty() && Settled.Verts.empty() &&
+				MarkLook(Brand::Writ, End + 3.0, Day, false).Hash == Settled.Hash,
+			"FestCrestLowDetail (motions): WRIT's word-mark flaps in letter by letter (split-flap tiles first), then holds");
+	}
+	// FEIGN's bob: the letters ride a slow sine, within 8% of the size of the baseline.
+	{
+		const festart::FestivalLook& L = festart::LookOf(Brand::Feign);
+		const MarkRunLook Still = MarkLook(Brand::Feign, 1.2, Day, false);
+		float Lo = 1e9f;
+		float Hi = -1e9f;
+		float Far = 0.0f;
+		for (const ss::ui::TextItem& T : ReadableLook(Still, L))
+		{
+			Lo = std::min(Lo, T.BaselineY);
+			Hi = std::max(Hi, T.BaselineY);
+			Far = std::max(Far, std::fabs(T.BaselineY - 196.0f));
+		}
+		std::printf("  motions: FEIGN's bob: baselines %.2f to %.2f at 1.2 s (at most %.2f off)\n", static_cast<double>(Lo), static_cast<double>(Hi), static_cast<double>(Far));
+		ExpectLook(MarkLook(Brand::Feign, 0.4, Day, false).Hash != Still.Hash && Hi - Lo > 1.0f && Far <= 0.08f * 46.0f + 0.01f,
+			"FestCrestLowDetail (motions): FEIGN's letters bob on a slow sine, within 8% of the size");
+	}
+	// PUSH's gauge: it fills on open to the day's progress, which moves once a world minute, each minute's mark one cached fragment.
+	{
+		const festart::FestivalLook& L = festart::LookOf(Brand::Push);
+		const std::string Name = MarkNameLook(Brand::Push);
+		const double End = fd::FestWordSettle(L, Name);
+		const MarkRunLook Full = MarkLook(Brand::Push, End, Day, false);
+		ExpectLook(MarkLook(Brand::Push, 0.3, Day, false).Hash != Full.Hash && MarkLook(Brand::Push, End + 4.0, Day, false).Hash == Full.Hash,
+			"FestCrestLowDetail (motions): PUSH's gauge fills on hub open, then holds");
+		ExpectLook(MarkLook(Brand::Push, End, Day + 0.2f / 1440.0f, false).Hash == Full.Hash && MarkLook(Brand::Push, End, Day + 1.0f / 1440.0f, false).Hash != Full.Hash &&
+				CachedLook(fd::FestWordMarkKey(L, Name, 46.0f, 576)) && !CachedLook(fd::FestWordMarkKey(L, Name, 46.0f, 1439)),
+			"FestCrestLowDetail (motions): PUSH's gauge moves once a world minute, each minute's settled mark one cached fragment");
+		ui_test::TableMeasurer M;
+		const float Bar0 = 210.0f + 0.04f * 46.0f;
+		const float BarW = M.Width(Name, ss::ui::Font::BlackItalic, 46.0f) - 0.1f * 46.0f;
+		const float At25 = InkLook(MarkLook(Brand::Push, End, 0.25f, false), L.Accent2, 0.99f).X;
+		const float At75 = InkLook(MarkLook(Brand::Push, End, 0.75f, false), L.Accent2, 0.99f).X;
+		std::printf("  motions: PUSH's gauge needle at %.1f (day 0.25) and %.1f (day 0.75) on a bar %.1f to %.1f\n", static_cast<double>(At25), static_cast<double>(At75),
+			static_cast<double>(Bar0), static_cast<double>(Bar0 + BarW));
+		ExpectLook(std::fabs(At25 - (Bar0 + 0.25f * BarW)) <= 0.6f && std::fabs(At75 - (Bar0 + 0.75f * BarW)) <= 0.6f,
+			"FestCrestLowDetail (motions): PUSH's gauge fills to the day's progress (its needle at the day's share of the bar)");
+		const MarkRunLook Old = RunMarkLook([&](ss::ui::Canvas& C) { festart::FestWordMark(C, L, Name, 210.0f, 196.0f, 46.0f, End, false); });
+		ExpectLook(Old.Hash == MarkLook(Brand::Push, End, 1.0f, false).Hash, "FestCrestLowDetail (motions): the word-mark without a day draws PUSH's gauge full");
+	}
+	// The banner's motions.
+	{
+		ExpectLook(BannerLook(Brand::Grit, 0.3, Day, false, false).Hash != BannerLook(Brand::Grit, 1.4, Day, false, false).Hash &&
+				BannerLook(Brand::Grit, 1.4, Day, false, false).Hash == BannerLook(Brand::Grit, 6.0, Day, false, false).Hash,
+			"FestCrestLowDetail (motions): GRIT's curtains part on hub open, then hold");
+		const festart::FestivalLook& Rcop = festart::LookOf(Brand::Rcop);
+		const MarkRunLook Risen = BannerLook(Brand::Rcop, 1.6, Day, false, false);
+		const float Dawn = InkLook(BannerLook(Brand::Rcop, 1.6, 0.1f, false, false), Rcop.Accent2, 0.4f).Y;
+		const float Dusk = InkLook(BannerLook(Brand::Rcop, 1.6, 0.9f, false, false), Rcop.Accent2, 0.4f).Y;
+		std::printf("  motions: RCOP's top wave at y %.1f (day 0.1) and %.1f (day 0.9)\n", static_cast<double>(Dawn), static_cast<double>(Dusk));
+		ExpectLook(BannerLook(Brand::Rcop, 0.5, Day, false, false).Hash != Risen.Hash && BannerLook(Brand::Rcop, 9.0, Day, false, false).Hash == Risen.Hash && Dawn > Dusk + 20.0f,
+			"FestCrestLowDetail (motions): RCOP's waves rise on hub open to the day's mark, which climbs through the day");
+		ExpectLook(BannerLook(Brand::Rcop, 1.6, Day + 0.2f / 1440.0f, false, false).Hash == Risen.Hash && BannerLook(Brand::Rcop, 1.6, Day + 1.0f / 1440.0f, false, false).Hash != Risen.Hash &&
+				CachedLook(fd::FestBannerKey(Rcop, BannerRectLook(Brand::Rcop), 1, 576)),
+			"FestCrestLowDetail (motions): RCOP's wave moves once a world minute, each minute's settled wave one cached fragment");
+		ExpectLook(BannerLook(Brand::Slam, 0.0, Day, false, false).Hash != BannerLook(Brand::Slam, 5.0, Day, false, false).Hash,
+			"FestCrestLowDetail (motions): Summer Slam's rays turn for good (live)");
+		const uint64_t Lit = BannerLook(Brand::Reign, 0.8, Day, true, false).Hash;
+		bool MainOnly = true;
+		for (const Brand B : AllLook)
+		{
+			MainOnly = MainOnly && (B == Brand::Reign) == (BannerLook(B, 5.0, Day, true, false).Hash != BannerLook(B, 5.0, Day, false, false).Hash);
+		}
+		ExpectLook(BannerLook(Brand::Reign, 0.3, Day, true, false).Hash != Lit && BannerLook(Brand::Reign, 4.0, Day, true, false).Hash == Lit && MainOnly,
+			"FestCrestLowDetail (motions): REIGN's door-light comes up on Main day (and only REIGN's banner knows Main day)");
+	}
+	// The crests' motions: once round and back to the crest at rest (40 units: no glints twinkle on the clock).
+	for (const Brand B : {Brand::RingRush, Brand::Reign, Brand::Writ})
+	{
+		const double End = ead::FestCrestSeconds(B);
+		const uint64_t Rest = CrestAtLook(B, 40.0f, 0.0).Hash;
+		ExpectLook(CrestAtLook(B, 40.0f, End * 0.5).Hash != Rest && CrestAtLook(B, 40.0f, End * 0.2).Hash != Rest && CrestAtLook(B, 40.0f, End).Hash == Rest &&
+				CrestAtLook(B, 40.0f, End + 3.7).Hash == Rest && CrestAtLook(B, 40.0f, -2.0).Hash == Rest,
+			std::string("FestCrestLowDetail (motions): the crest's motion runs once and comes back to the crest at rest (") + NameLook(B) + ")");
+	}
+	{
+		// PENNANT's dome chase (bulbs are drawn above 44 units): a halo runs round the dome bulb by bulb while it runs, none at rest.
+		const festart::FestivalLook& L = festart::LookOf(Brand::Pennant);
+		const uint32_t Halo = RgbLook(ss::ui::Mix(ss::ui::Hex(L.Gold), ss::ui::Hex(0xffffff), 0.85f));
+		const double End = ead::FestCrestSeconds(Brand::Pennant);
+		const InkAtLook Early = InkLook(CrestAtLook(Brand::Pennant, 150.0f, End * 0.3), Halo, 0.05f);
+		const InkAtLook Late = InkLook(CrestAtLook(Brand::Pennant, 150.0f, End * 0.7), Halo, 0.05f);
+		std::printf("  motions: PENNANT's dome chase: %d halo vertices at x %.1f (0.3 of the run), %d at x %.1f (0.7)\n", Early.N, static_cast<double>(Early.X), Late.N,
+			static_cast<double>(Late.X));
+		ExpectLook(Early.N > 0 && Late.N > 0 && std::fabs(Early.X - Late.X) > 10.0f && InkLook(CrestAtLook(Brand::Pennant, 150.0f, 0.0), Halo, 0.05f).N == 0 &&
+				InkLook(CrestAtLook(Brand::Pennant, 150.0f, End), Halo, 0.05f).N == 0,
+			"FestCrestLowDetail (motions): PENNANT's dome bulbs chase once, bulb by bulb, and rest unlit by the chase");
+		// The Clasp: a glint over the cached bracelet while it runs; at rest, and on the silhouette, the cached fragment alone.
+		const double Clasp = ead::FestClaspSeconds(Brand::Tco, 0);
+		const uint64_t Rest = TrophyAtLook(Brand::Tco, 54.0f, 0.0, false).Hash;
+		ExpectLook(TrophyAtLook(Brand::Tco, 54.0f, Clasp * 0.5, false).Hash != Rest && TrophyAtLook(Brand::Tco, 54.0f, Clasp, false).Hash == Rest &&
+				TrophyAtLook(Brand::Tco, 54.0f, Clasp + 2.0, false).Hash == Rest && TrophyAtLook(Brand::Tco, 30.0f, Clasp * 0.5, true).Hash == TrophyAtLook(Brand::Tco, 30.0f, 0.0, true).Hash &&
+				TrophyAtLook(Brand::Rcop, 54.0f, Clasp * 0.5, false).Hash == TrophyAtLook(Brand::Rcop, 54.0f, 0.0, false).Hash,
+			"FestCrestLowDetail (motions): The Championship Online's Clasp glints once over the cached bracelet (never on the silhouette, on no other trophy)");
+	}
+
+	// The word-marks.
+	ui_test::TableMeasurer M;
+	for (const Brand B : AllLook)
+	{
+		const festart::FestivalLook& L = festart::LookOf(B);
+		const std::string Who = std::string(" (") + NameLook(B) + ")";
+		const std::string Name = MarkNameLook(B);
+		std::string Shown = Name;
+		if (L.Caps)
+		{
+			std::transform(Shown.begin(), Shown.end(), Shown.begin(), [](char Ch) { return Ch >= 'a' && Ch <= 'z' ? static_cast<char>(Ch - 'a' + 'A') : Ch; });
+		}
+		const double End = fd::FestWordSettle(L, Name);
+		const MarkRunLook At1 = MarkLook(B, End, Day, false);
+		const MarkRunLook At15 = MarkLook(B, End, Day, false, 1.5f);
+		std::printf("  word-mark: %-11s \"%s\" at 46: %zu, %zu vertices and %zu, %zu runs (scales 1, 1.5)\n", NameLook(B), Shown.c_str(), At1.Verts.size(), At15.Verts.size(),
+			At1.Runs.size(), At15.Runs.size());
+		ExpectLook(At1.Verts.size() <= 1000 && At15.Verts.size() <= 1000 && At1.Runs.size() <= 40 && At15.Runs.size() <= 40,
+			"FestCrestLowDetail (word-mark): at most 1k vertices and 40 runs at the banner's 46, both scales" + Who);
+		const ss::ui::Font Face = L.WordFace >= 0 ? static_cast<ss::ui::Font>(L.WordFace) : ss::ui::Font::Bold;
+		bool Faced = !At1.Runs.empty();
+		for (const ss::ui::TextItem& T : At1.Runs)
+		{
+			Faced = Faced && T.Face == Face;
+		}
+		ExpectLook(Faced, "FestCrestLowDetail (word-mark): set in the look's face (BlackItalic, BoldCondensed, or the site's bold title face)" + Who);
+		const std::vector<ss::ui::TextItem> Read = ReadableLook(At1, L);
+		std::string Spelled;
+		for (const ss::ui::TextItem& T : Read)
+		{
+			Spelled += T.Text;
+		}
+		Spelled.erase(std::remove(Spelled.begin(), Spelled.end(), ' '), Spelled.end());
+		std::string Want = Shown;
+		Want.erase(std::remove(Want.begin(), Want.end(), ' '), Want.end());
+		// The same name typed in lower case: capitals where the look sets caps, as typed where it doesn't.
+		std::string Lower = Name;
+		std::transform(Lower.begin(), Lower.end(), Lower.begin(), [](char Ch) { return Ch >= 'A' && Ch <= 'Z' ? static_cast<char>(Ch - 'A' + 'a') : Ch; });
+		const MarkRunLook Typed = RunMarkLook([&](ss::ui::Canvas& C) { festart::FestWordMark(C, L, Lower, 210.0f, 196.0f, 46.0f, End, Day, false); });
+		std::string TypedSpelled;
+		for (const ss::ui::TextItem& T : ReadableLook(Typed, L))
+		{
+			TypedSpelled += T.Text;
+		}
+		TypedSpelled.erase(std::remove(TypedSpelled.begin(), TypedSpelled.end(), ' '), TypedSpelled.end());
+		std::string TypedWant = Lower;
+		if (L.Caps)
+		{
+			std::transform(TypedWant.begin(), TypedWant.end(), TypedWant.begin(), [](char Ch) { return Ch >= 'a' && Ch <= 'z' ? static_cast<char>(Ch - 'a' + 'A') : Ch; });
+		}
+		TypedWant.erase(std::remove(TypedWant.begin(), TypedWant.end(), ' '), TypedWant.end());
+		ExpectLook(Spelled == Want && TypedSpelled == TypedWant && (L.Caps == (HostLook(B) != SiteId::RiverLine)),
+			"FestCrestLowDetail (word-mark): spells the festival's name, in capitals where the look sets caps (the rivals' six), as typed for RiverLine's four" + Who);
+		// The twice print: a Signal Red under-copy of every letter at the site's offset (round(46 / 16), 2-6: 3).
+		const float O = std::min(6.0f, std::max(2.0f, std::floor(46.0f / 16.0f + 0.5f)));
+		size_t Unders = 0;
+		for (const ss::ui::TextItem& T : Read)
+		{
+			for (const ss::ui::TextItem& U : At1.Runs)
+			{
+				if (U.Text == T.Text && RgbLook(U.Col) == 0xd2141a && std::fabs(U.X - T.X - O) < 0.01f && std::fabs(U.BaselineY - T.BaselineY - O) < 0.01f)
+				{
+					++Unders;
+					break;
+				}
+			}
+		}
+		ExpectLook(L.Twice ? (!Read.empty() && Unders == Read.size()) : Unders == 0,
+			"FestCrestLowDetail (word-mark): RunItTwice's three are twice-printed (a Signal Red under-copy at the site's offset under every letter), the other seven print once" + Who);
+		// Letter by letter where it's tracked (WRIT, REIGN: 0.28 of the size apart), bobs (FEIGN) or flaps (WRIT); one run otherwise.
+		bool Set = true;
+		if (L.Tracking > 0.0f || L.Move == festart::Motion::Bob || L.Move == festart::Motion::Flap)
+		{
+			float X = 210.0f;
+			size_t K = 0;
+			const ss::ui::Font F = Face;
+			for (size_t I = 0; I < Shown.size(); ++I)
+			{
+				const std::string G = Shown.substr(I, 1);
+				if (G != " ")
+				{
+					Set = Set && K < Read.size() && Read[K].Text == G && std::fabs(Read[K].X - X) < 0.02f;
+					++K;
+				}
+				X += M.Width(G, F, 46.0f) + L.Tracking * 46.0f;
+			}
+			Set = Set && K == Read.size();
+		}
+		else
+		{
+			Set = Read.size() == 1;
+		}
+		ExpectLook(Set && ((B == Brand::Writ || B == Brand::Reign) == (L.Tracking >= 0.28f * 0.999f)),
+			"FestCrestLowDetail (word-mark): WRIT and REIGN tracked wide (letter by letter, 0.28 of the size apart), a plain mark one run" + Who);
+		if (B == Brand::Feign)
+		{
+			bool Funhouse = Read.size() >= 2;
+			for (size_t K = 0; K < Read.size(); ++K)
+			{
+				bool Shadow = false;
+				for (const ss::ui::TextItem& U : At1.Runs)
+				{
+					Shadow = Shadow || (U.Text == Read[K].Text && RgbLook(U.Col) == L.Gold && std::fabs(U.X - Read[K].X - 0.05f * 46.0f) < 0.01f);
+				}
+				Funhouse = Funhouse && Shadow;
+			}
+			bool Pink = false;
+			bool Mint = false;
+			for (const ss::ui::TextItem& T : Read)
+			{
+				Pink = Pink || RgbLook(T.Col) == L.Accent;
+				Mint = Mint || RgbLook(T.Col) == L.Accent2;
+			}
+			ExpectLook(Funhouse && Pink && Mint, "FestCrestLowDetail (word-mark): FEIGN's funhouse letters, pink and mint over a Lemon Drop offset");
+		}
+		// The underline: PENNANT's stitched (an Outfield Green bar under coral stitches), PUSH's gauge; letters alone for the other eight.
+		bool Below = true;
+		for (const ss::ui::Vertex& V : At1.Verts)
+		{
+			Below = Below && V.Y >= 196.0f + 0.13f * 46.0f - 1.5f * 46.0f * 0.085f;
+		}
+		const bool Under = B == Brand::Pennant ? InkLook(At1, L.Accent, 0.9f).N > 0 && InkLook(At1, L.Accent2, 0.5f).N > 0 && Below
+			: B == Brand::Push                 ? InkLook(At1, L.Accent2, 0.99f).N > 0 && Below
+											   : At1.Verts.empty();
+		ExpectLook(Under, "FestCrestLowDetail (word-mark): PENNANT's stitched underline and PUSH's gauge under the letters, no underline on the other eight" + Who);
+	}
+
+	// The banner.
+	std::set<uint64_t> Banners;
+	for (const Brand B : AllLook)
+	{
+		const festart::FestivalLook& L = festart::LookOf(B);
+		const std::string Who = std::string(" (") + NameLook(B) + ")";
+		const ss::ui::Rect R = BannerRectLook(B);
+		const double End = fd::FestBannerSettle(L);
+		size_t Count[2] = {0, 0};
+		bool Inside = true;
+		bool Quiet = true;
+		for (int K = 0; K < 2; ++K)
+		{
+			const MarkRunLook Bn = BannerLook(B, End, Day, B == Brand::Reign, false, K == 0 ? 1.0f : 1.5f);
+			Count[K] = Bn.Verts.size();
+			Quiet = Quiet && Bn.Runs.empty();
+			if (B != Brand::Slam)
+			{
+				for (const ss::ui::Vertex& V : Bn.Verts)
+				{
+					Inside = Inside && V.X >= R.X - 2.0f && V.X <= R.X + R.W + 2.0f && V.Y >= R.Y - 2.0f && V.Y <= R.Y + R.H + 2.0f;
+				}
+			}
+			if (K == 0)
+			{
+				Banners.insert(Bn.Hash);
+			}
+		}
+		std::printf("  banner: %-11s {%.0f, %.0f, %.0f, %.0f} settled: %zu, %zu vertices (scales 1, 1.5)\n", NameLook(B), static_cast<double>(R.X), static_cast<double>(R.Y),
+			static_cast<double>(R.W), static_cast<double>(R.H), Count[0], Count[1]);
+		ExpectLook(Count[0] <= 6000 && Count[1] <= 6000 && Inside && Quiet && CachedLook(fd::FestBannerKey(L, R, 0, 0)),
+			"FestCrestLowDetail (banner): the banner's ground inside its rect (Summer Slam's rays clipped to it), at most 6k vertices settled, one cached fragment, no text" + Who);
+	}
+	ExpectLook(Banners.size() == 10, "FestCrestLowDetail (banner): the ten looks' banners are distinct");
 }
 
 /**
