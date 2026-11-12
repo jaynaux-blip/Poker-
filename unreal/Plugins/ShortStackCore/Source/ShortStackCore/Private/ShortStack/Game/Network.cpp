@@ -327,12 +327,52 @@ HeroStats StatsFrom(const std::string& Name, const std::vector<HistoryEntry>& Hi
 
 // ------------------------------------------------------------------ the network
 
+namespace calendar_detail
+{
+/** Update 4 G1 (FN-4a): a festival guarantee in whole dollars ("$78,203,400"), cents only if it has them. */
+std::string FestRcopMoney(Chips Cents)
+{
+	return Cents % 100 == 0 ? "$" + Grouped(Cents / 100) : Money(Cents);
+}
+
+/**
+ * Update 4 G1 (SPEC v1.7 §2.2.2, the W5 fixes; F-net, FN-4a; PLAN_FNET Q12): RCOP 2026's guarantee is the sum of its 154 templates'
+ * guarantees ($78,203,400), no longer a typed $100,000,000, and its tagline prints that sum. Both RiverLine constructors call this
+ * right after BuildCalendar (BuildSeries runs before any RCOP template exists), so Network() and Network(Def(RiverLine)) stay
+ * byte-identical. A SeriesInfo field and a string: no template, instance or listing moves (U9), and SeriesInfo is in no pinned hash.
+ */
+void FestRcopGtd(const std::vector<EventTemplate>& Temps, std::vector<SeriesInfo>& AllSeries)
+{
+	Chips Gtd = 0;
+	for (const EventTemplate& T : Temps)
+	{
+		Gtd += T.Series == "rcop" ? T.GtdCents : 0;
+	}
+	for (SeriesInfo& Sr : AllSeries)
+	{
+		if (Sr.Id == "rcop")
+		{
+			Sr.GtdCents = Gtd;
+			Sr.Tagline = "The RiverLine Championship of Online Poker. " + FestRcopMoney(Gtd) + " guaranteed.";
+		}
+	}
+}
+
+/** Update 4 G1 (§2.2.2, FN-4a): the day -6 "RCOP 2026: the schedule" post's body, its figure read from RCOP 2026's GtdCents (News posts
+ *  it; fest::Inventory lists it). The rest of the body is today's. */
+std::string FestRcopPost(const SeriesInfo& Rcop)
+{
+	return "154 events. " + FestRcopMoney(Rcop.GtdCents) + " guaranteed. October 18 to November 8. Satellites run every day from $2.20.";
+}
+} // namespace calendar_detail
+
 Network::Network() : Rules(std::make_shared<const SiteDef>(Def(SiteId::RiverLine)))
 {
 	BuildPlayers();
 	BuildSeries();
 	BuildSchedule();
 	BuildCalendar();
+	calendar_detail::FestRcopGtd(Temps, AllSeries); // Update 4 G1 (FN-4a, §2.2.2): RCOP 2026's guarantee and tagline from its templates
 	Index();
 }
 
@@ -345,6 +385,7 @@ Network::Network(const SiteDef& D) : Rules(std::make_shared<const SiteDef>(D)), 
 		BuildSeries();
 		BuildSchedule();
 		BuildCalendar();
+		calendar_detail::FestRcopGtd(Temps, AllSeries); // Update 4 G1 (FN-4a, §2.2.2), as the default network's
 	}
 	else
 	{
@@ -590,10 +631,11 @@ void Network::BuildSeries()
 	Rc.FirstDay = 13;
 	Rc.LastDay = 34;
 	Rc.Events = 154;
-	Rc.GtdCents = Cents(1.0e8);
 	Rc.Color = 0xf2c14e;
 	Rc.Color2 = 0x8b5cf6;
-	Rc.Tagline = "The RiverLine Championship of Online Poker. $100,000,000 guaranteed.";
+	// Update 4 G1 (FN-4a, §2.2.2): GtdCents and the tagline's " {Gtd} guaranteed." are set from the 154 templates once they exist
+	// (calendar_detail::FestRcopGtd, after BuildCalendar).
+	Rc.Tagline = "The RiverLine Championship of Online Poker.";
 	Rc.MainEvent = "rcop-main";
 	calendar_detail::FestCalDress("rcop", false, Rc); // Update 4 G1 (FN-1): RCOP 2026 is a festival (§2.1.3, §2.2.1): Draw 110, Flagship
 	AllSeries.push_back(Rc);
@@ -739,13 +781,14 @@ void Network::BuildSchedule()
 	Weekly("saturday-six", "Saturday Six-Max", 109, 150000, Format::ReEntry, "Regular", 12.0, 1500, At(19, 0), 5, false, "");
 	Weekly("millions", "RiverLine Millions", 1050, 3000000, Format::ReEntry, "Regular", 15.0, 3100, At(13, 0), 6, true,
 		"The Sunday flagship. $3,000,000 guaranteed, 15-minute levels, and the best in the world at every table.");
-	Weekly("sunday-showdown", "Sunday Showdown", 215, 1000000, Format::ReEntry, "Regular", 12.0, 5400, At(15, 0), 6, true,
-		"The people's major. $1M guaranteed every Sunday; last week 7,412 entries built a $1.47M prize pool.");
+	// Update 4 G1 (FN-4a, §2.2.2's W5 fixes): no typed past in a blurb (Sunday Showdown's), and no seat count the Mega doesn't guarantee.
+	Weekly("sunday-showdown", "Sunday Showdown", 215, 1000000, Format::ReEntry, "Regular", 12.0, 5400, At(15, 0), 6, true, "The people's major. $1M guaranteed every Sunday.");
 	Weekly("sunday-special", "Sunday Special", 54, 300000, Format::Bounty, "Regular", 12.0, 6200, At(16, 0), 6, false, "");
 	Weekly("sunday-storm", "Sunday Storm", 11, 150000, Format::ReEntry, "Regular", 10.0, 15600, At(17, 0), 6, true, "The biggest micro-stakes tournament of the week.");
 	Weekly("sunday-shr", "Super High Roller Bounty", 2100, 300000, Format::Bounty, "Regular", 15.0, 150, At(18, 0), 6, false, "");
-	Weekly("mega-rcop", "RCOP Main Mega Satellite", 109, 0, Format::Satellite, "Turbo", 8.0, 1400, At(18, 0), 5, true, "25 seats to the $5,250 RCOP Main Event guaranteed.");
-	Temps.back().Seats = "25 Main Event seats";
+	Weekly("mega-rcop", "RCOP Main Mega Satellite", 109, 0, Format::Satellite, "Turbo", 8.0, 1400, At(18, 0), 5, true,
+		"Seats to the $5,250 RCOP Main Event: one for every $5,250 in the pool.");
+	Temps.back().Seats = "RCOP Main Event seats";
 	Temps.back().SeatTicket = "rcop-main";
 	Temps.back().SeatValueCents = Cents(5250.0);
 
@@ -872,7 +915,7 @@ void Network::BuildSchedule()
 					T.Field = 5200;
 					T.OpensHours = 24 * 40;
 					T.Featured = true;
-					T.Blurb = "The one that changes a life. $25,000,000 guaranteed; last year's champion won $4.1M.";
+					T.Blurb = "The one that changes a life. $25,000,000 guaranteed."; // Update 4 G1 (FN-4a, §2.2.2): no typed champion's prize
 				}
 				else if (Day == 33 && K == 2)
 				{
@@ -1925,8 +1968,11 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 		}
 		Post(DayAt(-7, 12, 0), NewsKind::Schedule, "Mystery Madness goes nightly",
 			"Every night at 10:00 PM: $10.80 to enter, $40,000 guaranteed, mystery bounties up to $10,000 in the envelopes.", "SCHEDULE");
-		Post(DayAt(-6, 10, 0), NewsKind::Series, "RCOP 2026: the schedule",
-			"154 events. $100,000,000 guaranteed. October 18 to November 8. Satellites run every day from $2.20.", "RCOP 2026");
+		// Update 4 G1 (FN-4a, §2.2.2): the schedule's figure is RCOP 2026's GtdCents (the templates' sum).
+		if (const SeriesInfo* Rcop = FindSeries("rcop"))
+		{
+			Post(DayAt(-6, 10, 0), NewsKind::Series, "RCOP 2026: the schedule", calendar_detail::FestRcopPost(*Rcop), "RCOP 2026");
+		}
 		Post(DayAt(-5, 15, 0), NewsKind::Series, "Micro Madness starts Thursday",
 			"Seventy events from 55\xC2\xA2 with $5,000,000 guaranteed. The Main Event on October 11: $11 to play for $1,000,000.", "MICRO MADNESS");
 		Post(DayAt(-1, 23, 55), NewsKind::Record, "Record night for the Sunday Showdown",

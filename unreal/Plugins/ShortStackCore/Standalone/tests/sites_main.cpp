@@ -276,11 +276,12 @@ std::string SitesHex(uint64_t H)
 }
 
 /** The FNV hash RiverLinePinned takes of a network's first Count templates (ids, series, tickets, buy-in, FeeOf, guarantee, field
- *  and shape), shared with the rival prefixes' pins (Update 4 Phase A) so every pin hashes the same fields. */
-uint64_t SitesTemplatesFnv(const net::Network& N, size_t Count)
+ *  and shape), shared with the rival prefixes' pins (Update 4 Phase A) so every pin hashes the same fields. Update 4 G1 (FN-4a): From
+ *  starts the walk later (RiverLineFestivalPinned's appended block, from index 8,453). */
+uint64_t SitesTemplatesFnv(const net::Network& N, size_t Count, size_t From = 0)
 {
 	uint64_t Templates = 1469598103934665603ull;
-	for (size_t I = 0; I < Count && I < N.Templates().size(); ++I)
+	for (size_t I = From; I < Count && I < N.Templates().size(); ++I)
 	{
 		const net::EventTemplate& T = N.Templates()[I];
 		Templates = SitesFnv(Templates, T.Id + "|" + T.Series + "|" + T.Ticket + "|" + std::to_string(T.BuyInCents) + "|" + std::to_string(net::FeeOf(T.BuyInCents)) + "|" +
@@ -351,9 +352,33 @@ void RiverLinePinned()
  * Update 4 (SPEC v1.7 §2.2.4, §6 PA-7): RiverLine's appended templates, from index 8,453 on (G1's 84 satellites into Ring Rush's
  * and the Championship Online's Mains; Summer Slam's 42 at G3) and their instances over days -14 to 1,095, with RiverLinePinned's
  * fields. Empty in Phase A, when nothing is appended: F-net writes its constants at G1 (84 templates).
+ * G1, FN-4a (F-net; PLAN_FNET Q15): the 84 templates hash with SitesTemplatesFnv's fields, and their instances (one-offs: one each)
+ * are walked template by template through Network::Next, not whole-day Windows, and hash as RiverLinePinned's do (id, template,
+ * seed, entries, pool); the editions 2027-2029 fall inside day 1,095. Planted: the Mega's guarantee at 9 seats.
  */
 void RiverLineFestivalPinned()
 {
+	const net::Network& N = net::Shared();
+	const size_t Total = N.Templates().size();
+	const uint64_t Templates = SitesTemplatesFnv(N, Total, static_cast<size_t>(SitesRiverLinePrefix));
+	uint64_t Instances = 1469598103934665603ull;
+	int Count = 0;
+	for (size_t I = static_cast<size_t>(SitesRiverLinePrefix); I < Total; ++I)
+	{
+		double From = -14.0 * 1440.0;
+		net::EventInstance E;
+		while (N.Next(N.Templates()[I].Id, From, E) && E.Start < 1096.0 * 1440.0)
+		{
+			Instances = SitesFnv(Instances, E.Id + "|" + std::to_string(E.Template) + "|" + std::to_string(E.Seed) + "|" + std::to_string(E.Entries) + "|" + std::to_string(E.Pool) + "\n");
+			++Count;
+			From = E.Start + 1.0;
+		}
+	}
+	Expect(Total == 8537 && Templates == 0xd958e5e6a1fc86ccull,
+		"RiverLine's 84 appended templates (G1's satellites into Ring Rush's and the Championship Online's Mains) are G1's: " +
+			std::to_string(Total - static_cast<size_t>(SitesRiverLinePrefix)) + " " + SitesHex(Templates));
+	Expect(Count == 18 && Instances == 0x76b9544da58b29d1ull,
+		"their " + std::to_string(Count) + " instances over days -14 to 1,095 (ids, seeds, entries, pools) are G1's: " + SitesHex(Instances));
 }
 
 /** Update 4 (SPEC v1.7 §2.15.1, §6 PA-7): the rivals' templates before G1's festivals, taken on Phase A's tree (A-1). */
