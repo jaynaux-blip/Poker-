@@ -268,11 +268,26 @@ struct TurnHooks : ss::SessionHooks
 	std::vector<std::string> Texts;
 	ss::SaveData Last;
 	int Saves = 0;
+	/** Saves as the game's hosts do (NightOneGame, StreetGameMode: SavesInBackground): the session hands over World::Snapshot's frozen
+	 *  copy, whose text the host writes at once and keeps by its stamp (Kept); Last carries that text, so it reads as a text save. */
+	bool Background = false;
+	std::string Kept;
 	void Text(const std::string& From, const std::string& Body) override { Texts.push_back(From + ": " + Body); }
+	bool SavesInBackground() const override { return Background; }
 	void Save(const ss::SaveData& D) override
 	{
 		++Saves;
 		Last = D;
+		if (Background)
+		{
+			if (D.WorldSnapshot)
+			{
+				Kept.clear();
+				D.WorldSnapshot->Write(Kept);
+			}
+			Last.WorldSnapshot.reset();
+			Last.WorldText = Kept;
+		}
 	}
 	bool GoOut(const std::string&, ss::Chips) override { return true; }
 };
@@ -284,6 +299,8 @@ struct TurnSessionPlan
 	std::string Seed = "u4-turn";
 	/** Every frame, with the frame's index: a save request, say (§3.7 R5's check asks for one every frame of a hold). */
 	std::function<void(ss::Session&, int)> Frame;
+	/** The host saves in the background (TurnHooks::Background: World::Snapshot), as the game's do. */
+	bool Background = false;
 };
 
 struct TurnSessionRun
@@ -310,6 +327,7 @@ TurnSessionRun TurnSession(const TurnSessionPlan& P)
 {
 	TurnSessionRun Out;
 	TurnHooks H;
+	H.Background = P.Background;
 	std::unique_ptr<ss::Session> S(new ss::Session(H, P.Seed));
 	S->NewCareer(TurnSomeone());
 	S->CurrentScreen = ss::Screen::Lobby;
@@ -939,8 +957,9 @@ void SegTurn()
 /** The session-wide slice checks (§3.7, §6.6): a new career over 28 days (Mon Oct 12 and 19, 2026, the month's turn on Nov 1) at
  *  0.5 ms equals the unlimited one: its phone, in order, and its save. With the HoldGuard armed (a test build aborts on any
  *  undrained World call), it is also the session's drain audit. The 0.5 ms run asks for a save on every frame that ends holding
- *  (§3.7 R5's session form, the lead's Q-10): each waits for the hold's end, so none writes a half-turned world (Write's and
- *  Snapshot's guards). */
+ *  (§3.7 R5's session form, the lead's Q-10) and saves in the background as the game's hosts do: each save waits for the hold's end,
+ *  so no snapshot of a half-turned world is taken (World::Snapshot's HoldGuard, Q-13; the unlimited run's text saves read the same).
+ *  Mutation: Session::Save's deferral removed (HoldGuard: World::Snapshot). */
 void SegTurnSession()
 {
 	const auto T0 = std::chrono::steady_clock::now();
@@ -952,6 +971,7 @@ void SegTurnSession()
 	{
 		TurnSessionPlan Q = P;
 		Q.BudgetMs = Budget;
+		Q.Background = true;
 		int Asked = 0;
 		Q.Frame = [&Asked](ss::Session& S, int) {
 			if (S.Living().Holding())
@@ -962,8 +982,8 @@ void SegTurnSession()
 		};
 		const TurnSessionRun R = TurnSession(Q);
 		const std::string At = " at " + TurnBudgetName(Budget);
-		std::printf("  turn_session%s: %d held frames, %d units, %d holds, %d drains, %d guard trips, %d saves asked for while holding\n", At.c_str(), R.HeldFrames,
-			R.Stats.Units, R.Stats.Holds, R.Stats.Drains, R.Stats.GuardTrips, Asked);
+		std::printf("  turn_session%s: %d held frames, %d units, %d holds, %d drains, %d guard trips, %d saves asked for while holding (background saves)\n",
+			At.c_str(), R.HeldFrames, R.Stats.Units, R.Stats.Holds, R.Stats.Drains, R.Stats.GuardTrips, Asked);
 		Expect(R.HeldFrames > 0, "turn_session" + At + ": the session's world holds");
 		Expect(Asked == R.HeldFrames, "turn_session" + At + ": a save is asked for on every held frame (" + std::to_string(Asked) + " of " + std::to_string(R.HeldFrames) + ")");
 		Expect(R.Texts == Unlimited.Texts, "turn_session" + At + ": the phone gets the same texts in the same order");
