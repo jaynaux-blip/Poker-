@@ -2717,11 +2717,31 @@ namespace rlfest_detail
 {
 /** Stream B's festival strings for fest::FestUiInventory (LEAD_CALLS R-1, PLAN_G1 §2.1): the host files' lines (the takeover's words
  *  on Ignite and RunItTwice, the register sheets' YOUR strip, slide 0, the tickers, the card's pill), so CopyLint, both trademark tiers
- *  and U1 run over them with the hub's. Declared and called in UI/RiverLineFestival.cpp (stream A); empty until stream B adds strings
- *  (FH-3b on). */
+ *  and U1 run over them with the hub's. Declared and called in UI/RiverLineFestival.cpp (stream A); each "<kind>\t<text>" (§2.11), its
+ *  placeholders the hub's sample names ({FESTIVAL} the Short, {N}, {Days}, {D}, {Gtd}, {Added}, {FirstDate}, {LastDate}, {Time},
+ *  {Name}), filled from the sim when drawn. FH-3b: the takeover's words (U15, U22, U32 and the floor's Main cabinet). */
 std::vector<std::string> HostUiStrings()
 {
-	return {};
+	return {
+		// U15: the Lighthouse's sign (UI/RiverLineIgnite.cpp) and RunItTwice's tape (UI/RiverLineRit.cpp), from the Buildup to the
+		// Afterglow; GRIT's nightly form; the tape's race leader (§2.7.4's "the race leader", printed in caps).
+		"label\t{FESTIVAL} \xC2\xB7 OPENS IN {D}D",
+		"label\t{FESTIVAL} \xC2\xB7 DAY {N} OF {Days}",
+		"label\t{FESTIVAL} CHAMPION \xC2\xB7 {Name}",
+		"label\t{FESTIVAL} \xC2\xB7 NIGHT {N} OF {Days} \xC2\xB7 SHOWS AT {Time} AND {Time}",
+		"label\t{FESTIVAL} \xC2\xB7 {Name} LEADS THE RACE \xC2\xB7 {N} PTS",
+		"label\t{FESTIVAL} \xC2\xB7 YOU LEAD THE RACE \xC2\xB7 {N} PTS",
+		// U22: the wall calendar's words (UI/SecondScreen.cpp's Word()).
+		"label\tFESTIVAL",
+		"label\tMAIN",
+		// U32: the bandstand's line and Ignite's floor shelf (UI/RiverLineIgnite.cpp); the Main's own cabinet.
+		"label\t{FESTIVAL} TONIGHT \xC2\xB7 #{N}",
+		"label\t{FESTIVAL} \xC2\xB7 ON THE FLOOR",
+		"label\t{N} events \xC2\xB7 {Gtd} guaranteed \xC2\xB7 {FirstDate} \xE2\x80\x93 {LastDate}",
+		"label\t1 event \xC2\xB7 {Gtd} guaranteed \xC2\xB7 {FirstDate} \xE2\x80\x93 {LastDate}",
+		"label\t{Gtd} GTD",
+		"label\t+ {Added} ADDED",
+	};
 }
 } // namespace rlfest_detail
 
