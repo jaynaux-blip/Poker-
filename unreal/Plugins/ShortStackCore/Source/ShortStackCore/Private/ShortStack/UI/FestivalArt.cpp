@@ -7,6 +7,8 @@
 // EventArt's own SlotOf) and Dressed (§2.7.3's six tokens). Data only: nothing outside tests reads a look until FL-2 (crests) and FL-4
 // (the takeover), so no page moves. The palette rules are tests/u4_ui_look.cpp's FestLookDistance, FestContrast and FestLeak, twins
 // of durable/update4/model/fest_brands/palette_check.py.
+// G1 FL-2 (F-look): the crests read the looks (UI/EventArt.cpp: FrameFor, SeriesGlyph and FestDress take LookFor first; SlotOf strips
+// a rival's site key), so RCOP's crest gains its wave band and a rival festival's series wears its own frame, motif and rim.
 #include "ShortStack/UI/FestivalArt.h"
 
 #include "ShortStack/Common.h"
@@ -31,7 +33,7 @@ namespace festart
 namespace festart_detail
 {
 // eventart's private Frame enum (UI/EventArt.cpp:1610-1628) by value, as FestivalLook::Frame holds it (§2.7.1): the three existing
-// frames the RiverLine looks keep and Phase A's six appends. FL-2 reads Frame back in UI/EventArt.cpp (and asserts these values there).
+// frames the RiverLine looks keep and Phase A's six appends. UI/EventArt.cpp's FrameFor reads Frame back and static_asserts these values.
 constexpr int FestFrameShield = 0, FestFrameSunburst = 2, FestFrameMedallion = 3;
 constexpr int FestFrameArch = 8, FestFrameTower = 9, FestFrameOctagon = 10, FestFrameProscenium = 11, FestFramePavilion = 12, FestFrameKeyhole = 13;
 // "Tracked wide" (WRIT, REIGN): the gap between letters as a share of the size (RunItTwice's kickers: 1.5 at 13, RitSpaced).
@@ -137,8 +139,8 @@ const FestivalLook& LookOf(fest::Brand B)
 
 const FestivalLook* LookFor(const net::SeriesInfo& S)
 {
-	// QF-3 (accepted): the brand from the series id's slot ("rcop27" -> "rcop"; "ignite.feign26" -> "feign" once FL-2 strips the site
-	// key), so a look needs no F-net data and "SlotOf unstripped" fails FestCrestLowDetail (FL-2). A plain series' slot is no brand key.
+	// QF-3 (accepted): the brand from the series id's slot ("rcop27" -> "rcop"; "ignite.feign26" -> "feign": SlotOf strips the site key,
+	// FL-2), so a look needs no F-net data and "SlotOf unstripped" fails FestCrestLowDetail. A plain series' slot is no brand key.
 	const fest::Brand B = fest::BrandOf(eventart::eventart_detail::SlotOf(S.Id));
 	return B == fest::Brand::None ? nullptr : &LookOf(B);
 }

@@ -5,11 +5,15 @@
 // durable/update4/model/fest_brands/palette_check.py: FestLookDistance (R-12), FestContrast's token half and FestLeak's table half
 // (FL-4 adds both checks' page halves). No page is drawn or emitted here yet. Helpers sit in an anonymous namespace with a Look
 // suffix (the u4_ui binary links F-hubs' files beside this one).
+// G1 FL-2 (F-look): FestCrestLowDetail, the crests (§2.7.4): the low-detail path's and the full crest's budgets at both scales, each
+// festival's frame, motif and RCOP's wave band, a rival festival unlike a plain rival series, the crest cache counted. Draws, emits
+// nothing.
 #include "UiSeg.h"
 #include "ShortStack/Common.h"
 #include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Sites.h"
+#include "ShortStack/UI/EventArt.h"
 #include "ShortStack/UI/FestivalArt.h"
 #include "ShortStack/UI/Ui.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/UI/RiverLineShared.h"
@@ -19,10 +23,29 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
+
+// UI/EventArt.cpp's private frame outline (external linkage, as UI/FestivalArt.cpp reaches its SlotOf): FestCrestLowDetail checks the
+// six festival frames draw their own outlines. The enum is declared opaque here; its values are FestivalLook::Frame's (static_asserted
+// in UI/EventArt.cpp).
+namespace ss
+{
+namespace ui
+{
+namespace eventart
+{
+namespace eventart_detail
+{
+enum class Frame : int;
+std::vector<Vec2> FramePts(Frame F, float K);
+} // namespace eventart_detail
+} // namespace eventart
+} // namespace ui
+} // namespace ss
 
 namespace
 {
@@ -465,6 +488,267 @@ void FestLeak()
 			festart::LookFor(Plain) == nullptr && festart::LookFor(Rcop) == &festart::LookOf(Brand::Rcop),
 		"FestLeak: the empty look dresses nothing, a plain series has no look and a festival's series wears its own");
 }
+
+/** FNV-1a over raw bytes (a draw list's fingerprint). */
+uint64_t FnvLook(uint64_t H, const void* Data, size_t Size)
+{
+	const unsigned char* B = static_cast<const unsigned char*>(Data);
+	for (size_t K = 0; K < Size; ++K)
+	{
+		H = (H ^ B[K]) * 0x100000001b3ull;
+	}
+	return H;
+}
+
+/** What one drawing put on a fresh canvas: its vertices, a fingerprint of everything drawn (geometry, colours, text), its visible
+ *  height and whether a vertex wears Mark exactly (a thin line's alpha follows its width). */
+struct CrestRunLook
+{
+	size_t Vertices = 0;
+	uint64_t Hash = 0;
+	float Width = 0.0f;
+	float Height = 0.0f;
+	bool Mark = false;
+};
+
+CrestRunLook RunCrestLook(const std::function<void(ss::ui::Canvas&)>& Paint, float Scale, uint32_t Mark = 0)
+{
+	ui_test::TableMeasurer M;
+	ss::ui::DrawList L;
+	ss::ui::Canvas C(L, M, 400.0f, 400.0f, Scale);
+	Paint(C);
+	CrestRunLook R;
+	R.Vertices = L.Vertices.size();
+	uint64_t H = 0xcbf29ce484222325ull;
+	float Top = 1e9f;
+	float Bottom = -1e9f;
+	float Left = 1e9f;
+	float Right = -1e9f;
+	for (const ss::ui::Vertex& V : L.Vertices)
+	{
+		const float F[6] = {V.X, V.Y, V.Col.R, V.Col.G, V.Col.B, V.Col.A};
+		H = FnvLook(H, F, sizeof(F));
+		if (V.Col.A > 0.02f)
+		{
+			Top = std::min(Top, V.Y);
+			Bottom = std::max(Bottom, V.Y);
+			Left = std::min(Left, V.X);
+			Right = std::max(Right, V.X);
+		}
+		R.Mark = R.Mark || (Mark != 0 && V.Col.A > 0.2f && RgbLook(V.Col) == Mark);
+	}
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text)
+		{
+			H = FnvLook(H, Cmd.Text.Text.data(), Cmd.Text.Text.size());
+		}
+	}
+	R.Hash = H;
+	R.Height = Bottom > Top ? Bottom - Top : 0.0f;
+	R.Width = Right > Left ? Right - Left : 0.0f;
+	return R;
+}
+
+/** A look's series as the crests see it: RiverLine's four from the network (as the pages draw them); the six rival festivals as F-net
+ *  lists them (fest::All is F-net's, empty here): "<site key>.<brand key><yy>", Color and Color2 the look's Accent and Accent2. */
+ss::net::SeriesInfo CrestSeriesLook(Brand B)
+{
+	static const char* const Ids[] = {"", "rcop27", "ring27", "tco27", "slam27", "ignite.feign26", "ignite.push27", "runittwice.writ27", "runittwice.grit27",
+		"ignite.pennant27", "runittwice.reign27"};
+	const char* Id = Ids[static_cast<int>(B)];
+	if (const ss::net::SeriesInfo* Real = ss::net::Site(SiteId::RiverLine).FindSeries(Id))
+	{
+		return *Real;
+	}
+	ss::net::SeriesInfo S;
+	S.Id = Id;
+	S.Name = std::string(NameLook(B)) + (B == Brand::Feign ? " 2026" : " 2027");
+	S.Short = NameLook(B);
+	S.Color = festart::LookOf(B).Accent;
+	S.Color2 = festart::LookOf(B).Accent2;
+	S.Festival = true;
+	S.Brand = ss::fest::BrandKey(B);
+	return S;
+}
+
+/** An outline's width and height. */
+std::pair<float, float> ExtentLook(const std::vector<ss::ui::Vec2>& P)
+{
+	float X0 = 1e9f, X1 = -1e9f, Y0 = 1e9f, Y1 = -1e9f;
+	for (const ss::ui::Vec2& Q : P)
+	{
+		X0 = std::min(X0, Q.X);
+		X1 = std::max(X1, Q.X);
+		Y0 = std::min(Y0, Q.Y);
+		Y1 = std::max(Y1, Q.Y);
+	}
+	return {X1 - X0, Y1 - Y0};
+}
+
+/** The shoelace area of a closed outline. */
+float AreaLook(const std::vector<ss::ui::Vec2>& P)
+{
+	float A = 0.0f;
+	for (size_t I = 0; I < P.size(); ++I)
+	{
+		const ss::ui::Vec2& Q = P[I];
+		const ss::ui::Vec2& R = P[(I + 1) % P.size()];
+		A += Q.X * R.Y - R.X * Q.Y;
+	}
+	return std::fabs(A) * 0.5f;
+}
+
+/** Whether a closed outline holds the point (0, 0) (the crest's centre, where the motif sits). */
+bool HoldsCentreLook(const std::vector<ss::ui::Vec2>& P)
+{
+	bool In = false;
+	for (size_t I = 0, J = P.size() - 1; I < P.size(); J = I++)
+	{
+		if ((P[I].Y > 0.0f) != (P[J].Y > 0.0f) && 0.0f < (P[J].X - P[I].X) * (0.0f - P[I].Y) / (P[J].Y - P[I].Y) + P[I].X)
+		{
+			In = !In;
+		}
+	}
+	return In;
+}
+
+/**
+ * FestCrestLowDetail (§2.7.4's Crests and Cache rows, §2.15.2, §8.5): every look's crest, at both scales (1 and 1.5 pixels a unit), is
+ * at most 0.9k vertices at 26 units (the low-detail path: the frame's silhouette and the motif, filling its box: "drop detail, don't
+ * shrink") and at most 5.5k at 150. A festival's series finds its look (SlotOf strips a rival's site key) and wears its frame and motif;
+ * a rival festival never wears the generic star and medallion a plain rival series does (its crest differs from its plain twin's); the
+ * ten looks' crests are pairwise distinct (frame and motif, and as drawn); RCOP's crest carries its silver wave band and no other look's
+ * does; the six festival glyphs and frames draw their own bodies (not the star, not the medallion). Printed: each look's counts and the
+ * crest cache (3 sizes x 10 looks x 2 scales). QF-3: a series F-net flags as a festival finds the look of its own brand (vacuous until
+ * F-net's calendar).
+ * Planted bug: SlotOf unstripped ("ignite.feign26" reads "ignite": every rival festival loses its look).
+ */
+void FestCrestLowDetail()
+{
+	namespace ea = ss::ui::eventart;
+	namespace ead = ss::ui::eventart::eventart_detail;
+	const float Scales[2] = {1.0f, 1.5f};
+	const uint32_t Silver = festart::LookOf(Brand::Rcop).Accent2; // RCOP's Crest Silver: the wave band's middle line
+	std::vector<uint64_t> Drawn;
+	std::set<std::pair<int, int>> Kinds;
+	// The low-detail crest is its frame's silhouette (the motif inside it), so its extents are its frame's outline at one scale a unit:
+	// RCOP's shield (its frame by slot as by look) sets that scale, and every look's 26-unit crest must match its own frame's outline.
+	const ss::net::SeriesInfo RcopSeries = CrestSeriesLook(Brand::Rcop);
+	const float ShieldHigh = ExtentLook(ead::FramePts(static_cast<ead::Frame>(festart::LookOf(Brand::Rcop).Frame), 1.0f)).second;
+	size_t CacheVertices = 0;
+	int CacheCrests = 0;
+	for (const Brand B : AllLook)
+	{
+		const festart::FestivalLook& L = festart::LookOf(B);
+		const ss::net::SeriesInfo S = CrestSeriesLook(B);
+		const std::string Who = std::string(" (") + NameLook(B) + ", " + S.Id + ")";
+		ExpectLook(festart::LookFor(S) == &L && ea::SeriesGlyph(S) == L.Glyph, "FestCrestLowDetail: a festival's series finds its look and wears its motif" + Who);
+		Kinds.insert({L.Frame, static_cast<int>(L.Glyph)});
+		size_t Small[2] = {0, 0};
+		size_t Big[2] = {0, 0};
+		for (int K = 0; K < 2; ++K)
+		{
+			const CrestRunLook At26 = RunCrestLook([&S](ss::ui::Canvas& C) { ea::SeriesCrest(C, S, 200.0f, 200.0f, 26.0f, 0.0); }, Scales[K], Silver);
+			const CrestRunLook At46 = RunCrestLook([&S](ss::ui::Canvas& C) { ea::SeriesCrest(C, S, 200.0f, 200.0f, 46.0f, 0.0); }, Scales[K], Silver);
+			const CrestRunLook At150 = RunCrestLook([&S](ss::ui::Canvas& C) { ea::SeriesCrest(C, S, 200.0f, 200.0f, 150.0f, 0.0); }, Scales[K], Silver);
+			Small[K] = At26.Vertices;
+			Big[K] = At150.Vertices;
+			CacheVertices += At26.Vertices + At46.Vertices + At150.Vertices;
+			CacheCrests += 3;
+			char Scale[24];
+			std::snprintf(Scale, sizeof(Scale), ", scale %.1f", static_cast<double>(Scales[K]));
+			ExpectLook(At26.Vertices <= 900, "FestCrestLowDetail: a festival crest at 26 is at most 0.9k vertices" + Who + Scale);
+			ExpectLook(At150.Vertices <= 5500, "FestCrestLowDetail: a festival crest at 150 is at most 5.5k vertices" + Who + Scale);
+			ExpectLook(At26.Height >= 0.78f * 26.0f, "FestCrestLowDetail: the low-detail crest fills its box (drop detail, don't shrink)" + Who + Scale);
+			const float Unit = RunCrestLook([&RcopSeries](ss::ui::Canvas& C) { ea::SeriesCrest(C, RcopSeries, 200.0f, 200.0f, 26.0f, 0.0); }, Scales[K]).Height / ShieldHigh;
+			const std::pair<float, float> Own = ExtentLook(ead::FramePts(static_cast<ead::Frame>(L.Frame), 1.0f));
+			ExpectLook(std::fabs(At26.Width - Own.first * Unit) <= 0.03f && std::fabs(At26.Height - Own.second * Unit) <= 0.03f,
+				"FestCrestLowDetail: a festival crest wears its look's frame (its silhouette's extents)" + Who + Scale);
+			ExpectLook((At150.Mark && At46.Mark) == (B == Brand::Rcop) && !At26.Mark,
+				"FestCrestLowDetail: RCOP's crest carries its silver wave band above 30 units, no other look's does" + Who + Scale);
+			if (K == 0)
+			{
+				Drawn.push_back(At150.Hash);
+			}
+			if (HostLook(B) != SiteId::RiverLine)
+			{
+				// Its plain twin: the same series under a slot no festival owns draws the generic medallion and star.
+				ss::net::SeriesInfo Twin = S;
+				Twin.Id = (HostLook(B) == SiteId::Ignite ? "ignite.plain" : "runittwice.plain") + S.Id.substr(S.Id.size() - 2);
+				Twin.Festival = false;
+				Twin.Brand.clear();
+				const CrestRunLook Twin26 = RunCrestLook([&Twin](ss::ui::Canvas& C) { ea::SeriesCrest(C, Twin, 200.0f, 200.0f, 26.0f, 0.0); }, Scales[K]);
+				const CrestRunLook Twin150 = RunCrestLook([&Twin](ss::ui::Canvas& C) { ea::SeriesCrest(C, Twin, 200.0f, 200.0f, 150.0f, 0.0); }, Scales[K]);
+				ExpectLook(ea::SeriesGlyph(Twin) == ea::Glyph::Star && L.Glyph != ea::Glyph::Star && L.Frame != 3 && Twin26.Hash != At26.Hash && Twin150.Hash != At150.Hash,
+					"FestCrestLowDetail: a rival festival's crest is not the generic star and medallion of a plain rival series" + Who + Scale);
+			}
+		}
+		std::printf("  crest: %-11s %-19s frame %2d glyph %2d rim %d | at 26: %zu, %zu vertices | at 150: %zu, %zu (scales 1, 1.5)\n", NameLook(B), S.Id.c_str(), L.Frame,
+			static_cast<int>(L.Glyph), static_cast<int>(L.RimKind), Small[0], Small[1], Big[0], Big[1]);
+	}
+	ExpectLook(Kinds.size() == 10 && std::set<uint64_t>(Drawn.begin(), Drawn.end()).size() == Drawn.size(),
+		"FestCrestLowDetail: the ten looks' crests are pairwise distinct (frame and motif, and as drawn)");
+	std::printf("  crest cache: %d crests (3 sizes x 10 looks x 2 scales) drew %zu vertices, the cached layers' upper bound (Shared pool: 1.5M; §2.7.4: ~188k)\n",
+		CacheCrests, CacheVertices);
+
+	// The six motifs draw their own bodies, each unlike the star they were drawn as before G1 and unlike each other.
+	const auto GlyphRun = [](ea::Glyph G) { return RunCrestLook([G](ss::ui::Canvas& C) { ea::DrawGlyph(C, G, 200.0f, 200.0f, 72.0f); }, 1.0f); };
+	const uint64_t Star = GlyphRun(ea::Glyph::Star).Hash;
+	std::set<uint64_t> Motifs;
+	for (int G = static_cast<int>(ea::Glyph::Mirror); G < static_cast<int>(ea::Glyph::Count); ++G)
+	{
+		const CrestRunLook R = GlyphRun(static_cast<ea::Glyph>(G));
+		std::printf("  crest motif %d: %zu vertices at 72\n", G, R.Vertices);
+		ExpectLook(R.Hash != Star && Motifs.insert(R.Hash).second, "FestCrestLowDetail: each festival motif draws its own body, not the star (glyph " + std::to_string(G) + ")");
+	}
+
+	// The six frames draw their own outlines: not the medallion's, each holding the centre with room for the motif, inside the unit box.
+	const std::vector<ss::ui::Vec2> Medallion = ead::FramePts(static_cast<ead::Frame>(3), 1.0f);
+	std::vector<std::vector<ss::ui::Vec2>> Outlines;
+	for (const Brand B : AllLook)
+	{
+		if (HostLook(B) == SiteId::RiverLine)
+		{
+			continue;
+		}
+		const std::vector<ss::ui::Vec2> P = ead::FramePts(static_cast<ead::Frame>(festart::LookOf(B).Frame), 1.0f);
+		float Reach = 0.0f;
+		for (const ss::ui::Vec2& Q : P)
+		{
+			Reach = std::max(Reach, std::max(std::fabs(Q.X), std::fabs(Q.Y)));
+		}
+		const bool Own = P.size() != Medallion.size() || !std::equal(P.begin(), P.end(), Medallion.begin(), [](const ss::ui::Vec2& A, const ss::ui::Vec2& C) {
+			return A.X == C.X && A.Y == C.Y;
+		});
+		bool New = true;
+		for (const std::vector<ss::ui::Vec2>& O : Outlines)
+		{
+			New = New && !(O.size() == P.size() && std::equal(O.begin(), O.end(), P.begin(), [](const ss::ui::Vec2& A, const ss::ui::Vec2& C) { return A.X == C.X && A.Y == C.Y; }));
+		}
+		Outlines.push_back(P);
+		std::printf("  crest frame %d (%s): %zu points, area %.2f, reach %.2f\n", festart::LookOf(B).Frame, NameLook(B), P.size(), static_cast<double>(AreaLook(P)), static_cast<double>(Reach));
+		ExpectLook(Own && New && HoldsCentreLook(P) && AreaLook(P) >= 1.8f && Reach <= 1.06f,
+			std::string("FestCrestLowDetail: a festival frame draws its own outline, round the centre, inside the unit box (") + NameLook(B) + ")");
+	}
+
+	// QF-3: every series F-net flags as a festival finds the look of its own brand (vacuous before F-net's calendar).
+	int Flagged = 0;
+	for (const SiteId SiteK : {SiteId::RiverLine, SiteId::Ignite, SiteId::RunItTwice})
+	{
+		for (const ss::net::SeriesInfo& Sr : ss::net::Site(SiteK).Series())
+		{
+			if (!Sr.Festival)
+			{
+				continue;
+			}
+			++Flagged;
+			const festart::FestivalLook* Own = festart::LookFor(Sr);
+			ExpectLook(Own != nullptr && Own->Which == ss::fest::BrandOf(Sr.Brand), "FestCrestLowDetail: a festival series finds its own brand's look (" + Sr.Id + ")");
+		}
+	}
+	std::printf("  crest: %d series flagged Festival (F-net's data) each find their own brand's look\n", Flagged);
+}
 } // namespace
 
 namespace u4_ui_test
@@ -474,5 +758,6 @@ void SegLook()
 	FestLookDistance();
 	FestContrast();
 	FestLeak();
+	FestCrestLowDetail();
 }
 } // namespace u4_ui_test
