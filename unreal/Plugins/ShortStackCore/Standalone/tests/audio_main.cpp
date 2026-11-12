@@ -3,8 +3,8 @@
 // Usage: audio_test                      the checks
 //        audio_test <out-dir>            the checks, and every one-shot as a 16-bit WAV in <out-dir>
 //        audio_test --listening <dir>    the listening gate's renders (§4.10) into <dir>, no checks
-//        audio_test --cues <dir>         Update 3's site cues and the creator update's Kast cues on their own and in their
-//                                        moments (reels), no checks
+//        audio_test --cues <dir>         Update 3's site cues, the creator update's Kast cues and Update 4's festival stings
+//                                        and applause on their own and in their moments (reels), no checks
 #include "ShortStack/Audio/CardRoom.h"
 #include "ShortStack/Audio/Synth.h"
 #include "ShortStack/Audio/Voice.h"
@@ -14,7 +14,9 @@
 #include <cmath>
 #include <complex>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <string>
 #include <thread>
 #include <vector>
@@ -438,6 +440,12 @@ const char* const Lines[] = {
 
 // ------------------------------------------------------------------ the checks
 
+/** Update 4 G1 (SPEC v1.7 §2.7.6, §9.3; F-look): the festivals' four stings and CrowdApplause, which have their bodies (a list: the
+ *  enum puts CrowdApplause between CrowdSwell and CrowdOoh, so no range holds the five). */
+const ss::SoundId FestSoundIds[] = {ss::SoundId::FestRiver, ss::SoundId::FestIgnite, ss::SoundId::FestRit, ss::SoundId::FestChampion, ss::SoundId::CrowdApplause};
+/** Update 4's cues still silent after G1 (§8.4): NbPencil (W-ui, G2), BigBeat, CrowdSwell and CrowdOoh (B-ui, G3). */
+const ss::SoundId FestLaterSilentIds[] = {ss::SoundId::NbPencil, ss::SoundId::BigBeat, ss::SoundId::CrowdSwell, ss::SoundId::CrowdOoh};
+
 void OneShots()
 {
 	std::printf("one-shots\n");
@@ -448,19 +456,25 @@ void OneShots()
 		const ss::SoundId Id = static_cast<ss::SoundId>(I);
 		Check(ss::SoundName(Id), Render(Id, 1.0f, 7u + static_cast<uint32_t>(I)), 0.01f);
 	}
-	// Update 4 (SPEC v1.7 §9.3; Phase A, §6 PA-36): the nine cues after KastShine render nothing until their gates write their bodies.
-	// Each gate moves its ids into the loop above and out of this one (31 cues become 40 by G3).
+	// Update 4 G1 (§8.4): the festivals' four stings and CrowdApplause (F-look) left the silence check below and are checked as the
+	// cues above are; SiteCueChecks and FestSoundChecks hold them to their own.
+	for (const ss::SoundId Id : FestSoundIds)
 	{
-		std::string Loud;
-		for (int I = static_cast<int>(ss::SoundId::FestRiver); I <= static_cast<int>(ss::SoundId::CrowdOoh); ++I)
+		Check(ss::SoundName(Id), Render(Id, 1.0f, 7u + static_cast<uint32_t>(Id)), 0.01f);
+	}
+	// Update 4 (SPEC v1.7 §9.3; Phase A, §6 PA-36): the cues after KastShine render nothing until their gates write their bodies. Each
+	// gate moves its ids into the checks above and out of this one (31 cues became 36 at G1; 40 by G3).
+	{
+		std::string Loud, Quiet;
+		for (const ss::SoundId Id : FestLaterSilentIds)
 		{
-			const ss::SoundId Id = static_cast<ss::SoundId>(I);
-			if (!Render(Id, 1.0f, 7u + static_cast<uint32_t>(I)).empty() || !Render(Id, 0.4f, 2u).empty())
+			if (!Render(Id, 1.0f, 7u + static_cast<uint32_t>(Id)).empty() || !Render(Id, 0.4f, 2u).empty())
 			{
 				Loud += std::string(Loud.empty() ? "" : ", ") + ss::SoundName(Id);
 			}
+			Quiet += std::string(Quiet.empty() ? "" : ", ") + ss::SoundName(Id);
 		}
-		Expect(Loud.empty(), "Update 4's nine cues are silent until their gates (Phase A)", Loud.empty() ? std::string("festriver to crowdooh") : Loud);
+		Expect(Loud.empty(), "Update 4's four G2 and G3 cues are silent until their gates", Loud.empty() ? Quiet : Loud);
 	}
 	Check("buzz", Render(Effect::Buzz, 1u), 0.05f);
 	Check("canopen", Render(Effect::CanOpen, 2u), 0.02f);
@@ -528,6 +542,14 @@ const SiteCue SiteCues[] = {
 	{"ritrank", ss::SoundId::RitRank, 0.35f, 0.25f, 0.08, true, true},
 	{"ritrank-fall", ss::SoundId::RitRank, 0.45f, 0.45f, 0.8, false, false},
 	{"ritrank-rise", ss::SoundId::RitRank, 0.6f, 0.5f, 0.8, false, false},
+	// Update 4 G1 (SPEC v1.7 §2.7.6, §9.3; F-look), FestSounds' render half (§2.15.2): the hosts' three festival stings, the
+	// champion's and the applause under it, at UiSound's default volume (the hosts play them so, F-hubs), each running its
+	// length and 0.1 s at most. Kept last, so the indices SiteCueChecks reads above them stay.
+	{"festriver", ss::SoundId::FestRiver, 0.4f, 0.25f, 1.3, false, true},
+	{"festignite", ss::SoundId::FestIgnite, 0.4f, 0.25f, 1.0, false, true},
+	{"festrit", ss::SoundId::FestRit, 0.4f, 0.25f, 2.1, false, true},
+	{"festchampion", ss::SoundId::FestChampion, 0.4f, 0.25f, 2.5, false, true},
+	{"crowdapplause", ss::SoundId::CrowdApplause, 0.4f, 0.25f, 3.1, false, true},
 };
 /** Distinct: a cue's nearest other sound is at least this far (dB, Apart below) and this much farther than the cue is from
  *  itself with other seeds. */
@@ -676,7 +698,8 @@ double Apart(const CueLook& A, const CueLook& B)
 }
 
 /** The ten site cues (§1.11): each its own, bounded, distinct from each other and from the game's sounds, at the
- *  volumes the sites use (§10: 0.25-0.6), cheap enough to render on the game thread. */
+ *  volumes the sites use (§10: 0.25-0.6), cheap enough to render on the game thread. Update 4 G1: the festivals' five
+ *  (SiteCues' last rows) are held to the same, FestSounds' render half; FestSoundChecks below holds each to its character. */
 void SiteCueChecks()
 {
 	std::printf("the sites' cues\n");
@@ -713,13 +736,19 @@ void SiteCueChecks()
 	}
 
 	// §10's range: every id, 0.25 to 0.6, heard and bounded, whatever seed the host renders it with (eight of them); Kast's
-	// four too (the creator update: KastShine is the last id; KastCueChecks holds them at the queue's volumes).
+	// four too (the creator update: KastShine is the last id; KastCueChecks holds them at the queue's volumes), and Update 4's
+	// festival five (G1: FestSoundIds, a list).
+	std::vector<ss::SoundId> CueIds;
+	for (int I = static_cast<int>(ss::SoundId::IgSpark); I <= static_cast<int>(ss::SoundId::KastShine); ++I)
+	{
+		CueIds.push_back(static_cast<ss::SoundId>(I));
+	}
+	CueIds.insert(CueIds.end(), std::begin(FestSoundIds), std::end(FestSoundIds));
 	bool Range = true;
 	float Loudest = 0.0f;
 	std::string RangeWhy;
-	for (int I = static_cast<int>(ss::SoundId::IgSpark); I <= static_cast<int>(ss::SoundId::KastShine); ++I)
+	for (const ss::SoundId Id : CueIds)
 	{
-		const ss::SoundId Id = static_cast<ss::SoundId>(I);
 		for (uint32_t Seed = 1u; Seed <= 8u; ++Seed)
 		{
 			const float Low = PeakOf(Render(Id, 0.25f, Seed)), High = PeakOf(Render(Id, 0.6f, Seed));
@@ -925,24 +954,34 @@ void SiteCueChecks()
 	std::sort(GameRates.begin(), GameRates.end());
 	const double GameRate = GameRates[GameRates.size() / 2];
 	std::printf("         the game's one-shots render in %.2f ms a second of sound (the median)\n", GameRate);
+	// Update 4 G1 (SPEC v1.7 §8.1: a check that asserts milliseconds runs only behind SS_PERF=1): the festivals' five print their
+	// time on every run and assert it only under SS_PERF=1 (a loaded PC slows a stretch of renders by half again).
+	const char* const PerfEnv = std::getenv("SS_PERF");
+	const bool FestPerf = PerfEnv != nullptr && std::string(PerfEnv) == "1";
 	for (const SiteCue& C : SiteCues)
 	{
 		double Seconds = 1.0;
 		const double Ms = Cost(C.Id, C.Vol, Seconds);
 		const double Ceiling = C.Tick ? 0.5 : 6.0;
-		Expect(Ms <= Ceiling && Ms / std::max(Seconds, 0.01) <= GameRate, std::string(C.Name) + " renders fast",
-			Fmt("%.3f ms (%.1f at most), %.2f ms a second", Ms, Ceiling, Ms / std::max(Seconds, 0.01)));
+		const std::string What = std::string(C.Name) + " renders fast";
+		const std::string Detail = Fmt("%.3f ms (%.1f at most), %.2f ms a second", Ms, Ceiling, Ms / std::max(Seconds, 0.01));
+		if (!FestPerf && std::find(std::begin(FestSoundIds), std::end(FestSoundIds), C.Id) != std::end(FestSoundIds))
+		{
+			std::printf("  %-6s %s: %s (asserted with SS_PERF=1)\n", "time", What.c_str(), Detail.c_str());
+			continue;
+		}
+		Expect(Ms <= Ceiling && Ms / std::max(Seconds, 0.01) <= GameRate, What, Detail);
 	}
 
 	// A host's bad volume: a non-number or an infinity is silence, a negative one too, a huge one the top of the range;
 	// never past the limiter.
 	bool BadOk = true;
 	const float Bad[] = {std::nanf(""), INFINITY, -INFINITY, -1.0f, 1.0e9f};
-	for (int I = static_cast<int>(ss::SoundId::IgSpark); I <= static_cast<int>(ss::SoundId::KastShine); ++I)
+	for (const ss::SoundId Id : CueIds)
 	{
 		for (const float V : Bad)
 		{
-			const std::vector<float> S = Render(static_cast<ss::SoundId>(I), V, 2u);
+			const std::vector<float> S = Render(Id, V, 2u);
 			bool Finite = !S.empty();
 			for (const float X : S)
 			{
@@ -1445,6 +1484,191 @@ void KastCueChecks()
 		Expect(Best <= 6.0 && Rate <= GameRate, std::string(KastCues[I].Name) + " renders fast",
 			Fmt("%.3f ms (6.0 at most), %.2f ms a second ", Best, Rate) + Fmt("(the game's median %.2f)", GameRate));
 	}
+}
+
+// ------------------------------------------------------------------ Update 4 G1: the festivals' stings and the applause (SPEC v1.7 §2.7.6, §9.3)
+
+/** The power spectrum of [T0, T1) seconds: Hann-windowed 8,192-point frames (5.9 Hz a bin), half overlapped, summed (one frame,
+ *  zero-padded, for a shorter stretch). FestBandOf reads a band of it. */
+std::vector<double> FestSpectrumOf(const std::vector<float>& S, double T0, double T1)
+{
+	const size_t N = 8192;
+	const size_t From = std::min(S.size(), static_cast<size_t>(std::max(0.0, T0) * SampleRate)), To = std::min(S.size(), static_cast<size_t>(T1 * SampleRate));
+	std::vector<double> Window(N);
+	for (size_t I = 0; I < N; ++I)
+	{
+		Window[I] = 0.5 - 0.5 * std::cos(2.0 * 3.14159265358979323846 * static_cast<double>(I) / static_cast<double>(N));
+	}
+	std::vector<double> P(N / 2, 0.0);
+	std::vector<std::complex<double>> A(N);
+	for (size_t At = From; At < To; At += N / 2)
+	{
+		for (size_t I = 0; I < N; ++I)
+		{
+			A[I] = std::complex<double>(At + I < To ? S[At + I] * Window[I] : 0.0, 0.0);
+		}
+		Fft(A);
+		for (size_t K = 0; K < N / 2; ++K)
+		{
+			P[K] += std::norm(A[K]);
+		}
+		if (At + N >= To)
+		{
+			break;
+		}
+	}
+	return P;
+}
+
+/** The energy of a FestSpectrumOf spectrum between Lo and Hi Hz. */
+double FestBandOf(const std::vector<double>& P, double Lo, double Hi)
+{
+	const double Bin = SampleRate / 8192.0;
+	double E = 0.0;
+	for (size_t K = 1; K < P.size(); ++K)
+	{
+		const double Hz = static_cast<double>(K) * Bin;
+		if (Hz >= Lo && Hz < Hi)
+		{
+			E += P[K];
+		}
+	}
+	return E;
+}
+
+/**
+ * FestSounds (§2.15.2), the render half (the once-a-day sting rule is F-hubs' FestPreviewStill): the four stings and CrowdApplause
+ * are SiteCues' last rows (each bounded and no longer than its length + 0.1 s, following its volume, deterministic and seeded,
+ * distinct from each other and every older sound; its render time printed, asserted under SS_PERF=1 by §8.1), in SiteCueChecks'
+ * range and bad-volume loops, and out of OneShots' silence check; here each one's character, at UiSound's 0.4: RiverLine's
+ * three-note fanfare, Ignite's cymbal swelling into the organ's hit, RunItTwice's bell on its four inharmonic partials
+ * (§2.7.6), the champion's climb into a held major chord, and the crowd. Their loudness is printed for the lead's listen
+ * (audio_test --cues).
+ */
+void FestSoundChecks()
+{
+	std::printf("the festivals' stings and the applause (FestSounds)\n");
+	auto Secs = [](const std::vector<float>& S) { return static_cast<double>(S.size()) / SampleRate; };
+	std::vector<std::vector<float>> Heard;
+	for (const ss::SoundId Id : FestSoundIds)
+	{
+		Heard.push_back(Render(Id, 0.4f, 11u));
+	}
+	{
+		// RiverLine's: G4 and C5 called short, E5 held to 1.2 s. In each note's stretch its fundamental's band (3% either side) is the
+		// strongest of the three (a band, not the strongest bin: two horns in unison beat, and the trombone's partials sit on E5's
+		// octaves).
+		const std::vector<float>& S = Heard[0];
+		const double Note[3] = {392.0, 523.25, 659.26};
+		const char* const NoteName[3] = {"G4", "C5", "E5"};
+		const double From[3] = {0.03, 0.2, 0.5}, To[3] = {0.14, 0.31, 0.9};
+		bool Calls = true;
+		std::string Notes;
+		for (int K = 0; K < 3; ++K)
+		{
+			const std::vector<double> P = FestSpectrumOf(S, From[K], To[K]);
+			int Best = 0;
+			double BestE = -1.0;
+			for (int J = 0; J < 3; ++J)
+			{
+				const double E = FestBandOf(P, Note[J] * 0.97, Note[J] * 1.03);
+				Best = E > BestE ? J : Best;
+				BestE = std::max(BestE, E);
+			}
+			Calls = Calls && Best == K;
+			Notes += std::string(K ? ", " : "") + NoteName[Best];
+		}
+		const double Held = RmsOf(S, 1.0, 1.1), Call = RmsOf(S, 0.5, 0.7);
+		Expect(Calls && Db(Held * Held) >= Db(Call * Call) - 24.0 && Secs(S) >= 1.1, "FestRiver is a three-note fanfare: G4, C5, then E5 held to 1.2 s",
+			Notes + Fmt("; the held note %.1f dB at 1.0-1.1 s, %.2f s", Db(Held * Held) - Db(Call * Call), Secs(S)));
+	}
+	{
+		// Ignite's: the cymbal swells from nothing into the hit at 0.16 s (louder at 0.10-0.15 s than at 0-0.05 s), and the hit is the
+		// loudest 20 ms.
+		const std::vector<float>& S = Heard[1];
+		const double Early = RmsOf(S, 0.0, 0.05), Late = RmsOf(S, 0.1, 0.15);
+		double HitAt = 0.0, HitRms = 0.0;
+		for (double T = 0.0; T + 0.02 <= Secs(S); T += 0.005)
+		{
+			const double R = RmsOf(S, T, T + 0.02);
+			if (R > HitRms)
+			{
+				HitRms = R;
+				HitAt = T;
+			}
+		}
+		Expect(Db(Late * Late) >= Db(Early * Early) + 6.0 && HitAt >= 0.15 && HitAt <= 0.26, "FestIgnite's cymbal swells into the organ's hit at 0.16 s",
+			Fmt("the swell %.1f dB from its start; ", Db(Late * Late) - Db(Early * Early)) + Fmt("the loudest 20 ms at %.3f s", HitAt));
+	}
+	{
+		// RunItTwice's: a struck bell on 554 Hz (Synth.cpp's CueFestRitHz) whose spectrum peaks at its four partials, 1, 2.76, 5.40 and
+		// 8.93 times it (§2.7.6), each 12 dB or more over its neighbourhood (6-12% either side), and nothing at the harmonic places
+		// between them (2, 3 and 4 times): the three upper partials 12 dB or more over the strongest of those.
+		const std::vector<float>& S = Heard[2];
+		const std::vector<double> P = FestSpectrumOf(S, 0.0, Secs(S));
+		const double F = 554.37;
+		const double Ratio[4] = {1.0, 2.76, 5.40, 8.93};
+		double Clear = 1.0e9, Upper = 1.0e9;
+		std::string Peaks;
+		for (int K = 0; K < 4; ++K)
+		{
+			const double Hz = F * Ratio[K];
+			const double E = Db(FestBandOf(P, Hz * 0.97, Hz * 1.03));
+			const double Round = Db(std::max(FestBandOf(P, Hz * 0.88, Hz * 0.94), FestBandOf(P, Hz * 1.06, Hz * 1.12)));
+			Clear = std::min(Clear, E - Round);
+			Upper = K > 0 ? std::min(Upper, E) : Upper;
+			Peaks += Fmt(K ? ", %.1f" : "%.1f", E - Round);
+		}
+		double Harmonic = -300.0;
+		for (int H = 2; H <= 4; ++H)
+		{
+			Harmonic = std::max(Harmonic, Db(FestBandOf(P, F * H * 0.97, F * H * 1.03)));
+		}
+		Expect(Clear >= 12.0 && Upper >= Harmonic + 12.0 && Secs(S) >= 1.8, "FestRit is an inharmonic struck bell: its spectrum peaks at 1, 2.76, 5.40 and 8.93 times 554 Hz, not at 2, 3 or 4",
+			"each over its neighbourhood by " + Peaks + Fmt(" dB; the upper three %.1f dB over the harmonic places; %.2f s", Upper - Harmonic, Secs(S)));
+	}
+	{
+		// The champion's: up D major (D4, F#4, A4, D5, 90 ms apart), then the held chord, major (F#5 within 12 dB of D5, no F5 within 20
+		// dB of the F#: the moment cheers), still heard at 1.9-2.1 s (within 30 dB of the landing).
+		const std::vector<float>& S = Heard[3];
+		double Prev = 0.0;
+		bool Up = true;
+		std::string Notes;
+		for (int K = 0; K < 4; ++K)
+		{
+			const double Hz = DominantHz(S, 0.09 * K + 0.022, 0.09 * K + 0.08);
+			Up = Up && Hz > Prev * 1.1;
+			Prev = Hz;
+			Notes += Fmt(K ? ", %.0f" : "%.0f", Hz);
+		}
+		const std::vector<double> P = FestSpectrumOf(S, 0.6, 2.0);
+		const double Root = Db(FestBandOf(P, 587.33 * 0.975, 587.33 * 1.025)), Major = Db(FestBandOf(P, 739.99 * 0.975, 739.99 * 1.025));
+		const double Minor = Db(FestBandOf(P, 698.46 * 0.975, 698.46 * 1.025));
+		const double Held = RmsOf(S, 1.9, 2.1), Landing = RmsOf(S, 0.4, 0.6);
+		Expect(Up && Major >= Root - 12.0 && Minor <= Major - 20.0 && Db(Held * Held) >= Db(Landing * Landing) - 30.0 && Secs(S) >= 2.2,
+			"FestChampion climbs D major into a held major chord", Notes + Fmt(" Hz; the third %.1f dB under the root, the minor third %.1f dB under the third; ", Root - Major, Major - Minor) +
+				Fmt("held %.1f dB at 1.9-2.1 s", Db(Held * Held) - Db(Landing * Landing)));
+	}
+	{
+		// The crowd: it breaks out (0.25-0.5 s at half its loudest quarter second or more), claps (peak over RMS 3 or more in
+		// 1.0-1.5 s), murmurs under the claps (a share of its energy at 250-520 Hz, where the claps' banks put little) and thins
+		// out by 3 s (2.6-2.9 s under half of 1.0-1.5 s).
+		const std::vector<float>& S = Heard[4];
+		double Loudest = 0.0;
+		for (double T = 0.0; T + 0.25 <= Secs(S); T += 0.05)
+		{
+			Loudest = std::max(Loudest, RmsOf(S, T, T + 0.25));
+		}
+		const double Breakout = RmsOf(S, 0.25, 0.5), Body = RmsOf(S, 1.0, 1.5), End = RmsOf(S, 2.6, 2.9);
+		const std::vector<float> Mid(S.begin() + static_cast<long long>(std::min(1.0, Secs(S)) * SampleRate), S.begin() + static_cast<long long>(std::min(1.5, Secs(S)) * SampleRate));
+		const double Crest = static_cast<double>(PeakOf(Mid)) / std::max(RmsOf(Mid, 0.0, 1.0), 1.0e-12);
+		const std::vector<double> P = FestSpectrumOf(S, 0.0, Secs(S));
+		const double Murmur = FestBandOf(P, 250.0, 520.0) / std::max(FestBandOf(P, 1.0, SampleRate * 0.5), 1.0e-30);
+		Expect(Breakout >= 0.5 * Loudest && Crest >= 3.0 && Murmur >= 0.02 && End <= 0.5 * Body && Secs(S) >= 2.7, "CrowdApplause is a crowd: it breaks out, claps, murmurs under the claps and thins out by 3 s",
+			Fmt("0.25-0.5 s at %.2f of its loudest; peak over RMS %.1f; ", Breakout / std::max(Loudest, 1.0e-12), Crest) + Fmt("%.1f%% at 250-520 Hz; the end at %.2f of 1.0-1.5 s", 100.0 * Murmur, End / std::max(Body, 1.0e-12)));
+	}
+	std::printf("         at 0.4: festriver %.1f, festignite %.1f, festrit %.1f LUFS; ", LoudnessOf(Heard[0]), LoudnessOf(Heard[1]), LoudnessOf(Heard[2]));
+	std::printf("festchampion %.1f, crowdapplause %.1f\n", LoudnessOf(Heard[3]), LoudnessOf(Heard[4]));
 }
 
 void Timbres()
@@ -2981,6 +3205,20 @@ void CueReel(const std::string& Dir)
 		}
 		Save("reel_kast.wav", Kast.S);
 	}
+	// Update 4 G1 (SPEC v1.7 §2.7.6, §9.3): the festivals' five each wrote its cue_<name>.wav above (SiteCues' last rows, at 0.4);
+	// here as they play: the three hosts' stings (a hub's first open of the day), then the champion's moment, FestChampion with
+	// CrowdApplause under it, and the belt's.
+	{
+		CueReelTrack Fest;
+		Fest.Put(ss::SoundId::FestRiver, 0.4f, 0.2, Seed++);
+		Fest.Put(ss::SoundId::FestIgnite, 0.4f, 2.0, Seed++);
+		Fest.Put(ss::SoundId::FestRit, 0.4f, 3.5, Seed++);
+		Fest.Put(ss::SoundId::FestChampion, 0.4f, 6.5, Seed++);
+		Fest.Put(ss::SoundId::CrowdApplause, 0.4f, 6.5, Seed++);
+		Fest.Put(ss::SoundId::FestChampion, 0.4f, 10.5, Seed++);
+		Fest.Put(ss::SoundId::CrowdApplause, 0.4f, 10.5, Seed++);
+		Save("reel_fest.wav", Fest.S);
+	}
 	FILE* F = std::fopen((Dir + "/README.txt").c_str(), "wb");
 	if (F)
 	{
@@ -3004,7 +3242,15 @@ void CueReel(const std::string& Dir)
 			"reel_kast.wav          a deep run through the cue queue (1.2 s apart, best first): the bubble's sting, ITM's cash,\n"
 			"                       the final table (its Run Alert folded into one KastAlert, the Broadcast's raid waiting), an\n"
 			"                       all-in's reveal and the 50th follower, then the stream's end: the end card's milestone and\n"
-			"                       Heat's tier-up. The order is printed as it plays.\n");
+			"                       Heat's tier-up. The order is printed as it plays.\n\n"
+			"Update 4's festival stings and applause (SPEC v1.7 2.7.6, 9.3), at UiSound's default 0.4.\n"
+			"cue_festriver.wav      RiverLine's festival sting: a three-note brass fanfare (G4, C5, E5 held), 1.2 s.\n"
+			"cue_festignite.wav     Ignite's: a cymbal swelling into a band organ's E major hit, 0.9 s.\n"
+			"cue_festrit.wav        RunItTwice's: an inharmonic struck bell (partials 1, 2.76, 5.40, 8.93 on 554 Hz), 2.0 s.\n"
+			"cue_festchampion.wav   the champion's and the belt's moments: brass up D major into a held chord with glints, 2.4 s.\n"
+			"cue_crowdapplause.wav  under FestChampion and on the CHAMPION card: noise-burst applause with its murmur, 3 s.\n"
+			"reel_fest.wav          the three stings as a hub's first open of the day plays them, then the champion's moment\n"
+			"                       (FestChampion with CrowdApplause under it) and the belt's.\n");
 		std::fclose(F);
 	}
 }
@@ -3029,6 +3275,7 @@ int main(int Argc, char** Argv)
 	audio_test::OneShots();
 	audio_test::SiteCueChecks();
 	audio_test::KastCueChecks();
+	audio_test::FestSoundChecks();
 	audio_test::Timbres();
 	audio_test::Speech();
 	audio_test::Vocals();
