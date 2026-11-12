@@ -120,6 +120,32 @@ SHORTSTACKCORE_API FestMark HeroMark(const World& W, const std::string& Key);
 // WHO'S IN is one query for the hub, CHIP COUNTS and the broadcast: World::FieldStoriesOf(EventId) (§4.7.3, declared in Phase A,
 // §6 PA-27). At G1 F-world fills its People (rival, met, the defending champion and the roll's champions, team pros, streamers,
 // satellite qualifiers) and the Qualifiers group; G2 and G3 add the rest (§4.7.3's ownership list).
+
+// ---- G1's appends (the lead's pre-wave commit H0; LEAD_CALLS R-2; PLAN_G1 §4.2): views F-hubs, F-net and the session read, each a
+// stub in G/WorldFest.cpp answering "none" until F-world's bodies (FestRaceKey FW-2a, HeroMarks FW-2b, HeroFestResults FW-3,
+// FestWhyLine FW-4).
+struct StoryPerson;
+/** The hero's marks, one per edition scored in (World's HeroFest: Key, Mark, Rank, Scorers, Points and the unpaid crown Ticket):
+ *  T14, the mark moment (U28) and FestStep need the rank, scorers and ticket HeroMark does not carry. */
+SHORTSTACKCORE_API const std::vector<HeroFestMark>& HeroMarks(const World& W);
+/** The series id of the race FestTop, FestStanding, FestKnown and fest::MarkCutoff read right now ("" when they read none), set from
+ *  the race's opening (FestDay), before anyone scores: the hub's line (§2.5.5) and fest::YourLine tell a fresh race with no scorers
+ *  from no race, and edition F's race from another's. */
+SHORTSTACKCORE_API const std::string& FestRaceKey(const World& W);
+/** WHO'S IN's festival line for a person in EventId's field (§2.11's who:fest:* lines, F-world's inventory; at G1 the three
+ *  championship reasons only, LEAD_CALLS R-16, R-21); "" when the person has none. */
+SHORTSTACKCORE_API std::string FestWhyLine(const World& W, const StoryPerson& Person, const std::string& EventId);
+/** One of YOUR <FESTIVAL>'s result rows (§2.8.2): a festival event the hero finished (World's HeroResults, which is private). */
+struct HeroFestResult
+{
+	std::string EventId; // "<template>@<minute>"
+	int Place = 0;
+	Chips Prize = 0;
+	int Entries = 0;     // the instance's field (FindInstance), 0 when it can't be found
+};
+/** The hero's results in edition Key (its numbered events, headliners and Main, as HeroFestPins counts them), newest first: the YOUR
+ *  panel draws up to six. */
+SHORTSTACKCORE_API std::vector<HeroFestResult> HeroFestResults(const World& W, const std::string& Key);
 } // namespace world
 
 namespace fest
@@ -129,5 +155,9 @@ struct WorldAccess;
 /** The ladder's "{N} pts to {MARK}" (§2.5.3, U27): the points of the scorer holding the mark's last rank in the live race right now
  *  (cached per world Rev); 0 when no race is running. */
 SHORTSTACKCORE_API double MarkCutoff(const world::World& W, world::FestMark Mark);
+/** G1 (the lead's pre-wave commit H0; LEAD_CALLS R-10): the festival views' cache World keeps for them (its private FestViews: the
+ *  per-Rev views and FieldStoriesOf's returned reference), defined in G/WorldFest.cpp (F-world's) and reached through WorldAccess.
+ *  Never saved; a copied World starts without one. */
+struct WorldViews;
 } // namespace fest
 } // namespace ss

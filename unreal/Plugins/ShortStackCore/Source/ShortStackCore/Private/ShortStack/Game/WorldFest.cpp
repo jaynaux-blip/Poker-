@@ -33,6 +33,11 @@ double MarkCutoff(const world::World& /*W*/, world::FestMark /*Mark*/)
 	// Phase A: no race runs (G1: the points of the scorer holding the mark's last rank, cached per world Rev).
 	return 0.0;
 }
+
+/** World::FestViews' contents (H0, LEAD_CALLS R-10): empty, and never made, until F-world's per-Rev views (FW-2a). */
+struct WorldViews
+{
+};
 } // namespace fest
 
 namespace world
@@ -130,6 +135,31 @@ std::vector<HeroFestPin> HeroFestPins(const World& /*W*/)
 FestMark HeroMark(const World& /*W*/, const std::string& /*Key*/)
 {
 	return FestMark::None;
+}
+
+// ---- G1's appends (the lead's pre-wave commit H0, PLAN_G1 §4.2): stubs until F-world's bodies (FestRaceKey FW-2a, HeroMarks FW-2b,
+// HeroFestResults FW-3, FestWhyLine FW-4). No race, mark or festival result exists before them, so each answers "none".
+
+const std::vector<HeroFestMark>& HeroMarks(const World& /*W*/)
+{
+	static const std::vector<HeroFestMark> FestMarksNone;
+	return FestMarksNone;
+}
+
+const std::string& FestRaceKey(const World& /*W*/)
+{
+	static const std::string FestRaceNone;
+	return FestRaceNone;
+}
+
+std::string FestWhyLine(const World& /*W*/, const StoryPerson& /*Person*/, const std::string& /*EventId*/)
+{
+	return std::string();
+}
+
+std::vector<HeroFestResult> HeroFestResults(const World& /*W*/, const std::string& /*Key*/)
+{
+	return {};
 }
 
 // ---- WHO'S IN (§4.7.3, PA-27)

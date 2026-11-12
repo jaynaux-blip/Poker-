@@ -149,6 +149,9 @@ struct FestMoment
 	Chips Prize = 0;
 	int Year = 0;
 	int Mark = 0, Rank = 0, Scorers = 0;
+	/** G1 (§2.16's ss.Fest.Moment; the lead's pre-wave commit H0, LEAD_CALLS R-7): a dev moment, its numbers marked DEV; it grants
+	 *  nothing and DoneFestMoment writes no key for it. */
+	bool Dev = false;
 };
 
 /** What the viewer sees at one seat of the hero's table. */
@@ -1328,6 +1331,10 @@ private:
 	Rng KastRng;
 	/** Update 3: when UiSound last played each id (Now; not saved). */
 	std::map<int, double> UiSoundAt;
+	/** Update 4 G1 (SPEC v1.7 §2.8.5; the lead's pre-wave commit H0, PLAN_G1 §4.2): the moment ShowResults sets for Kinds 1, 3 and 5
+	 *  (a festival Main's title, another festival event, a championship's Mini or Micro title; ss::Results holds no event id), played
+	 *  later through PeekFestMoment. Not saved. Empty until F-world's bodies (G/Session.cpp's ShowResults, SessionFest.cpp). */
+	std::optional<FestMoment> FestPending;
 };
 
 const char* SoundName(SoundId Id);

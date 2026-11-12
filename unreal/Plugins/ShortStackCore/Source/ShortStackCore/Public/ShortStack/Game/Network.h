@@ -391,6 +391,9 @@ public:
 	SHORTSTACKCORE_API std::vector<EventInstance> Upcoming(double Now, double Horizon) const;
 	/** Simulates every result up to Now ahead of time (a loading moment), so the first board or page doesn't stall. */
 	SHORTSTACKCORE_API void Prewarm(double Now) const;
+	/** Update 4 G1 (SPEC v1.7 §2.4.5; the lead's pre-wave commit H0, PLAN_FNET P1): fest::RecordOf's day maxima, the largest field
+	 *  that started on Day on this site, 0 outside what FillDayMax has walked. G/NetworkFestival.cpp (F-net's body at FN-7). */
+	SHORTSTACKCORE_API int DayMaxOn(int Day) const;
 	/** The player's own results (from the save): their finishes replace a regular in those final tables. */
 	SHORTSTACKCORE_API void SetHero(const std::string& Name, const std::vector<HistoryEntry>& History);
 	const std::string& HeroName() const { return YouName; }

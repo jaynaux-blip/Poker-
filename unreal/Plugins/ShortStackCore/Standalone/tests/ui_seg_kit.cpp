@@ -11,6 +11,10 @@
 
 namespace ui_test
 {
+// u4_ui_test (Update 4 G1, the lead's pre-wave commit H0) builds this file with SS_UI_KIT_MAIN_COUNTERS: its main,
+// tests/u4_ui_main.cpp, defines these three (OutDir from SS_U4_UI_OUT, Expect forwarding to its own counters). Every other suite
+// takes them from here, as before.
+#ifndef SS_UI_KIT_MAIN_COUNTERS
 int Failures = 0;
 std::string OutDir;
 
@@ -22,6 +26,7 @@ void Expect(bool Condition, const char* What)
 		std::printf("FAILED: %s\n", What);
 	}
 }
+#endif
 
 float TextAt(const ss::ui::DrawList& L, const std::string& Needle)
 {

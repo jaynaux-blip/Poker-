@@ -56,6 +56,31 @@ void FestWordMark(Canvas& /*C*/, const FestivalLook& /*L*/, const std::string& /
 void FeltMark(Canvas& /*C*/, const FestivalLook& /*L*/, float /*Cx*/, float /*Cy*/, float /*Size*/, bool /*Suppressed*/)
 {
 }
+
+// G1's appends (the lead's pre-wave commit H0, PLAN_G1 §4.2): stubs until F-look's bodies (FestCardBack and DevLook at FL-4,
+// FestBanner and the FestWordMark overload at FL-7). No back today's tables draw reaches kBackFestival (the highest is
+// SitesIgBackLooks + a Locker look) and nothing calls the others, so they draw nothing and keep nothing.
+
+void FestCardBack(Canvas& /*C*/, int /*Back*/, float /*X*/, float /*Y*/, float /*W*/, float /*H*/)
+{
+}
+
+void DevLook(fest::Brand /*B*/)
+{
+}
+
+fest::Brand DevLook()
+{
+	return fest::Brand::None;
+}
+
+void FestBanner(Canvas& /*C*/, const FestivalLook& /*L*/, const Rect& /*R*/, double /*SinceOpen*/, float /*DayProgress*/, bool /*MainDay*/, bool /*Still*/)
+{
+}
+
+void FestWordMark(Canvas& /*C*/, const FestivalLook& /*L*/, const std::string& /*Text*/, float /*X*/, float /*Y*/, float /*Size*/, double /*Time*/, float /*DayProgress*/, bool /*Still*/)
+{
+}
 } // namespace festart
 } // namespace ui
 } // namespace ss

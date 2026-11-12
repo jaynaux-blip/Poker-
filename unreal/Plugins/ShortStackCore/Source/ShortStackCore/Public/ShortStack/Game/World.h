@@ -2169,6 +2169,22 @@ private:
 		std::vector<Headliner> Picks;
 	};
 	mutable HeadlinerCache Headlined;                   // Headliners (G/WorldSim.cpp): the month's picks, reused until the world moves
+	// Update 4 G1 (SPEC v1.7 §2.6.6; the lead's pre-wave commit H0, LEAD_CALLS R-10): the festival views' cache, a fest::WorldViews
+	// (G/WorldFest.cpp, F-world's: the Rev-cached views and FieldStoriesOf's returned reference), reached through fest::WorldAccess.
+	// Not saved. A copy of this World (Snapshot's included, LEAD_CALLS Q-13; a copied or moved world) starts with none, so a world
+	// never shares or carries another world's views. Never made before F-world's bodies (FW-2a).
+	struct FestViewBox
+	{
+		std::shared_ptr<fest::WorldViews> P;
+		FestViewBox() = default;
+		FestViewBox(const FestViewBox&) noexcept {}
+		FestViewBox& operator=(const FestViewBox&) noexcept
+		{
+			P.reset();
+			return *this;
+		}
+	};
+	mutable FestViewBox FestViews;
 
 	SHORTSTACKCORE_API const std::vector<net::Player>& SnapshotView() const;
 	void Refresh(int Id);

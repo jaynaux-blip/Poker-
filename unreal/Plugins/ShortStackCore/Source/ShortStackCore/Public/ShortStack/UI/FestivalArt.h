@@ -88,6 +88,24 @@ SHORTSTACKCORE_API void FestPin(Canvas& C, fest::Brand B, int Grade, world::Fest
 SHORTSTACKCORE_API void FestWordMark(Canvas& C, const FestivalLook& L, const std::string& Text, float X, float Y, float Size, double Time, bool Still);
 /** The low-detail crest at alpha 0.14 on the oval; Suppressed (G3's B-ui) while INTRODUCTIONS or a lower third draws on RunItTwice. */
 SHORTSTACKCORE_API void FeltMark(Canvas& C, const FestivalLook& L, float Cx, float Cy, float Size, bool Suppressed);
+
+// G1's appends (the lead's pre-wave commit H0; LEAD_CALLS R-2; PLAN_G1 §4.2), each a stub in UI/FestivalArt.cpp that draws or keeps
+// nothing until F-look's bodies (FestCardBack and DevLook at FL-4, FestBanner and the FestWordMark overload at FL-7). Crest motions
+// go through eventart::SeriesCrest's Time (a still is its settled Time), so there is no FestCrestMotion.
+/** A festival's card back, Back = kBackFestival + its brand (§2.7.4: the host's back pattern in the look's Accent and Accent2, the
+ *  low-detail crest at its centre), in {X, Y, W, H}; TblBack's festival branch (UI/Ui.cpp) calls it. */
+SHORTSTACKCORE_API void FestCardBack(Canvas& C, int Back, float X, float Y, float W, float H);
+/** ss.Fest.Look <brand or off> (§2.16; presentation only, never saved, logged as dev by the game module): the look SitesSkin and
+ *  SitesTableLook dress the site in front in, ahead of the calendar; Brand::None turns it off. */
+SHORTSTACKCORE_API void DevLook(fest::Brand B);
+/** The dev look DevLook(B) set (Brand::None: off), read first by SitesSkin and SitesTableLook. */
+SHORTSTACKCORE_API fest::Brand DevLook();
+/** The hub's banner in R (§2.8.2): the Bg2 -> Felt gradient, the look's motif and its banner-level motions (RaysTurn, Curtains,
+ *  WaveRise, the door-light on Main day; §2.7.2, §2.7.7). SinceOpen: real seconds since the hub opened; DayProgress: the world day's
+ *  fraction (changed once a world minute); Still: the settled frame (previews). */
+SHORTSTACKCORE_API void FestBanner(Canvas& C, const FestivalLook& L, const Rect& R, double SinceOpen, float DayProgress, bool MainDay, bool Still);
+/** FestWordMark with the day's progress (Gauge fills to it); Time is seconds since the hub opened (Flap, Bob). */
+SHORTSTACKCORE_API void FestWordMark(Canvas& C, const FestivalLook& L, const std::string& Text, float X, float Y, float Size, double Time, float DayProgress, bool Still);
 } // namespace festart
 } // namespace ui
 } // namespace ss

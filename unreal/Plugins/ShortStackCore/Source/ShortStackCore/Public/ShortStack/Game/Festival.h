@@ -178,5 +178,17 @@ SHORTSTACKCORE_API std::vector<std::string> TextInventory();
 SHORTSTACKCORE_API std::vector<std::string> FestUiInventory();
 /** The words the festival art prints: arches, bandstands, floors, word-marks (UI/FestivalArt.cpp, F-look's at G1). */
 SHORTSTACKCORE_API std::vector<std::string> FestArtInventory();
+
+// G1's appends (the lead's pre-wave commit H0; LEAD_CALLS R-2, R-3; PLAN_G1 §4.2), each a stub in G/Festival.cpp until F-net's
+// bodies (FN-2a); F-world, F-hubs and F-look call them.
+/** The trophy of brand B (Tier 0: §2.11's P1-P10) or a championship's title object (Tier 1, as FestTrophy's Tier: P11-P12), as §2.11
+ *  prints it; "" for None or a tier the brand lacks. fest::Inventory lists them. */
+SHORTSTACKCORE_API const char* TrophyName(Brand B, int Tier = 0);
+/** A {Festival} name as it prints after an article the template writes ("the {Festival} Main Event", "next {Festival}"): a leading
+ *  "The " dropped ("The Championship Online 2027" -> "Championship Online 2027"), any other name as it is (§1.2 item 13; no fill
+ *  prints "the The"). */
+SHORTSTACKCORE_API std::string NameAfterArticle(const std::string& Name);
+/** A date inside a sentence (§1.2 item 13): "Oct 6" when Day is in Today's world year, "Oct 6, 2026" otherwise. */
+SHORTSTACKCORE_API std::string DateInSentence(int Day, int Today);
 } // namespace fest
 } // namespace ss

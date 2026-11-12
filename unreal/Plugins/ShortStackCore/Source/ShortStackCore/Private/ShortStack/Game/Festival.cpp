@@ -134,5 +134,26 @@ std::vector<std::string> Inventory()
 {
 	return {};
 }
+
+// G1's appends (the lead's pre-wave commit H0, PLAN_G1 §4.2): stubs until F-net's bodies (FN-2a). Nothing calls them before G1's
+// packages; each answers empty, or as today's text prints.
+
+const char* TrophyName(Brand /*B*/, int /*Tier*/)
+{
+	// H0: no trophy is named yet (FN-2a: §2.11's P1-P12 by brand and tier).
+	return "";
+}
+
+std::string NameAfterArticle(const std::string& Name)
+{
+	// H0: the name as it is (FN-2a drops a leading "The ").
+	return Name;
+}
+
+std::string DateInSentence(int Day, int /*Today*/)
+{
+	// H0: today's date label, "Oct 6" (FN-2a adds the year outside Today's world year).
+	return net::DateLabel(Day);
+}
 } // namespace fest
 } // namespace ss

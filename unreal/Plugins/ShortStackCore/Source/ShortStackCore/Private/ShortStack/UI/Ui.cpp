@@ -3,6 +3,7 @@
 
 #include "ShortStack/Cards.h"
 #include "ShortStack/Game/SitePlay.h"
+#include "ShortStack/UI/FestivalArt.h"
 
 #include <cmath>
 #include <cstring>
@@ -329,6 +330,13 @@ TblWorn TblWornLook(int Slot, int Look)
  */
 void TblBack(Canvas& C, float X, float Y, float W, float H, int Back)
 {
+	if (Back >= festart::kBackFestival)
+	{
+		// Update 4 G1 (SPEC v1.7 §2.7.4; F-look's P2 in the lead's pre-wave commit H0): a festival's back (kBackFestival + its brand),
+		// F-look's FestCardBack. No back reaches it before F-look's festival table looks (FL-4).
+		festart::FestCardBack(C, Back, X, Y, W, H);
+		return;
+	}
 	const float Rad = W * 0.1f;
 	const bool Lod = W <= 58.0f; // small: ground, stripes or bands, border
 	TblWorn Worn;

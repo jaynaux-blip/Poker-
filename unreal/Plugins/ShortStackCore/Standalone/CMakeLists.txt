@@ -219,10 +219,12 @@ target_link_libraries(big_field_test PRIVATE ShortStackCore)
 target_compile_definitions(big_field_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
 add_test(NAME big_field COMMAND big_field_test)
 
+# G1 (the lead's pre-wave commit H0; LEAD_CALLS R-1, R-2): u4_ui gains F-hubs' second stream (u4_ui_fest_hosts.cpp, Option B) and
+# the UI kit (ui_seg_kit.cpp: UiSeg.h's page helpers), its three counters defined by u4_ui_main.cpp (SS_UI_KIT_MAIN_COUNTERS).
 add_executable(u4_ui_test tests/u4_ui_main.cpp tests/u4_ui_fest.cpp tests/u4_ui_look.cpp tests/u4_ui_world.cpp tests/u4_ui_bigfield.cpp
-  tests/u4_ui_crowd.cpp)
+  tests/u4_ui_crowd.cpp tests/u4_ui_fest_hosts.cpp tests/ui_seg_kit.cpp)
 target_link_libraries(u4_ui_test PRIVATE ShortStackCore)
-target_compile_definitions(u4_ui_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
+target_compile_definitions(u4_ui_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}" SS_UI_KIT_MAIN_COUNTERS=1)
 add_test(NAME u4_ui COMMAND u4_ui_test)
 
 # Update 4 Phase 0 (update 4 SPEC §6.1, §8.1; the lead's call P-4, durable/update4/LEAD_CALLS.md): every suite has a real
