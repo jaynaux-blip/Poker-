@@ -1227,10 +1227,10 @@ void RealSchedules()
 		int Sundays;
 		size_t TemplatesLo, TemplatesHi;
 	};
-	// Update 4 G1 (SPEC v1.7 §2.3.4, §8.4; F-net): the template bands grow with the festivals BuildFestivals appends. FN-3's interim
-	// bands, around its measured counts: Ignite 1,876 (783 + FEIGN's 435 + PENNANT's 658), RunItTwice 2,291 (1,521 + GRIT's 238 +
-	// REIGN's 532); FN-2b moves them to the final 2,100-2,300 (Ignite 2,198) and 2,400-2,600 (RunItTwice 2,487).
-	const Want Wants[] = {{net::SiteId::Ignite, 18, 110, 2200, 1, 1800, 1950}, {net::SiteId::RunItTwice, 22, 330, 21500, 3, 2200, 2350}};
+	// Update 4 G1 (SPEC v1.7 §2.3.4, §8.4; F-net): the template bands grow with the festivals BuildFestivals appends. FN-2b's final
+	// bands, the six festivals in: Ignite 2,100-2,300 (2,198 = 783 + FEIGN's 435 + PUSH's 322 + PENNANT's 658), RunItTwice 2,400-2,600
+	// (2,487 = 1,521 + WRIT's 196 + GRIT's 238 + REIGN's 532).
+	const Want Wants[] = {{net::SiteId::Ignite, 18, 110, 2200, 1, 2100, 2300}, {net::SiteId::RunItTwice, 22, 330, 21500, 3, 2400, 2600}};
 	std::set<std::string> Every;
 	for (const net::EventTemplate& T : net::Shared().Templates())
 	{
@@ -1338,9 +1338,10 @@ void RealSchedules()
 			ss::world::DayOn(2027, 8, 1) <= Aug->FirstDay && Aug->FirstDay < ss::world::DayOn(2027, 9, 1) && !Ig.FindSeries("ignite.wildaug26"),
 		"Wildfire in February and August from 2027 (after Ignite opens), 24 events each");
 	// (Review.) A rival series event costs a standard buy-in, as RiverLine's series do ($5.50, $11, $22, $55, $109...), never
-	// a $67.90 or a $118.20. Update 4 G1 (SPEC v1.7 §2.3.2, §8.4; F-net, FN-3): REIGN's Main ($2,100) and High Roller ($5,250), prices
-	// RunItTwice already runs; FN-2b adds WRIT's $1,050.
-	static const Chips Standard[] = {110, 220, 330, 440, 550, 770, 1100, 1650, 2200, 2750, 3300, 4400, 5500, 8250, 10900, 16200, 21500, 32000, 53000, 210000, 525000};
+	// a $67.90 or a $118.20. Update 4 G1 (SPEC v1.7 §2.3.2, §8.4; F-net, FN-3 and FN-2b): REIGN's Main ($2,100) and High Roller ($5,250)
+	// and WRIT's ladder and Main ($1,050; its $215-$2,100 rungs), prices RunItTwice already runs.
+	static const Chips Standard[] = {110, 220, 330, 440, 550, 770, 1100, 1650, 2200, 2750, 3300, 4400, 5500, 8250, 10900, 16200, 21500, 32000, 53000, 105000, 210000,
+		525000};
 	bool Priced = true;
 	std::set<Chips> Seen;
 	for (const net::Network* Nw : {&Ig, &Rt})

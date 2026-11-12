@@ -32,6 +32,16 @@
 // the next edition), and F-net's Major (T.Main by the major floor, §2.6.2: PENNANT's Micro Main is a title but not a major). The
 // steps' seats texts follow RCOP's ladder ("Step 2 tickets ($5.50)", "PENNANT Main Event seats") and their seat values are the
 // next rung's buy-in. Names, taglines and blurbs: §2.11's N20-N23, G9, G10, H14 (v1.6), H16-H22, B7-B10, B11-B15.
+//
+// G1, FN-2b (F-net; SPEC v1.7 §2.1.3, §2.3.1-§2.3.4, §2.4.1-§2.4.3 as data, §2.11, §3.2.1; PLAN_FNET's Corrections item 1): PUSH
+// and WRIT, the siblings' last two, inserted after FEIGN on Ignite and before GRIT on RunItTwice ({FEIGN, PUSH, PENNANT}, {WRIT, GRIT,
+// REIGN}), so FEIGN's templates keep their indices (FEIGN 2026 at 783-811, the only festival a committed fixture can hold) and
+// PENNANT's, GRIT's and REIGN's shift once, before ship. PUSH is Ignite's boardwalk festival (Sep 16, ten days, 18 numbered on the
+// series curve, two a day, Standing Room Only, a $215 High Roller and a $109 Main with $5,000 added); WRIT RunItTwice's high-roller
+// festival (Jan 22, ten days, 12 numbered on its explicit ladder, Ladder[(No x 3) % 5] of $215-$2,100, the plan's appended Ladder
+// column, since NetSitesStep stops at $530; a $1,050 Main with $25,000 added and its one satellite, The Summons, with no seat
+// guarantee, FD-7; HighRoller for the world's high-roller mix, §3.2.1). Names, taglines and blurbs: §2.11's N1, N6, N9, N14, N17,
+// N18, G1, G6, H2, H6-H10, H14, B2, B6-B10.
 #include "ShortStack/Game/Network.h"
 
 #include "SitesDetail.h"
@@ -137,6 +147,9 @@ struct NetSitesFestival
 	bool FlipOpener = false;                 // No 1 is Ignite's Flip & Run (FEIGN)
 	const NetSitesFestNumber* Numbers = nullptr; // the numbered events set apart
 	int NumberCount = 0;
+	// F-net's, appended (FN-2b):
+	const double* Ladder = nullptr;          // an explicit numbered ladder (WRIT's $215-$2,100): No takes Ladder[(No x 3) % LadderCount]
+	int LadderCount = 0;                     // instead of the series curve (NetSitesStep stops at $530)
 };
 
 // FEIGN (SPEC §2.1.3, §2.3.2): Ignite, Nov 30, ten days, from 2026. The funhouse words in the order that gives FEIGN 2026 v1.3's rooms.
@@ -155,6 +168,32 @@ const NetSitesFestEvent NetSitesFeignEvents[] = {
 	{"main", "Main Event", 55.0, Format::Freezeout, "Deep", 700, 9, 18 * 60, 1.0, 0, 250000, true, false, true, "The Main Event: a guarantee, money added and a top-heavy payout."},
 	{"sat1", "Main Mega Satellite", 5.50, Format::Satellite, "Turbo", 200, 8, 20 * 60 + 30, 0.0, 0, 0, false, true, false, "Seats into the Main Event, the night before."},
 	{"sat2", "Main Last Chance", 2.20, Format::Satellite, "Hyper", 150, 9, 15 * 60, 0.0, 0, 0, false, true, false, "The last way into the Main Event."},
+};
+
+// PUSH (SPEC §2.1.3, §2.3.2): Ignite, Sep 16, ten days, from 2027; "Pier's Upbeat Summer Hold'em". The pier words (no "Bandstand":
+// Ignite's UI owns the word; "Striker" stays as a pier attraction).
+const char* const NetSitesPushRooms[] = {"Sea Spray", "Promenade", "Striker", "Boardwalk", "Saltwater", "Iron Pier", "Gull's Rest", "Tide Clock", "Ferris Light",
+	"Lifebuoy", "Harbour Lamp", "Deckchair", "Rock Candy", "Breakwater", "Pier End", "Seawall", "Anchor Rope", "Shell Cove"};
+const int NetSitesPushFormats[4] = {NetSitesFestFreezeout, NetSitesFestReEntry, NetSitesFestBounty, NetSitesFestReEntryTurbo};
+const NetSitesFestEvent NetSitesPushEvents[] = {
+	{"mega", "Standing Room Only", 1.10, Format::ReEntry, "Regular", 2500, 5, 20 * 60, 1.0, 0, 0, false, false, false, "A seat in the biggest room on the pier, for {BuyIn}."},
+	{"hr", "High Roller", 215.0, Format::Freezeout, "Regular", 90, 8, 19 * 60, 1.0, 0, 0, false, false, false, "The festival's highest buy-in."},
+	{"main", "Main Event", 109.0, Format::Freezeout, "Deep", 520, 9, 18 * 60, 1.0, 0, 500000, true, false, true, "The Main Event: a guarantee, money added and a top-heavy payout."},
+	{"sat1", "Main Mega Satellite", 11.0, Format::Satellite, "Turbo", 180, 8, 20 * 60 + 30, 0.0, 0, 0, false, true, false, "Seats into the Main Event, the night before."},
+	{"sat2", "Main Last Chance", 4.40, Format::Satellite, "Hyper", 140, 9, 15 * 60, 0.0, 0, 0, false, true, false, "The last way into the Main Event."},
+};
+
+// WRIT (SPEC §2.1.3, §2.3.2): RunItTwice, Jan 22, ten days, from 2027; "The Winter RunItTwice". Twelve high-roller events on the
+// explicit ladder, the Main and The Summons (the people's door: its seats are the pool's, max(1, Pool / $1,050), never promised, FD-7).
+// The members' club and the chambers of a summons.
+const char* const NetSitesWritRooms[] = {"Long Gallery", "Seal Room", "Map Room", "Reading Room", "Strong Room", "Writing Room", "Clerk's Office", "Hilary Term",
+	"Gatehouse", "Back Stair", "Morning Room", "Witness Box"};
+const int NetSitesWritFormats[4] = {NetSitesFestFreezeout, NetSitesFestReEntry, NetSitesFestFreezeout, NetSitesFestBounty};
+const double NetSitesWritLadder[5] = {215.0, 320.0, 530.0, 1050.0, 2100.0};
+const NetSitesFestEvent NetSitesWritEvents[] = {
+	{"main", "Main Event", 1050.0, Format::Freezeout, "Deep", 260, 9, 18 * 60, 0.95, 0, 2500000, true, false, true, "The Main Event: a guarantee, money added and a top-heavy payout."},
+	{"sat1", "The Summons", 22.0, Format::Satellite, "Regular", 1580, 8, 19 * 60, 0.0, 0, 0, false, true, false,
+		"{BuyIn} for a seat in the Main Event: one for every {MainBuyIn} in the pool."},
 };
 
 // GRIT (SPEC §2.1.3, §2.3.2): RunItTwice, May 12, twelve nights, from 2027. Twelve show templates, one a night, each run twice.
@@ -228,15 +267,19 @@ const NetSitesFestEvent NetSitesReignEvents[] = {
 
 // The plans, each site's appended in this order (v1.6: PUSH after FEIGN and PENNANT last on Ignite; WRIT before GRIT and REIGN last
 // on RunItTwice, FN-2b and FN-3), so every earlier plan's templates keep their indices. Flagship lives in each plan's own cell
-// (LEAD_CALLS Q-16, L2: none of the six is a flagship; S-W1 would edit REIGN's cell here). Until FN-2b inserts PUSH and WRIT,
-// PENNANT follows FEIGN and REIGN follows GRIT (PLAN_FNET's Corrections item 1).
+// (LEAD_CALLS Q-16, L2: none of the six is a flagship; S-W1 would edit REIGN's cell here). FN-2b inserted PUSH and WRIT, so from
+// FN-2b PENNANT's, GRIT's and REIGN's templates sit after them (PLAN_FNET's Corrections item 1; no committed fixture holds them).
 const NetSitesFestival IgniteFestivals[] = {
 	{"feign", "FEIGN", "FEIGN", "", 11, 30, 10, 2026, 24, 1.10, 22.0, 260, 3, NetSitesFeignRooms, 24, NetSitesFeignFormats, NetSitesFeignEvents, 5, 0xff4fa3, 0x5ff2c9, 32,
 		false, "Nothing in here is what it looks like. Except the guarantee.", 15 * 60, 150, 0, 0, false, true, NetSitesFeignNumbers, 3},
+	{"push", "PUSH", "PUSH", "Pier's Upbeat Summer Hold'em", 9, 16, 10, 2027, 18, 2.20, 33.0, 230, 2, NetSitesPushRooms, 18, NetSitesPushFormats, NetSitesPushEvents, 5,
+		0xf2a93b, 0x7fd4ff, 28, false, "Last summer on the pier. Push.", 15 * 60, 150},
 	{"pennant", "PENNANT", "PENNANT", "", 3, 30, 13, 2027, 33, 1.10, 55.0, 280, 3, NetSitesPennantRooms, 33, NetSitesPennantFormats, NetSitesPennantEvents, 11, 0x21d958,
 		0xff6b57, 50, false, "One flag flies over the boardwalk all year. Go win it.", 15 * 60, 150},
 };
 const NetSitesFestival RunItTwiceFestivals[] = {
+	{"writ", "WRIT", "WRIT", "The Winter RunItTwice", 1, 22, 10, 2027, 12, 215.0, 2100.0, 110, 2, NetSitesWritRooms, 12, NetSitesWritFormats, NetSitesWritEvents, 2,
+		0xd2141a, 0xe3e6ec, 14, false, "Served every January. The high rollers answer first.", 15 * 60, 180, 0, 0, true, false, nullptr, 0, NetSitesWritLadder, 5},
 	{"grit", "GRIT", "GRIT", "The Grinders' RunItTwice", 5, 12, 12, 2027, 12, 5.50, 109.0, 300, 1, NetSitesGritRooms, 12, NetSitesGritFormats, NetSitesGritEvents, 5, 0xd2141a,
 		0xf3e9d2, 32, false, "Every event runs twice a night. Seven o'clock, then ten. Bring grit.", 19 * 60, 0, 180, 22 * 60},
 	{"reign", "REIGN", "REIGN", "", 7, 26, 13, 2027, 24, 11.0, 530.0, 220, 2, NetSitesReignRooms, 24, NetSitesReignFormats, NetSitesReignEvents, 11, 0xd2141a, 0xe8b4a0, 45,
@@ -349,6 +392,19 @@ void Network::BuildFestivals()
 	const double Scale = D.Traffic.Scale > 0.0 ? D.Traffic.Scale : 1.0;
 	const double GtdOfPool = D.GtdOfPool > 0.0 ? D.GtdOfPool : 0.9;
 	const auto FestField = [Scale](int Planned) { return static_cast<int>(std::lround(static_cast<double>(Planned) / Scale)); };
+	// FN-2b (SPEC §2.14's "rivals <= 40% of RiverLine's build"): the templates this appends, counted first and reserved once, so the
+	// append never regrows Temps (each regrowth moved every template; 2,487 on RunItTwice crossed a capacity step). Output-neutral.
+	size_t Appends = 0;
+	for (size_t P = 0; P < PlanCount; ++P)
+	{
+		size_t PerEdition = static_cast<size_t>(std::max(0, Plans[P].Numbered));
+		for (int K = 0; K < Plans[P].EventCount; ++K)
+		{
+			PerEdition += Plans[P].Events[K].Satellite && Plans[P].Events[K].DayIndex2 >= 0 ? 2 : 1;
+		}
+		Appends += PerEdition * static_cast<size_t>(std::max(0, fest::kLastYear - Plans[P].FirstYear + 1));
+	}
+	Temps.reserve(Temps.size() + Appends);
 	for (size_t P = 0; P < PlanCount; ++P)
 	{
 		const NetSitesFestival& Pl = Plans[P];
@@ -423,6 +479,8 @@ void Network::BuildFestivals()
 				// The series loop's curve (G/NetworkSites.cpp's), each a standard buy-in.
 				const double S = Pl.Numbered > 2 ? static_cast<double>((No * 7) % (Pl.Numbered - 1)) / static_cast<double>(Pl.Numbered - 2) : 0.0;
 				double Dollars = NetSitesStep(Pl.MinBuyIn + (Pl.MaxBuyIn - Pl.MinBuyIn) * S * S, Pl.MinBuyIn, Pl.MaxBuyIn);
+				// WRIT: its explicit ladder, Ladder[(No x 3) % 5] (§2.3.2; the curve's NetSitesStep stops at $530).
+				Dollars = Pl.Ladder && Pl.LadderCount > 0 ? Pl.Ladder[(No * 3) % Pl.LadderCount] : Dollars;
 				int Fmt = Pl.Formats[No % 4];
 				int NumEntries = Pl.Entries;
 				int Start = Pl.SlotStart + Slot * Pl.SlotStep;
