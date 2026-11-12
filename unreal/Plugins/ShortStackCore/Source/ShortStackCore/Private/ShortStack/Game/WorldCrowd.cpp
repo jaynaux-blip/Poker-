@@ -10,6 +10,7 @@
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/World.h"
 
+#include <atomic>
 #include <memory>
 #include <set>
 #include <string>
@@ -32,6 +33,7 @@ CrowdRec& CrowdBook::Edit(int I)
 	{
 		Page = std::make_shared<std::array<CrowdRec, PageSize>>(*Page); // copy-on-write: a snapshot still holds the old page
 	}
+	std::atomic_thread_fence(std::memory_order_acquire); // use_count() reads relaxed: the saver's release happens before our writes (Q-14)
 	return (*Page)[static_cast<size_t>(I % PageSize)];
 }
 

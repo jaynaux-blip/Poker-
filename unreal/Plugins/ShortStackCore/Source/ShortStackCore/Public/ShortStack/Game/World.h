@@ -1471,6 +1471,7 @@ public:
 		{
 			P = std::make_shared<std::string>(*P);
 		}
+		std::atomic_thread_fence(std::memory_order_acquire); // use_count() reads relaxed: the saver's release happens before our writes (Q-14)
 		return *P;
 	}
 	SharedText& operator+=(const std::string& S)

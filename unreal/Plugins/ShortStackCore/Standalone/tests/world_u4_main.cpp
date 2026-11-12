@@ -11,7 +11,8 @@
 // 0: one unit a call) over a run from Sun Jan 3 to Tue Feb 2, 2027 (crossing Monday, Feb 1, 2027), a copy taken mid-hold,
 // save-during-hold and texts-during-hold in their Phase A form, the HoldGuard, the structural turn checks, and PA-33's two caches.
 // The lead's fixes after A-2 (pa-fix, LEAD_CALLS Q-10): turn_actions calls the session's draining user actions during a hold, and
-// turn_session asks for a save on every held frame (§3.7 R5's session form).
+// turn_session asks for a save on every held frame (§3.7 R5's session form). pa-fix2 (Q-21): turn_actions also stops a skip during a
+// hold at RegisterEvent's table three ways (SetAutoplay, StopSprint, StopSkip), each reaching BuildSeats's drain.
 //   world_u4_test                    the checks (ctest)
 //   world_u4_test turn-session       the session-wide slice checks alone, whether or not this build wires them (see kTurnSessionWired)
 //   world_u4_test turn-actions       turn_actions alone
@@ -1005,7 +1006,8 @@ void TurnActionTrip(const char* Method)
 /** One of the session's draining user actions (§3.7 R3's drain-on-touch, A1's drains at e27ea47): its name, the drain it reaches,
  *  whether the call finishes a held turn (NewCareer's world is a new one, so its drain never has a turn to finish), what it needs
  *  first (the same on both sessions, never the world), the call, whose answer is compared, when it can reach its drain (null:
- *  always) and whether it waits for every action listed before it. */
+ *  always), whether it waits for every action listed before it and, for the table's actions (pa-fix2, Q-21), what it needs some
+ *  frames before its hold, on both sessions alike: a skip under way at RegisterEvent's table, "" or why not (null: a night's action). */
 struct TurnActionCase
 {
 	const char* Name;
@@ -1015,19 +1017,97 @@ struct TurnActionCase
 	std::function<std::string(ss::Session&)> Call;
 	std::function<bool(const ss::Session&)> Ready = nullptr;
 	bool AfterTheRest = false;
+	std::function<std::string(ss::Session&)> Arm = nullptr;
 };
 
+/** True: someone the world follows still plays in the player's event (FieldNpc's seats, the rival's too). */
+bool TurnSeatable(const ss::Session& S)
+{
+	if (!S.T)
+	{
+		return false;
+	}
+	for (const auto& It : S.FieldNpc)
+	{
+		const ss::TPlayer* P = S.PlayerById(It.first);
+		if (P && !P->IsHero && !P->Busted)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+/** The table's actions' prep (pa-fix2, Q-21; both sessions alike, never the world): someone the world follows newly seated at the
+ *  player's table, for the next hand's BuildSeats to greet (the greeting reads the bond: its drain, G/Session.cpp:2245). Whoever the
+ *  world follows at the table counts as new (the session forgets having greeted them; one the skip seated there is new already), so
+ *  the start tick's balancing can't move them all away; with nobody there, one comes over from another table the way the engine
+ *  balances (Tournament::MoveToTable, as BeforeTick moves the rival; a full table swaps someone out). */
+void TurnSeatSomeone(ss::Session& S)
+{
+	if (!S.T)
+	{
+		return;
+	}
+	const int Table = S.T->Hero().TableId;
+	std::string Away;
+	int AwayNpc = -1;
+	bool Here = false;
+	for (const auto& It : S.FieldNpc)
+	{
+		const ss::TPlayer* P = S.PlayerById(It.first);
+		if (!P || P->IsHero || P->Busted)
+		{
+			continue;
+		}
+		if (P->TableId == Table)
+		{
+			S.FieldGreeted.erase(It.second);
+			Here = true;
+		}
+		else if (Away.empty() || (S.FieldGreeted.count(AwayNpc) > 0 && S.FieldGreeted.count(It.second) == 0))
+		{
+			Away = It.first; // the first not yet greeted, else the first
+			AwayNpc = It.second;
+		}
+	}
+	if (!Here && !Away.empty())
+	{
+		S.T->MoveToTable(Away, Table);
+		S.FieldGreeted.erase(AwayNpc);
+	}
+}
+
+/** A table action's hold can come: the table is skipping between hands and someone the world follows is still in the event. */
+bool TurnSkipping(const ss::Session& S)
+{
+	return S.Sprinting && TurnSeatable(S);
+}
+
+/** A table action's arm: the plan's skip to the result from the next hand (SkipAhead, the panel's SKIP), one hand a frame. */
+std::string TurnPlanSkip(ss::Session& S)
+{
+	S.SprintBudgetMs = 0.0;
+	return S.SkipAhead(S.FocusedTable(), ss::autoplay::Target::Result);
+}
+
 /** The 27 drains in the session's user actions (a2-check's count; each function's DrainWorld() at e27ea47), by how turn_actions
- *  reaches them. Called during a hold, one a hold (21 calls, 21 drains):
+ *  reaches them. Called during a hold, one a hold (24 calls, 22 drains):
  *    PawnSell G/SessionShops.cpp:1416, PawnLoan :1490; CounterDeal G/SessionSponsor.cpp:234, AskForRaise :259, DebugSponsor :402;
  *    ListAction G/SessionStake.cpp:326, ProposeSwap :351; Heard G/SessionTown.cpp:93, Lend :191; ChooseIdea G/SessionVideo3.cpp:521;
  *    SettleEdit G/SessionVideo.cpp:1049, DebugVideo :1395; DebugBadge G/SessionBadges.cpp:289; DebugSitePlay G/SessionSitePlay.cpp:440,
  *    CallOut :250; DebugSite G/SessionSites.cpp:298; DebugWorld G/SessionWorld.cpp:21; GoToGame G/Session.cpp:4213, GoToLive :4241,
- *    RegisterEvent :2021, NewCareer :1662 (after ResetSave's new world: never a turn to finish).
- *  Not callable during a hold (6 drains): ResolveAbandonedLive G/Session.cpp:4395 runs only in the constructor, after StartWorld's
- *  HoldWhole; BuildSeats :2245, ReportToWorld :6233, VideoNoteHand G/SessionVideo.cpp:807 and SitePlayHand G/SessionSitePlay.cpp:347,
- *  :358 run in Session::Update's hand loop (TableStep, after WorldStep), the per-frame path turn_session and session_test audit with
- *  the guard armed. */
+ *    RegisterEvent :2021, NewCareer :1662 (after ResetSave's new world: never a turn to finish);
+ *    BuildSeats G/Session.cpp:2245 (the greeting of someone the world follows, newly seated at the player's table) through
+ *    StartNextHand and BeginHand, from three calls that stop a skip between hands at RegisterEvent's table: SetAutoplay
+ *    G/SessionAuto.cpp:222 and StopSkip :338 (user actions: the table's pace press and the autoplay panel) and StopSprint
+ *    G/Session.cpp:3570 (today's Sprint's stop, which SkipStep makes in Session::Update at the bubble's approach and the final table;
+ *    called here at a hold, as the skip would). BuildSeats also runs in RegisterEvent's first hand (after its own drain) and in
+ *    Session::Update's hand loop (EndHand, the skip's own stop, AdoptHand). pa-fix's comment had it in the hand loop only (sp-check).
+ *  Not callable during a hold (5 drains): ResolveAbandonedLive G/Session.cpp:4395 runs only in the constructor, after StartWorld's
+ *  HoldWhole; ReportToWorld :6233, VideoNoteHand G/SessionVideo.cpp:807 and SitePlayHand G/SessionSitePlay.cpp:347, :358 run in
+ *  Session::Update's hand loop (TableStep, after WorldStep), the per-frame path turn_session and session_test audit with the guard
+ *  armed (G2's check plays a table across a midnight hold, LEAD_CALLS Q-21). */
 std::vector<TurnActionCase> TurnActionCases()
 {
 	const auto None = [](ss::Session&) {};
@@ -1101,6 +1181,37 @@ std::vector<TurnActionCase> TurnActionCases()
 			},
 			nullptr, true},
 		{"RegisterEvent", "G/Session.cpp:2021", true, None, [](ss::Session& S) { return S.RegisterEvent(ss::Lobby()[1]); }, nullptr, true},
+		// The table's actions (pa-fix2, Q-21): a skip under way at RegisterEvent's table (one hand a frame, session_test's precedent),
+		// stopped during a hold, so the next hand starts there and then.
+		{"SetAutoplay", "G/Session.cpp:2245 via G/SessionAuto.cpp:222", true, TurnSeatSomeone,
+			[](ss::Session& S) {
+				// The table's FULL or SMART press mid-skip (UI/RiverLine.cpp's PacePress): the plan off.
+				ss::autoplay::TableAuto Off = S.Autoplay(S.FocusedTable());
+				Off.M = ss::autoplay::Mode::Off;
+				return S.SetAutoplay(S.FocusedTable(), Off);
+			},
+			TurnSkipping, true, TurnPlanSkip},
+		{"StopSprint", "G/Session.cpp:2245 via G/Session.cpp:3570", true, TurnSeatSomeone,
+			[](ss::Session& S) {
+				S.StopSprint();
+				return S.SprintStopReason;
+			},
+			TurnSkipping, true,
+			[](ss::Session& S) {
+				// Today's Sprint: the plan off and the SPRINT pace, as the table's pace press sets it (from the next hand).
+				S.SprintBudgetMs = 0.0;
+				std::string Why;
+				ss::autoplay::TableAuto Off = S.Autoplay(S.FocusedTable());
+				if (Off.M != ss::autoplay::Mode::Off)
+				{
+					Off.M = ss::autoplay::Mode::Off;
+					Why = S.SetAutoplay(S.FocusedTable(), Off);
+				}
+				S.CurrentPace = ss::Pace::Sprint;
+				return Why;
+			}},
+		{"StopSkip", "G/Session.cpp:2245 via G/SessionAuto.cpp:338", true, TurnSeatSomeone, [](ss::Session& S) { return S.StopSkip(S.FocusedTable()); },
+			TurnSkipping, true, TurnPlanSkip},
 	};
 }
 
@@ -1134,9 +1245,11 @@ std::string TurnActionShort(const std::string& S)
  *  same frames at an unlimited budget. Two sessions in lockstep, one action a hold (the first still to run that is ready), in
  *  turn_session's rhythm (a night is a jump to 07:00, four frames, a jump to 23:00 and a minute a frame to 01:00). A night that never
  *  holds at 0.5 ms (a fast PC) runs the next at 0 ms (one unit a call), so every action still meets a hold; the action itself runs at
- *  0.5 ms.
+ *  0.5 ms. The table's actions (pa-fix2, Q-21) come after the nights, at RegisterEvent's table: each arms a skip on both sessions,
+ *  and while it runs each frame moves the world an hour and a half on, at 0 ms for the held session, so it holds at the hour it
+ *  crosses on any PC; each call must also greet someone the world follows, newly seated (BuildSeats).
  *  Mutations: RegisterEvent's drain removed (HeroEntered during the hold: a guard trip, the turn left held); any listed drain removed
- *  (the turn left held). */
+ *  (the turn left held); BuildSeats's drain removed (the table's three: Greeting during the hold, the turn left held). */
 void SegTurnActions()
 {
 	const auto T0 = std::chrono::steady_clock::now();
@@ -1159,6 +1272,7 @@ void SegTurnActions()
 	}
 	Budgets();
 	const std::vector<TurnActionCase> Cases = TurnActionCases();
+	const size_t NightCases = static_cast<size_t>(std::count_if(Cases.begin(), Cases.end(), [](const TurnActionCase& C) { return !C.Arm; }));
 	std::vector<bool> Ran(Cases.size(), false);
 	size_t Next = 0; // how many have run
 	int Fallbacks = 0;
@@ -1170,6 +1284,7 @@ void SegTurnActions()
 		const std::string At = std::string("turn_actions: ") + C.Name + " (" + C.Drain + ")";
 		C.Prep(*S);
 		C.Prep(*R);
+		const size_t GreetedBefore = S->FieldGreeted.size();
 		S->Living().TurnBudgetMs = Forced;
 		const int DrainsBefore = S->Living().TurnCounters().Drains;
 		const double HeldAt = S->WorldMinutes();
@@ -1186,6 +1301,11 @@ void SegTurnActions()
 			Expect(Finished, At + ": the call finishes the held turn");
 		}
 		Expect(Answer == Expected, At + ": the same answer as the unsliced run (\"" + TurnActionShort(Answer) + "\"; unsliced \"" + TurnActionShort(Expected) + "\")");
+		if (C.Arm)
+		{
+			Expect(S->FieldGreeted.size() > GreetedBefore && S->FieldGreeted == R->FieldGreeted,
+				At + ": the next hand greets someone the world follows, newly seated at the table (BuildSeats), as the unsliced run does");
+		}
 		Expect(TurnActionState(*S, HS) == TurnActionState(*R, HR), At + ": the session's save, the world and the phone after it equal the unsliced run's");
 		char Line[160];
 		std::snprintf(Line, sizeof(Line), " %s@%02d:%02d%s", C.Name, static_cast<int>(std::fmod(HeldAt, 1440.0) / 60.0), static_cast<int>(std::fmod(HeldAt, 60.0)),
@@ -1233,7 +1353,7 @@ void SegTurnActions()
 	}
 	int Day = static_cast<int>(std::floor(S->WorldMinutes() / 1440.0)) + 1;
 	int Nights = 0;
-	for (; Next < Cases.size() && Nights < 3 * static_cast<int>(Cases.size()); ++Day)
+	for (; Next < NightCases && Nights < 3 * static_cast<int>(NightCases); ++Day)
 	{
 		++Nights;
 		HeldTonight = false;
@@ -1266,15 +1386,47 @@ void SegTurnActions()
 			Budgets();
 		}
 	}
+	// The table's actions (pa-fix2, Q-21), one after another at RegisterEvent's table: each arms its skip on both sessions once every
+	// action before it has run (again if the skip ended before a hold). The event's clock never moves the world's here (Lobby()[1] is a
+	// night-one listing played on a later night), so while the skip runs each frame moves the world an hour and a half on, as the
+	// nights' frames jump; the held session runs those frames at 0 ms (one unit a call), so it holds at the hour it crosses on any PC,
+	// and the action itself runs at 0.5 ms as the rest do. Between skips the world stands (the plan, or the player's clock, finishes
+	// the hand).
+	NightBudget = 0.0;
+	Budgets();
+	int TableFrames = 0;
+	size_t Armed = Cases.size();
+	for (; Next < Cases.size() && TableFrames < 20000; ++TableFrames)
+	{
+		if (S->TableCount() == 0 || S->CurrentScreen == ss::Screen::Results)
+		{
+			break; // the table is over (a bust): the count below says which actions never met a hold
+		}
+		const size_t First = static_cast<size_t>(std::find(Ran.begin(), Ran.end(), false) - Ran.begin());
+		const bool SkipOn = S->Sprinting || S->CurrentPace == ss::Pace::Sprint; // under way, or from the next hand
+		if (First < Cases.size() && Cases[First].Arm && (First != Armed || !SkipOn))
+		{
+			const bool Again = First == Armed;
+			Armed = First;
+			const std::string Why = Cases[First].Arm(*S);
+			const std::string WhyR = Cases[First].Arm(*R);
+			if (!Again)
+			{
+				Expect(Why.empty() && WhyR.empty(), std::string("turn_actions: ") + Cases[First].Name + ": its skip starts at the table (\"" + Why + "\")");
+			}
+		}
+		Frame(S->Sprinting ? S->WorldMinutes() + 90.0 : 0.0);
+	}
 	Expect(Next == Cases.size(), "turn_actions: every action met a hold (" + std::to_string(Next) + " of " + std::to_string(Cases.size()) + " in " +
-		std::to_string(Nights) + " nights)");
+		std::to_string(Nights) + " nights and " + std::to_string(TableFrames) + " table frames)");
 	// The table RegisterEvent opened plays on for ten seconds in both runs, then the two compare once more.
 	for (int K = 0; K < 300; ++K)
 	{
 		Frame(0.0);
 	}
 	Expect(TurnActionState(*S, HS) == TurnActionState(*R, HR), "turn_actions: ten seconds of the table later, the session, the world and the phone equal the unsliced run's");
-	std::printf("  turn_actions: %zu actions in %d nights%s:%s\n", Next, Nights, Fallbacks > 0 ? " (fell back to 0 ms nights)" : "", Log.c_str());
+	std::printf("  turn_actions: %zu actions in %d nights and %d table frames%s:%s\n", Next, Nights, TableFrames, Fallbacks > 0 ? " (fell back to 0 ms nights)" : "",
+		Log.c_str());
 	std::printf("  turn_actions: %.1fs\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
 }
 } // namespace world_u4_test

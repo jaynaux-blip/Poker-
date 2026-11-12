@@ -93,9 +93,9 @@ struct PaceRow
 namespace grow
 {
 // The knobs (§1.4, §3.8; each defined here and nowhere else).
-constexpr PaceRow kPace[3] = {{1.0f, {{4, 4, 5}}}, {3.5f, {{4, 4, 5}}}, {7.0f, {{2, 2, 3}}}};
+constexpr PaceRow kPace[3] = {{1.0f, {{4, 4, 5}}}, {3.5f, {{6, 6, 7}}}, {7.0f, {{2, 2, 3}}}}; // FastButBelievable's dwell 6/6/7: S-pace (Q-19)
 constexpr ArcPace kArcPace = ArcPace::FastButBelievable;           // [ASK] 1 (answered: fast but believable)
-constexpr float kSurgeA = 0.025f, kSurgeB = 0.035f;                 // x PaceX
+constexpr float kSurgeA = 0.10f, kSurgeB = 0.035f;                  // x PaceX (kSurgeA 0.025 -> 0.10: S-pace, Q-19)
 constexpr float kCap1 = 0.015f, kCap2 = 0.010f, kCap3 = 0.004f;     // x PaceX: below 0.58, 0.58-0.72, above
 constexpr float kVeteranSurge = 6.0f, kFirstYearBoost = 2.0f;
 constexpr int kLongShotsPerQuarter = 1;                             // R13
