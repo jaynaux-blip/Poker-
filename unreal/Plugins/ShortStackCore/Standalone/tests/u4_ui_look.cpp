@@ -2376,7 +2376,7 @@ struct TakePageLook
 	Brand Look = Brand::None; // the look it should wear (None: Afterburner's night)
 	ss::ui::DrawList L1, L15;
 	bool Drawn = false;
-	uint32_t Felt = 0, FeltDark = 0; // a table's: SitesTableLook's felt and card back as it drew
+	uint32_t Felt = 0, FeltLight = 0, FeltDark = 0; // a table's: SitesTableLook's felt and card back as it drew
 	int Back = 0;
 	bool Marked = false; // a table's felt mark was drawn (cached at its host's size)
 	double Seconds = 0.0;
@@ -2460,6 +2460,7 @@ void TableDrawLook(TakePageLook& P, LaptopLook& Lap, bool Emit = true)
 	MeasureLook(P, Lap, Emit);
 	const ss::ui::rlsites_detail::SiteLook& Worn = ss::ui::rlsites_detail::SitesTableLook(Lap.S);
 	P.Felt = Worn.Felt;
+	P.FeltLight = Worn.FeltLight;
 	P.FeltDark = Worn.FeltDark;
 	P.Back = Worn.CardBack;
 	const float Size = P.Host == SiteId::RunItTwice ? 110.0f : 120.0f;
@@ -2614,7 +2615,9 @@ void FestTableBudgets(const TakeoverLook& T)
 			Cap ? std::to_string(Cap).c_str() : "none listed");
 		ExpectLook(P.Drawn && (Cap == 0 || V1 <= Cap), "FestTableBudgets: the festival table is within its budget with the felt mark (" + P.Name + ")");
 		const ss::ui::rlsites_detail::SiteLook& Own = ss::ui::rlsites_detail::SitesLook(P.Host);
-		const bool Felt = P.Look == Brand::Reign ? P.Felt == Own.Felt && P.FeltDark == Own.FeltDark : P.Felt == L.Felt && P.FeltDark == L.FeltDark;
+		// Its three felts (§2.7.2: FeltLight is the Felt mixed 0.18 toward Accent2); REIGN's are the club's own three, its pool included.
+		const bool Felt = P.Look == Brand::Reign ? P.Felt == Own.Felt && P.FeltLight == Own.FeltLight && P.FeltDark == Own.FeltDark
+												 : P.Felt == L.Felt && P.FeltLight == MixHexLook(L.Felt, L.Accent2, 0.18f) && P.FeltDark == L.FeltDark;
 		ExpectLook(P.Drawn && Felt && P.Back == festart::kBackFestival + static_cast<int>(P.Look) && P.Marked,
 			"FestTableBudgets: the festival table wears its look's felt (REIGN: the club's own cloth), its card back and its felt mark (" + P.Name + ", " + NameLook(P.Look) + ")");
 	}
