@@ -622,6 +622,25 @@ CueLook LookOf(const std::vector<float>& S)
 {
 	const size_t N = 1024, Hop = 512;
 	const int Bands = 24;
+	// The window and each bin's band, worked out once with the same expressions (Update 4 G1: the suite holds its TIMEOUT with the
+	// festivals' five looked at too; every look is the same, value for value).
+	static const std::vector<double> Window = [N] {
+		std::vector<double> W(N);
+		for (size_t I = 0; I < N; ++I)
+		{
+			W[I] = 0.5 - 0.5 * std::cos(2.0 * 3.14159265358979323846 * static_cast<double>(I) / static_cast<double>(N));
+		}
+		return W;
+	}();
+	static const std::vector<int> BandOfBin = [N] {
+		std::vector<int> B(N / 2, -1);
+		for (size_t K = 1; K < N / 2; ++K)
+		{
+			const double Hz = static_cast<double>(K) * SampleRate / static_cast<double>(N);
+			B[K] = static_cast<int>(std::floor(std::log2(Hz / 80.0) * 3.0));
+		}
+		return B;
+	}();
 	CueLook L;
 	std::vector<std::complex<double>> A(N);
 	double Loudest = -300.0;
@@ -629,7 +648,7 @@ CueLook LookOf(const std::vector<float>& S)
 	{
 		for (size_t I = 0; I < N; ++I)
 		{
-			const double W = 0.5 - 0.5 * std::cos(2.0 * 3.14159265358979323846 * static_cast<double>(I) / static_cast<double>(N));
+			const double W = Window[I];
 			const long long J = At + static_cast<long long>(I);
 			A[I] = std::complex<double>(J >= 0 && J < static_cast<long long>(S.size()) ? S[static_cast<size_t>(J)] * W : 0.0, 0.0);
 		}
@@ -637,8 +656,7 @@ CueLook LookOf(const std::vector<float>& S)
 		std::vector<double> Row(Bands, 0.0);
 		for (size_t K = 1; K < N / 2; ++K)
 		{
-			const double Hz = static_cast<double>(K) * SampleRate / static_cast<double>(N);
-			const int Band = static_cast<int>(std::floor(std::log2(Hz / 80.0) * 3.0));
+			const int Band = BandOfBin[K];
 			if (Band >= 0 && Band < Bands)
 			{
 				Row[static_cast<size_t>(Band)] += std::norm(A[K]);
@@ -696,6 +714,10 @@ double Apart(const CueLook& A, const CueLook& B)
 	}
 	return Cells ? Sum / static_cast<double>(Cells) : 0.0;
 }
+
+/** SiteCueChecks' looks at the game's 17 (at 0.6), its effects and SiteCues' rows (as they play), in that order, which
+ *  KastCueChecks compares its own four with. */
+std::vector<std::pair<std::string, CueLook>> CueOlderLooks;
 
 /** The ten site cues (§1.11): each its own, bounded, distinct from each other and from the game's sounds, at the
  *  volumes the sites use (§10: 0.25-0.6), cheap enough to render on the game thread. Update 4 G1: the festivals' five
@@ -896,6 +918,12 @@ void SiteCueChecks()
 	for (const std::vector<float>& S : Heard)
 	{
 		Looks.push_back(LookOf(S));
+	}
+	// Kept for KastCueChecks, which looks at the same sounds the same way (Update 4 G1: the suite's time).
+	CueOlderLooks = Others;
+	for (int I = 0; I < Cases; ++I)
+	{
+		CueOlderLooks.push_back({SiteCues[I].Name, Looks[static_cast<size_t>(I)]});
 	}
 	for (int I = 0; I < Cases; ++I)
 	{
@@ -1400,19 +1428,23 @@ void KastCueChecks()
 	// Distinct: each of Kast's four is farther from everything else than from itself with other seeds, and far from every
 	// other sound: the game's 17 (at 0.6: a look doesn't count loudness), its effects, the sites' ten (as they play)
 	// and Kast's other three.
-	std::vector<std::pair<std::string, CueLook>> Others;
-	for (int I = 0; I <= static_cast<int>(ss::SoundId::Mail); ++I)
+	// (SiteCueChecks' looks at the same renders when it has run; else the same, worked out here.)
+	std::vector<std::pair<std::string, CueLook>> Others = CueOlderLooks;
+	if (Others.empty())
 	{
-		Others.push_back({ss::SoundName(static_cast<ss::SoundId>(I)), LookOf(Render(static_cast<ss::SoundId>(I), 0.6f, 7u + static_cast<uint32_t>(I)))});
-	}
-	const char* const EffectNames[] = {"buzz", "canopen", "heartbeat", "step", "scrape", "breath", "chime", "applause", "cardprint"};
-	for (int I = 0; I <= static_cast<int>(Effect::CardPrint); ++I)
-	{
-		Others.push_back({EffectNames[I], LookOf(Render(static_cast<Effect>(I), 1u + static_cast<uint32_t>(I)))});
-	}
-	for (const SiteCue& C : SiteCues)
-	{
-		Others.push_back({C.Name, LookOf(Render(C.Id, C.Vol, 11u))});
+		for (int I = 0; I <= static_cast<int>(ss::SoundId::Mail); ++I)
+		{
+			Others.push_back({ss::SoundName(static_cast<ss::SoundId>(I)), LookOf(Render(static_cast<ss::SoundId>(I), 0.6f, 7u + static_cast<uint32_t>(I)))});
+		}
+		const char* const EffectNames[] = {"buzz", "canopen", "heartbeat", "step", "scrape", "breath", "chime", "applause", "cardprint"};
+		for (int I = 0; I <= static_cast<int>(Effect::CardPrint); ++I)
+		{
+			Others.push_back({EffectNames[I], LookOf(Render(static_cast<Effect>(I), 1u + static_cast<uint32_t>(I)))});
+		}
+		for (const SiteCue& C : SiteCues)
+		{
+			Others.push_back({C.Name, LookOf(Render(C.Id, C.Vol, 11u))});
+		}
 	}
 	std::vector<CueLook> Looks;
 	for (const std::vector<float>& S : Heard)
