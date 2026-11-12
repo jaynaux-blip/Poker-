@@ -22,6 +22,14 @@
 // day. Settled frames are cached fragments, the gauge and the wave's mark per world minute (§2.7.7). The crest motions (the ring's turn,
 // the dome's chase, the key's turn, the seal's press) and the Clasp go through SeriesCrest's and FestTrophy's Time in UI/EventArt.cpp.
 // Nothing outside tests calls these until F-hubs' hub, so no page moves.
+// G1 FL-4 (F-look): the takeover (§2.7.3, §2.7.4, §2.16). DevLook holds ss.Fest.Look's brand (presentation only, never saved), which
+// SitesSkin and SitesTableLook read ahead of the calendar; FeltMark draws the look's low-detail crest at alpha 0.14 (one cached fragment
+// a look and size; Suppressed draws nothing); FestCardBack draws the host's back pattern in the look's Accent and Accent2 with the
+// crest at its centre (one cached fragment a look and size). The low-detail crest at any size is SeriesCrest's own 30-unit path drawn
+// at 26 and scaled (FestLowCrest), so it stays the frame's silhouette and the motif ("drop detail, don't shrink"); on a card back,
+// drawn fourteen times at a table, the crest drops its motif too and is its frame's silhouette in Accent2 (the low-detail crest alone
+// measures 227-827 vertices, the back's budget is 300: FestTableBudgets prints each).
+// UI/RiverLineSites.cpp dresses the skin and the festival tables; UI/RiverLine.cpp draws the felt mark and REIGN's rail.
 #include "ShortStack/UI/FestivalArt.h"
 
 #include "RitArt.h"
@@ -31,6 +39,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <functional>
 
@@ -44,6 +53,9 @@ namespace eventart_detail
 {
 // UI/EventArt.cpp's (QF-3: one slot rule for crests and looks; FL-2 strips the "<site key>." prefix there, §2.7.4).
 std::string SlotOf(const std::string& SeriesId);
+// G1 FL-4: the private Frame enum (opaque here; FestivalLook::Frame holds its values) and a frame's outline, for a card back's crest.
+enum class Frame : int;
+std::vector<Vec2> FramePts(Frame F, float K);
 } // namespace eventart_detail
 } // namespace eventart
 
@@ -661,6 +673,187 @@ void FestLive(Canvas& C, float X, float Y, float K, const std::function<void(Can
 	C.SetAlpha(Was);
 	C.Restore();
 }
+
+// ---- G1 FL-4: the takeover's art (§2.7.4) and the dev look (§2.16).
+
+/** The felt mark's alpha (§2.7.4), and the size the low-detail crest is drawn at before it is scaled (eventart's 30-unit path). */
+constexpr float FestFeltMarkAlpha = 0.14f;
+constexpr float FestLowCrestAt = 26.0f;
+/** The back patterns' own inks (UI/Ui.cpp's): RiverLine's light border, Ignite's cream border, RunItTwice's gloss black. */
+constexpr uint32_t FestBackRiverRim = 0xf4f6fa, FestBackCream = 0xfff4ec, FestBackGloss = 0x202026, FestBackOnyx = 0x0c0c0f;
+
+/** ss.Fest.Look's brand (presentation only, never saved): one value for the program, read from any thread. */
+std::atomic<uint8_t>& FestDevSlot()
+{
+	static std::atomic<uint8_t> FestDevBrand{0};
+	return FestDevBrand;
+}
+
+/** The look's series as the crest reads it: the brand key as its slot (LookFor finds the look), the look's accents as its enamel. */
+net::SeriesInfo FestLookSeries(const FestivalLook& L)
+{
+	net::SeriesInfo S;
+	S.Id = fest::BrandKey(L.Which);
+	S.Color = L.Accent;
+	S.Color2 = L.Accent2;
+	S.Festival = true;
+	S.Brand = fest::BrandKey(L.Which);
+	return S;
+}
+
+/** The look's low-detail crest centred at (Cx, Cy), Size across: SeriesCrest's own path at 26 units, scaled, so it stays the frame's
+ *  silhouette and the motif at any size (§2.7.4). A still: the low-detail path draws no motion. */
+void FestLowCrest(Canvas& C, const FestivalLook& L, float Cx, float Cy, float Size)
+{
+	const float K = Size / FestLowCrestAt;
+	C.Save();
+	C.Translate(Cx, Cy);
+	C.Scale(K, K);
+	eventart::SeriesCrest(C, FestLookSeries(L), 0.0f, 0.0f, FestLowCrestAt, 0.0);
+	C.Restore();
+}
+
+/** The felt mark's fragment: its look and size (the alpha is applied as it replays). */
+uint64_t FestFeltMarkKey(const FestivalLook& L, float Size)
+{
+	uint64_t H = FestMix(0xcbf29ce484222325ull, "feltmark", 8);
+	H = FestMix(H, &L.Key, sizeof(L.Key));
+	return FestMix(H, &Size, sizeof(Size));
+}
+
+/** A card back's fragment: its look and size. */
+uint64_t FestCardBackKey(const FestivalLook& L, float W, float H)
+{
+	uint64_t K = FestMix(0xcbf29ce484222325ull, "cardback", 8);
+	K = FestMix(K, &L.Key, sizeof(L.Key));
+	K = FestMix(K, &W, sizeof(W));
+	return FestMix(K, &H, sizeof(H));
+}
+
+/** Sutherland-Hodgman: a convex polygon cut to a rect (a back's bands and rays stay inside its panel). */
+std::vector<Vec2> FestClipToRect(const std::vector<Vec2>& Poly, const Rect& Box)
+{
+	std::vector<Vec2> Kept = Poly;
+	for (int Side = 0; Side < 4 && !Kept.empty(); ++Side)
+	{
+		const auto Edge = [&](const Vec2& P) { return Side == 0 ? P.X - Box.X : Side == 1 ? Box.X + Box.W - P.X : Side == 2 ? P.Y - Box.Y : Box.Y + Box.H - P.Y; };
+		const std::vector<Vec2> From = Kept;
+		Kept.clear();
+		for (size_t I = 0; I < From.size(); ++I)
+		{
+			const Vec2& A = From[I];
+			const Vec2& B = From[(I + 1) % From.size()];
+			const float Ea = Edge(A);
+			const float Eb = Edge(B);
+			if ((Ea >= 0.0f) != (Eb >= 0.0f))
+			{
+				const float T = Ea / (Ea - Eb);
+				Kept.push_back({A.X + (B.X - A.X) * T, A.Y + (B.Y - A.Y) * T});
+			}
+			if (Eb >= 0.0f)
+			{
+				Kept.push_back(B);
+			}
+		}
+	}
+	return Kept;
+}
+
+/** A card back's crest (§2.7.4 at a back's size, within its 300 vertices): the look's frame silhouette, flat, in Accent2, Size across;
+ *  an outline point closer than 2.5 units to the last one kept is dropped (a round frame's 70 points are more than 37 units need). */
+void FestBackCrest(Canvas& C, const FestivalLook& L, float Cx, float Cy, float Size)
+{
+	const std::vector<Vec2> Outline = eventart::eventart_detail::FramePts(static_cast<eventart::eventart_detail::Frame>(L.Frame), 1.0f);
+	const float R = Size * 0.43f; // the crest's pen (UI/EventArt.cpp's FestCrestLow: Size x 0.43)
+	std::vector<Vec2> Pts;
+	for (const Vec2& P : Outline)
+	{
+		const Vec2 Q{Cx + P.X * R, Cy + P.Y * R};
+		if (Pts.empty() || std::hypot(Q.X - Pts.back().X, Q.Y - Pts.back().Y) >= 2.5f)
+		{
+			Pts.push_back(Q);
+		}
+	}
+	C.FillPolygon(Pts, Hex(L.Accent2));
+}
+
+/**
+ * A festival's card back at the origin, W x H (§2.7.4): its host's back pattern (UI/Ui.cpp's TblBack and CardBack) in the look's Accent
+ * and Accent2, with the crest at its centre where the host's own mark sits (FestBackCrest: its frame's silhouette). RiverLine's: the
+ * light border round a panel in the accents darkened (a rival deck's rule) with its hatching; Ignite's Sunset: the cream border round the
+ * look's felt, the rays and the band pair (Accent, Accent2) under a disc; RunItTwice's Twin Stripe: the gloss-black ground, the wide
+ * stripe in Accent (Signal Red), the narrow one and the inset border in Accent2, under a disc. A small back (58 units or less, TblBack's
+ * rule) drops the hatching and the rays.
+ */
+void FestBackPaint(Canvas& C, const FestivalLook& L, float W, float H)
+{
+	const float Rad = W * 0.1f;
+	const bool Lod = W <= 58.0f;
+	const Rect In{W * 0.07f, W * 0.07f, W - W * 0.14f, H - W * 0.14f};
+	const Vec2 Mid{W * 0.5f, H * 0.5f};
+	const net::SiteId Host = FestHostOf(L.Which);
+	if (Host == net::SiteId::Ignite)
+	{
+		C.FillRoundRect({0.0f, 0.0f, W, H}, Rad, Hex(FestBackCream));
+		C.FillRoundRect(In, W * 0.06f, Paint::Linear({In.X, In.Y}, {In.X + In.W, In.Y + In.H}, Hex(L.Felt), Hex(L.FeltDark)));
+		if (!Lod)
+		{
+			const float Reach = In.W + In.H;
+			for (int K = 0; K < 12; K += 2)
+			{
+				const float A = static_cast<float>(K) * 0.5235988f;
+				const std::vector<Vec2> Ray = FestClipToRect({Mid, {Mid.X + Reach * std::cos(A - 0.09f), Mid.Y + Reach * std::sin(A - 0.09f)},
+					{Mid.X + Reach * std::cos(A + 0.09f), Mid.Y + Reach * std::sin(A + 0.09f)}}, In);
+				if (Ray.size() >= 3)
+				{
+					C.FillPolygon(Ray, Hex(FestBackCream, 0.14f));
+				}
+			}
+		}
+		const float Bw = In.W * 0.22f;
+		const float Lean = In.H * 0.55f;
+		const std::vector<Vec2> First = FestClipToRect({{Mid.X - Bw * 1.1f - Lean, In.Y + In.H}, {Mid.X - Bw * 0.1f - Lean, In.Y + In.H}, {Mid.X - Bw * 0.1f + Lean, In.Y},
+			{Mid.X - Bw * 1.1f + Lean, In.Y}}, In);
+		const std::vector<Vec2> Second = FestClipToRect({{Mid.X + Bw * 0.1f - Lean, In.Y + In.H}, {Mid.X + Bw * 0.7f - Lean, In.Y + In.H}, {Mid.X + Bw * 0.7f + Lean, In.Y},
+			{Mid.X + Bw * 0.1f + Lean, In.Y}}, In);
+		if (First.size() >= 3)
+		{
+			C.FillPolygon(First, Hex(L.Accent));
+		}
+		if (Second.size() >= 3)
+		{
+			C.FillPolygon(Second, Hex(L.Accent2));
+		}
+		C.FillCircle(Mid.X, Mid.Y, W * 0.25f, Hex(L.FeltDark));
+	}
+	else if (Host == net::SiteId::RunItTwice)
+	{
+		C.FillRoundRect({0.0f, 0.0f, W, H}, Rad, Paint::Linear({0.0f, 0.0f}, {W, H}, Hex(FestBackGloss), Hex(FestBackOnyx)));
+		C.FillRect({W * 0.30f, 0.5f, W * 0.16f, H - 1.0f}, Hex(L.Accent));
+		C.FillRect({W * 0.50f, 0.5f, W * 0.06f, H - 1.0f}, Hex(L.Accent2));
+		C.FillCircle(Mid.X, Mid.Y, W * 0.25f, Hex(FestBackOnyx));
+		C.StrokeRoundRect({W * 0.04f, W * 0.04f, W - W * 0.08f, H - W * 0.08f}, Rad * 0.6f, Hex(L.Accent2, 0.8f), 1.0f);
+	}
+	else
+	{
+		C.FillRoundRect({0.0f, 0.0f, W, H}, Rad, Hex(FestBackRiverRim));
+		C.FillRoundRect(In, W * 0.06f, Paint::Linear({0.0f, 0.0f}, {W, H}, Mix(Hex(L.Accent), Hex(0x000000), 0.5f), Mix(Hex(L.Accent2), Hex(0x000000), 0.62f)));
+		if (!Lod)
+		{
+			// The hatching, every 12 units down to the right, each line cut to the panel (its two ends where it crosses In).
+			for (float I = In.X - In.H + 6.0f; I < In.X + In.W; I += 12.0f)
+			{
+				const float X0 = std::max(I, In.X);
+				const float X1 = std::min(I + In.H, In.X + In.W);
+				if (X1 - X0 > 1.0f)
+				{
+					C.StrokePolyline({{X0, In.Y + (X0 - I)}, {X1, In.Y + (X1 - I)}}, false, Hex(0xffffff, 0.12f), 2.0f);
+				}
+			}
+		}
+	}
+	FestBackCrest(C, L, Mid.X, Mid.Y, W * 0.44f);
+}
 } // namespace festart_detail
 } // namespace festart
 } // namespace ui
@@ -719,25 +912,49 @@ void FestWordMark(Canvas& C, const FestivalLook& L, const std::string& Text, flo
 	FestWordMark(C, L, Text, X, Y, Size, Time, 1.0f, Still);
 }
 
-void FeltMark(Canvas& /*C*/, const FestivalLook& /*L*/, float /*Cx*/, float /*Cy*/, float /*Size*/, bool /*Suppressed*/)
+void FeltMark(Canvas& C, const FestivalLook& L, float Cx, float Cy, float Size, bool Suppressed)
 {
+	// G1 FL-4 (§2.7.4): the look's low-detail crest, Size across, centred at (Cx, Cy), at alpha 0.14 of the canvas's own; one cached
+	// fragment a look and size (drawn opaque, the alpha applied as it replays). Suppressed (G3's B-ui: INTRODUCTIONS or a lower third on
+	// RunItTwice) draws nothing.
+	namespace fd = festart_detail;
+	if (Suppressed || L.Which == fest::Brand::None || !(Size > 0.0f))
+	{
+		return;
+	}
+	const float Was = C.GetAlpha();
+	C.SetAlpha(Was * fd::FestFeltMarkAlpha);
+	C.Cached(fd::FestFeltMarkKey(L, Size), Cx, Cy, [&L, Size](Canvas& At) { fd::FestLowCrest(At, L, 0.0f, 0.0f, Size); });
+	C.SetAlpha(Was);
 }
 
-// G1's appends (the lead's pre-wave commit H0, PLAN_G1 §4.2): stubs until F-look's bodies (FestCardBack and DevLook at FL-4,
-// FestBanner and the FestWordMark overload at FL-7, below). No back today's tables draw reaches kBackFestival (the highest is
-// SitesIgBackLooks + a Locker look) and nothing calls the others, so they draw nothing and keep nothing.
+// G1's appends (the lead's pre-wave commit H0, PLAN_G1 §4.2): FestCardBack and DevLook have F-look's bodies from FL-4, FestBanner and
+// the FestWordMark overload from FL-7 (below).
 
-void FestCardBack(Canvas& /*C*/, int /*Back*/, float /*X*/, float /*Y*/, float /*W*/, float /*H*/)
+void FestCardBack(Canvas& C, int Back, float X, float Y, float W, float H)
 {
+	// G1 FL-4 (§2.7.4): Back = kBackFestival + the brand; anything else above kBackFestival draws nothing. One cached fragment a look and
+	// size (TblBack's caller caches the back by id and size too, so a table replays it either way).
+	namespace fd = festart_detail;
+	const int Brand = Back - kBackFestival;
+	if (Brand <= static_cast<int>(fest::Brand::None) || Brand >= static_cast<int>(fest::Brand::Count) || !(W > 0.0f) || !(H > 0.0f))
+	{
+		return;
+	}
+	const FestivalLook& L = LookOf(static_cast<fest::Brand>(Brand));
+	C.Cached(fd::FestCardBackKey(L, W, H), X, Y, [&L, W, H](Canvas& At) { fd::FestBackPaint(At, L, W, H); });
 }
 
-void DevLook(fest::Brand /*B*/)
+void DevLook(fest::Brand B)
 {
+	// G1 FL-4 (§2.16): ss.Fest.Look's brand; Brand::None (or anything out of range) turns it off.
+	const bool Real = B > fest::Brand::None && B < fest::Brand::Count;
+	festart_detail::FestDevSlot().store(static_cast<uint8_t>(Real ? B : fest::Brand::None), std::memory_order_relaxed);
 }
 
 fest::Brand DevLook()
 {
-	return fest::Brand::None;
+	return static_cast<fest::Brand>(festart_detail::FestDevSlot().load(std::memory_order_relaxed));
 }
 
 void FestBanner(Canvas& C, const FestivalLook& L, const Rect& R, double SinceOpen, float DayProgress, bool MainDay, bool Still)

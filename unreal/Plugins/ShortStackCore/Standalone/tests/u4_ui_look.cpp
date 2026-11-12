@@ -23,21 +23,31 @@
 // FEIGN's bob, PUSH's gauge per world minute, GRIT's curtains, RCOP's waves per world minute, Summer Slam's rays, REIGN's door-light, the
 // crests' ring, key, seal and dome chase, the Clasp), the word-marks (face, caps, twice print, tracking, FEIGN's letters, the underlines,
 // 1k vertices and 40 runs at 46) and the banner (inside its rect, 6k vertices settled, cached ground). Draws, emits nothing.
+// G1 FL-4 (F-look): the takeover (§2.7.3, §2.7.4, §2.15.2). FestSkinRule (every hour of days 0-400 on the three hosts against the rule
+// worked out from the calendar; RCOP 2026's edges; Afterburner over FEIGN; the dev look; a bench line), FestTableBudgets (the felt marks
+// and card backs of the ten looks, cached, within 1.5k and 300; the three festival tables within 22k / 19k wearing their looks; no
+// sponsor mark on REIGN's), and the page halves of FestLeak and FestContrast. Emits F-look's seven pages (QF-18): fest_takeover_rl_lobby,
+// fest_takeover_ig_play, fest_takeover_ig_afterburner, fest_takeover_rit_board, fest_table_rl, fest_table_ig and fest_table_rit.
 #include "UiSeg.h"
 #include "CopyLint.h"
 #include "Trademarks.h"
 #include "ShortStack/Common.h"
 #include "ShortStack/Game/Festival.h"
+#include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Sites.h"
+#include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/UI/EventArt.h"
 #include "ShortStack/UI/FestivalArt.h"
+#include "ShortStack/UI/SponsorArt.h"
 #include "ShortStack/UI/Ui.h"
+#include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/UI/IgniteArt.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/UI/RiverLineShared.h"
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -87,8 +97,16 @@ double FestWordSettle(const FestivalLook& L, const std::string& Text);
 double FestBannerSettle(const FestivalLook& L);
 uint64_t FestWordMarkKey(const FestivalLook& L, const std::string& Shown, float Size, int Minute);
 uint64_t FestBannerKey(const FestivalLook& L, const Rect& R, int Layer, int Minute);
+// G1 FL-4: the felt mark's and the card back's cache keys (FestTableBudgets asks Canvas::IsCached for them).
+uint64_t FestFeltMarkKey(const FestivalLook& L, float Size);
+uint64_t FestCardBackKey(const FestivalLook& L, float W, float H);
 } // namespace festart_detail
 } // namespace festart
+// UI/RiverLineSites.cpp's (G1 FL-4, LEAD_CALLS R-18): a festival's step ticket, which WELCOME TICKETS leaves to the festival.
+namespace rlsites_detail
+{
+bool SitesFestStepTicket(const std::string& Key);
+} // namespace rlsites_detail
 } // namespace ui
 } // namespace ss
 
@@ -2017,6 +2035,908 @@ void FestCopyUiLook()
 	}
 	ExpectLook(Drawn >= 2 && Unlisted.empty(), "FestCopyUi: every word the attractions paint on the band is a FestArtInventory entry (" + std::to_string(Drawn) + " runs)" + Unlisted);
 }
+
+// ------------------------------------------------------------------ G1 FL-4: the takeover (§2.7.3, §2.7.4, §2.15.2)
+
+/** Hooks that let the laptop go out (a site's deposit) and stay quiet otherwise. */
+struct TakeHooksLook : ui_test::QuietHooks
+{
+	bool GoOut(const std::string&, ss::Chips) override { return true; }
+};
+
+/** A session and its laptop on a site at a world minute (the rivals' kits' pattern, this file's own copy). */
+struct LaptopLook
+{
+	TakeHooksLook H;
+	ss::Session S;
+	ss::ui::RiverLine RL;
+	ui_test::TableMeasurer M;
+	double Now = 1.0;
+	SiteId Site = SiteId::RiverLine;
+	LaptopLook(const std::string& Seed, SiteId On, double World) : S(H, Seed), RL(S), Site(On)
+	{
+		// The clock is set before the session's first update, so its world starts there (no days to catch up).
+		S.CurrentScreen = ss::Screen::Lobby;
+		At(World);
+		S.BankrollCents = 2000000;
+		if (On != SiteId::RiverLine)
+		{
+			ss::site::Join(S.Life.Sites, On, S.WorldMinutes());
+			if (ss::site::Account* A = ss::site::AccountOf(S.Life.Sites, On))
+			{
+				A->Cents = 1000000;
+			}
+			S.Life.Update2LinesRead |= ss::life::U2Sites;
+		}
+	}
+	~LaptopLook() { ss::ui::rlignite_detail::IgniteForget(&RL); }
+	LaptopLook(const LaptopLook&) = delete;
+	LaptopLook& operator=(const LaptopLook&) = delete;
+	void At(double World)
+	{
+		if (World > S.WorldMinutes())
+		{
+			S.LobbyMinutes += World - S.WorldMinutes();
+		}
+		Now = ui_test::Step(S, Now, 0.2);
+		S.Life.Hunger = 20.0;
+		S.Life.Thirst = 20.0;
+		S.Life.Energy = 80.0;
+	}
+	void Open(ss::ui::RiverLine::Page P)
+	{
+		RL.SiteShown = Site;
+		RL.OpenApp(ss::ui::RiverLine::App::RiverLine, Now);
+		S.ShowLobby();
+		RL.OpenPage(P, Now);
+	}
+	ss::ui::DrawList Frame(float Scale = 1.0f)
+	{
+		RL.UI.Ptr.Active = false;
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, Scale);
+		RL.Draw(C, Now);
+		RL.UI.Ptr.EndFrame();
+		return L;
+	}
+	ss::ui::DrawList Settled(float Scale = 1.0f)
+	{
+		Now += 1.5;
+		Frame();
+		Now += 0.05;
+		return Frame(Scale);
+	}
+};
+
+/** The first edition on a site (of a brand, if given) in the calendar (fest::All, F-net's). */
+const ss::fest::Festival* FirstOnLook(SiteId Site, Brand Want = Brand::None)
+{
+	for (const ss::fest::Festival& F : ss::fest::All())
+	{
+		if (F.Site == Site && (Want == Brand::None || F.Which == Want))
+		{
+			return &F;
+		}
+	}
+	return nullptr;
+}
+
+/** The skin §2.7.3 gives Site at world minute M, worked out from the calendar and the site's palettes (not SitesSkin's cache): the
+ *  night window first, then any edition on the site from its FirstDay 00:00 to 06:00 on LastDay + 1, else the day palette. */
+ss::ui::Skin RuleSkinLook(SiteId Site, double M)
+{
+	const ss::net::SiteDef& D = ss::net::Def(Site);
+	const long long Min = static_cast<long long>(std::floor(M));
+	const long long OfDay = ((Min % 1440) + 1440) % 1440;
+	const bool HasNight = std::any_of(D.NightPalette.begin(), D.NightPalette.end(), [](uint32_t V) { return V != 0; }) && D.NightFromMin != D.NightToMin;
+	if (HasNight && (D.NightFromMin < D.NightToMin ? OfDay >= D.NightFromMin && OfDay < D.NightToMin : OfDay >= D.NightFromMin || OfDay < D.NightToMin))
+	{
+		return ss::ui::Skin::FromHex(D.NightPalette);
+	}
+	for (const ss::fest::Festival& F : ss::fest::All())
+	{
+		if (F.Site == Site && Min >= static_cast<long long>(F.FirstDay) * 1440 && Min < (static_cast<long long>(F.LastDay) + 1) * 1440 + 360)
+		{
+			return festart::Dressed(ss::ui::Skin::FromHex(D.Palette), festart::LookOf(F.Which));
+		}
+	}
+	return ss::ui::Skin::FromHex(D.Palette);
+}
+
+bool SameSkinLook(const ss::ui::Skin& A, const ss::ui::Skin& B)
+{
+	return HexesLook(A) == HexesLook(B);
+}
+
+/**
+ * FestSkinRule (§2.15.2, §2.7.3): SitesSkin dresses a site in its festival's six tokens from the edition's FirstDay 00:00 to 06:00 on
+ * LastDay + 1 (RCOP 2026: day 13 00:00 to day 35 06:00); Ignite's 00:00-06:00 returns its NightPalette during FEIGN (Afterburner Hours
+ * win); every other hour of days 0-400 on all three sites is today's palette byte for byte. ss.Fest.Look's dev look dresses ahead of
+ * the calendar, never over Afterburner, and goes when turned off. The branch's cost: a bench line over 10,000 calls (printed).
+ * Planted bug: the festival branch before the night window (festival over Afterburner).
+ */
+void FestSkinRule()
+{
+	using ss::ui::rlsites_detail::SitesSkin;
+	{
+		// LEAD_CALLS R-18 (U37): a festival's step ticket ("<series>-s2a", "-s3a", a two-day step's "-s2b") is left out of WELCOME
+		// TICKETS; an event's own ticket, a championship's Main ticket and a "-s2a" of no festival are not step tickets.
+		using ss::ui::rlsites_detail::SitesFestStepTicket;
+		const ss::fest::Festival* Reign = FirstOnLook(SiteId::RunItTwice, Brand::Reign);
+		const ss::fest::Festival* Pennant = FirstOnLook(SiteId::Ignite, Brand::Pennant);
+		const bool Steps = Reign && Pennant && SitesFestStepTicket(Reign->SeriesId + "-s2a") && SitesFestStepTicket(Reign->SeriesId + "-s3a") &&
+			SitesFestStepTicket(Pennant->SeriesId + "-s2a") && SitesFestStepTicket(Pennant->SeriesId + "-s2b") &&
+			ss::net::Site(SiteId::RunItTwice).FindTemplate(Reign->SeriesId + "-s2a") != nullptr;
+		const bool Others = Reign && !SitesFestStepTicket(Reign->SeriesId + "-1") && !SitesFestStepTicket("runittwice.reign-main") && !SitesFestStepTicket("runittwice.nofest27-s2a") &&
+			!SitesFestStepTicket(Reign->SeriesId + "-s") && !SitesFestStepTicket(Reign->SeriesId + "-s2c") && !SitesFestStepTicket("s2a");
+		ExpectLook(Steps && Others, "FestCopyUi (R-18): WELCOME TICKETS leaves out a festival's step tickets and only those");
+	}
+	const SiteId Hosts[] = {SiteId::RiverLine, SiteId::Ignite, SiteId::RunItTwice};
+	int Shown = 0;
+	for (const ss::fest::Festival& F : ss::fest::All())
+	{
+		if (F.FirstDay <= 400 && Shown < 12)
+		{
+			std::printf("  takeover calendar: %-22s on %-10s days %3d-%3d (Main day %d)\n", F.Name.c_str(), ss::net::Def(F.Site).Name.c_str(), F.FirstDay, F.LastDay, F.MainDay);
+			++Shown;
+		}
+	}
+	int Hours = 0, Wrong = 0, Dressed = 0, Night = 0;
+	std::string First;
+	for (const SiteId Site : Hosts)
+	{
+		for (int Day = 0; Day <= 400; ++Day)
+		{
+			for (int H = 0; H < 24; ++H)
+			{
+				const double M = Day * 1440.0 + H * 60.0 + 30.0;
+				const ss::ui::Skin Want = RuleSkinLook(Site, M);
+				const ss::ui::Skin Got = SitesSkin(Site, M);
+				++Hours;
+				Dressed += SameSkinLook(Want, ss::ui::Skin::FromHex(ss::net::Def(Site).Palette)) ? 0 : 1;
+				if (!SameSkinLook(Want, Got))
+				{
+					++Wrong;
+					if (First.empty())
+					{
+						char Buf[96];
+						std::snprintf(Buf, sizeof(Buf), " (first: %s day %d %02d:30)", ss::net::Def(Site).Name.c_str(), Day, H);
+						First = Buf;
+					}
+				}
+			}
+		}
+	}
+	std::printf("  takeover skin rule: %d site-hours of days 0-400, %d dressed or at night, %d wrong%s\n", Hours, Dressed, Wrong, First.c_str());
+	ExpectLook(Hours == 3 * 401 * 24 && Wrong == 0, "FestSkinRule: every hour of days 0-400 on all three sites is the rule's skin (the festival's window, else today's byte for byte)" + First);
+	// RCOP 2026's edges, the SPEC's example.
+	const ss::fest::Festival* Rcop = ss::fest::FestivalOf("rcop");
+	const ss::ui::Skin RlDay = ss::ui::Skin::FromHex(ss::net::Def(SiteId::RiverLine).Palette);
+	const ss::ui::Skin RlRcop = festart::Dressed(RlDay, festart::LookOf(Brand::Rcop));
+	ExpectLook(Rcop && Rcop->FirstDay == 13 && Rcop->LastDay == 34 && SameSkinLook(SitesSkin(SiteId::RiverLine, 13 * 1440.0 - 0.5), RlDay) &&
+			SameSkinLook(SitesSkin(SiteId::RiverLine, 13 * 1440.0), RlRcop) && SameSkinLook(SitesSkin(SiteId::RiverLine, 35 * 1440.0 + 359.5), RlRcop) &&
+			SameSkinLook(SitesSkin(SiteId::RiverLine, 35 * 1440.0 + 360.0), RlDay),
+		"FestSkinRule: RCOP 2026 dresses RiverLine from day 13 00:00 to day 35 06:00 and not a minute outside");
+	// FEIGN on Ignite: Afterburner Hours win; the festival dresses 06:00-24:00.
+	const ss::fest::Festival* Feign = FirstOnLook(SiteId::Ignite, Brand::Feign);
+	if (Feign)
+	{
+		const ss::net::SiteDef& Ig = ss::net::Def(SiteId::Ignite);
+		const double Day2 = (Feign->FirstDay + 1) * 1440.0;
+		const ss::ui::Skin Ignited = festart::Dressed(ss::ui::Skin::FromHex(Ig.Palette), festart::LookOf(Brand::Feign));
+		++Night;
+		ExpectLook(SameSkinLook(SitesSkin(SiteId::Ignite, Day2 + 120.0), ss::ui::Skin::FromHex(Ig.NightPalette)) &&
+				SameSkinLook(SitesSkin(SiteId::Ignite, Day2 + 359.0), ss::ui::Skin::FromHex(Ig.NightPalette)) && SameSkinLook(SitesSkin(SiteId::Ignite, Day2 + 360.0), Ignited) &&
+				SameSkinLook(SitesSkin(SiteId::Ignite, Day2 + 21 * 60.0), Ignited),
+			"FestSkinRule: during FEIGN Ignite's 00:00-06:00 returns its NightPalette untouched (Afterburner Hours win) and FEIGN's dress from 06:00");
+	}
+	ExpectLook(Feign != nullptr && Night == 1, "FestSkinRule: the calendar has an FEIGN edition on Ignite");
+	// A RunItTwice edition keeps Signal Red and Hot White (§2.7.3).
+	const ss::fest::Festival* RitFest = FirstOnLook(SiteId::RunItTwice);
+	if (RitFest)
+	{
+		const ss::ui::Skin K = SitesSkin(SiteId::RunItTwice, RitFest->FirstDay * 1440.0 + 20 * 60.0);
+		const std::array<uint32_t, 16> X = HexesLook(K);
+		const std::array<uint32_t, 16>& Own = ss::net::Def(SiteId::RunItTwice).Palette;
+		ExpectLook(X[8] == Own[8] && X[10] == Own[10] && X[9] == festart::LookOf(RitFest->Which).Accent2,
+			std::string("FestSkinRule: a RunItTwice festival keeps Signal Red and Hot White and swaps its Accent2 (") + RitFest->Name + ")");
+	}
+	// The dev look (§2.16): ahead of the calendar, never over Afterburner, gone when turned off.
+	const double Plain = 5 * 1440.0 + 12 * 60.0;
+	festart::DevLook(Brand::Pennant);
+	const bool DevDressed = SameSkinLook(SitesSkin(SiteId::RiverLine, Plain), festart::Dressed(RlDay, festart::LookOf(Brand::Pennant))) &&
+		SameSkinLook(SitesSkin(SiteId::RiverLine, 20 * 1440.0 + 12 * 60.0), festart::Dressed(RlDay, festart::LookOf(Brand::Pennant)));
+	const bool DevNight = SameSkinLook(SitesSkin(SiteId::Ignite, Plain - 10 * 60.0), ss::ui::Skin::FromHex(ss::net::Def(SiteId::Ignite).NightPalette));
+	const bool DevRead = festart::DevLook() == Brand::Pennant;
+	festart::DevLook(Brand::None);
+	ExpectLook(DevRead && DevDressed && DevNight && festart::DevLook() == Brand::None && SameSkinLook(SitesSkin(SiteId::RiverLine, Plain), RlDay) &&
+			SameSkinLook(SitesSkin(SiteId::RiverLine, 20 * 1440.0 + 12 * 60.0), RlRcop),
+		"FestSkinRule: ss.Fest.Look's dev look dresses ahead of the calendar, never over Afterburner, and off puts the calendar's back");
+	// The bench line (§2.7.3: a compare a frame once the site and day are known).
+	const auto T0 = std::chrono::steady_clock::now();
+	uint64_t Sum = 0;
+	for (int K = 0; K < 10000; ++K)
+	{
+		Sum += HexesLook(SitesSkin(SiteId::RiverLine, 20 * 1440.0 + 600.0 + K * 0.001))[8];
+	}
+	const double Us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - T0).count();
+	std::printf("  takeover bench: SitesSkin x 10,000 on one site and day (RCOP live): %.0f us, %.3f us a call (%llu)\n", Us, Us / 10000.0, static_cast<unsigned long long>(Sum % 7));
+}
+
+/** What a page drew: its vertices, runs (text commands) and draw commands. */
+struct PageCountLook
+{
+	size_t Vertices = 0, Runs = 0, Cmds = 0;
+};
+
+PageCountLook CountLook(const ss::ui::DrawList& L)
+{
+	PageCountLook P;
+	P.Vertices = L.Vertices.size();
+	P.Cmds = L.Cmds.size();
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		P.Runs += Cmd.Type == ss::ui::DrawCmd::Kind::Text ? 1 : 0;
+	}
+	return P;
+}
+
+/** Whether a vertex that shows (or a text run) wears Rgb exactly. */
+bool WearsLook(const ss::ui::DrawList& L, uint32_t Rgb)
+{
+	for (const ss::ui::Vertex& V : L.Vertices)
+	{
+		if (V.Col.A > 0.05f && RgbLook(V.Col) == Rgb)
+		{
+			return true;
+		}
+	}
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && RgbLook(Cmd.Text.Col) == Rgb)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+/** SitesNoLeak's rule (tests/ui_seg_sites.cpp:274, riverline_ui's): colours drawn in Area (the client area unless given: vertices that
+ *  show, text runs) that are one of RiverLine's 16 tokens and not one of the host's own; a speck under 12 by 12 is shared art's ink. */
+int LeaksLook(const ss::ui::DrawList& L, SiteId Host, std::string& Seen, const ss::ui::Rect& Area = {0.0f, 0.0f, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height - 38.0f})
+{
+	const std::array<uint32_t, 16>& HomeA = ss::net::Def(SiteId::RiverLine).Palette;
+	const std::array<uint32_t, 16>& OwnA = ss::net::Def(Host).Palette;
+	const std::set<uint32_t> Home(HomeA.begin(), HomeA.end());
+	const std::set<uint32_t> Own(OwnA.begin(), OwnA.end());
+	const auto Inside = [&Area](float X, float Y) { return X >= Area.X && X <= Area.X + Area.W && Y >= Area.Y && Y <= Area.Y + Area.H; };
+	std::set<uint32_t> Found;
+	int Count = 0;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text)
+		{
+			const uint32_t Rgb = RgbLook(Cmd.Text.Col);
+			if (Cmd.Text.Col.A > 0.02f && Inside(Cmd.Text.X, Cmd.Text.BaselineY) && Home.count(Rgb) && !Own.count(Rgb))
+			{
+				++Count;
+				Found.insert(Rgb);
+			}
+			continue;
+		}
+		if (Cmd.Type != ss::ui::DrawCmd::Kind::Triangles)
+		{
+			continue;
+		}
+		int Here = 0;
+		float X0 = 1.0e9f, Y0 = 1.0e9f, X1 = -1.0e9f, Y1 = -1.0e9f;
+		std::set<uint32_t> Mine;
+		for (uint32_t K = 0; K < Cmd.VertexCount; ++K)
+		{
+			const ss::ui::Vertex& V = L.Vertices[Cmd.VertexStart + K];
+			const uint32_t Rgb = RgbLook(V.Col);
+			if (V.Col.A > 0.02f && Inside(V.X, V.Y) && Home.count(Rgb) && !Own.count(Rgb))
+			{
+				++Here;
+				Mine.insert(Rgb);
+				X0 = std::min(X0, V.X);
+				Y0 = std::min(Y0, V.Y);
+				X1 = std::max(X1, V.X);
+				Y1 = std::max(Y1, V.Y);
+			}
+		}
+		if (Here > 0 && (X1 - X0 > 12.0f || Y1 - Y0 > 12.0f))
+		{
+			Count += Here;
+			Found.insert(Mine.begin(), Mine.end());
+		}
+	}
+	for (const uint32_t H : Found)
+	{
+		char Buf[12];
+		std::snprintf(Buf, sizeof(Buf), " %06x", H);
+		Seen += Buf;
+	}
+	return Count;
+}
+
+/** One of the dev look's draws (ss.Fest.Look): a host's lobby in one look, at both scales. */
+struct LookDrawLook
+{
+	Brand B = Brand::None;
+	SiteId Host = SiteId::RiverLine;
+	ss::ui::DrawList L1, L15;
+};
+
+/** One festival page drawn at both scales: printed (vertices, runs; SS_UI_BENCH: ms a draw), emitted at scale 1. */
+struct TakePageLook
+{
+	std::string Name;
+	SiteId Host = SiteId::RiverLine;
+	Brand Look = Brand::None; // the look it should wear (None: Afterburner's night)
+	ss::ui::DrawList L1, L15;
+	bool Drawn = false;
+	uint32_t Felt = 0, FeltDark = 0; // a table's: SitesTableLook's felt and card back as it drew
+	int Back = 0;
+	bool Marked = false; // a table's felt mark was drawn (cached at its host's size)
+	double Seconds = 0.0;
+};
+
+/** What the takeover drew: the seven pages (the calendar's), each look's host page (the dev look) and REIGN's table (the dev look on
+ *  WRIT's). */
+struct TakeoverLook
+{
+	std::vector<TakePageLook> Pages;
+	std::vector<LookDrawLook> Looks;
+	TakePageLook ReignTable;
+};
+
+void MeasureLook(TakePageLook& P, LaptopLook& Lap, bool Emit = true)
+{
+	P.L1 = Lap.Settled(1.0f);
+	P.L15 = Lap.Frame(1.5f);
+	P.Drawn = P.L1.Vertices.size() > 100;
+	const PageCountLook A = CountLook(P.L1), B = CountLook(P.L15);
+	std::printf("  takeover page %-28s %6zu vertices %4zu runs at 1, %6zu vertices %4zu runs at 1.5\n", P.Name.c_str(), A.Vertices, A.Runs, B.Vertices, B.Runs);
+	if (std::getenv("SS_UI_BENCH"))
+	{
+		const auto T0 = std::chrono::steady_clock::now();
+		for (int K = 0; K < 40; ++K)
+		{
+			Lap.Frame(1.0f);
+		}
+		std::printf("UI BENCH %-28s %6.2f ms/draw  %6zu vertices\n", P.Name.c_str(), std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count() / 40.0,
+			A.Vertices);
+	}
+	if (Emit)
+	{
+		ui_test::WriteList(P.Name, P.L1);
+	}
+}
+
+/** The first numbered event of the edition the tables can run, in late registration from From on, at an hour outside Afterburner's
+ *  night (07:00 or later); false if none. */
+bool FestEventLook(const ss::fest::Festival& F, double From, ss::net::EventInstance& Out, double& World)
+{
+	const ss::net::Network& Net = ss::net::Site(F.Site);
+	for (const ss::net::EventInstance& E : Net.Window(std::max(From - 60.0, F.FirstDay * 1440.0), (F.LastDay + 1) * 1440.0))
+	{
+		const ss::net::EventTemplate& T = Net.TemplateOf(E);
+		const double At = E.Start + 2.0;
+		if (T.Series.empty() || ss::fest::FestivalOf(T.Series) != &F || At < From)
+		{
+			continue;
+		}
+		const int Hour = static_cast<int>(std::fmod(At, 1440.0) / 60.0);
+		const ss::LobbyEvent Ev = Net.Listing(E);
+		if (Hour >= 7 && Ev.Joinable && Ev.BuyInCents > 0 && Ev.BuyInCents <= 500000 && Ev.Spec.Entrants <= 3000 && Net.Live(E, At).St == ss::net::Status::LateReg)
+		{
+			Out = E;
+			World = At;
+			return true;
+		}
+	}
+	return false;
+}
+
+/** Registers Lap's session for E (late registration) and deals: false (printed) when it didn't seat. */
+bool SeatLook(LaptopLook& Lap, const ss::fest::Festival& F, const ss::net::EventInstance& E)
+{
+	const std::string Why = Lap.S.RegisterEvent(ss::net::Site(F.Site).Listing(E, nullptr, Lap.S.Unlocks()));
+	Lap.S.CurrentPace = ss::Pace::Full;
+	Lap.Now = ui_test::Step(Lap.S, Lap.Now, 3.0);
+	const double W = Lap.S.WorldMinutes();
+	std::printf("  takeover table: %s (%s) at day %d %02d:%02d%s%s\n", E.Id.c_str(), F.Name.c_str(), static_cast<int>(W / 1440.0), static_cast<int>(std::fmod(W, 1440.0) / 60.0),
+		static_cast<int>(std::fmod(W, 60.0)), Why.empty() ? "" : ": ", Why.c_str());
+	return Lap.S.T && Lap.S.CurrentScreen == ss::Screen::Table;
+}
+
+ss::ui::DrawList OnCanvasLook(const std::function<void(ss::ui::Canvas&)>& Paint, float Scale);
+
+/** The table in front as drawn now (measured; emitted when Emit), with the look it wears read back from SitesTableLook and whether its
+ *  felt mark was drawn (cached at its host's size). */
+void TableDrawLook(TakePageLook& P, LaptopLook& Lap, bool Emit = true)
+{
+	MeasureLook(P, Lap, Emit);
+	const ss::ui::rlsites_detail::SiteLook& Worn = ss::ui::rlsites_detail::SitesTableLook(Lap.S);
+	P.Felt = Worn.Felt;
+	P.FeltDark = Worn.FeltDark;
+	P.Back = Worn.CardBack;
+	const float Size = P.Host == SiteId::RunItTwice ? 110.0f : 120.0f;
+	OnCanvasLook([&](ss::ui::Canvas& C) { P.Marked = C.IsCached(festart::festart_detail::FestFeltMarkKey(festart::LookOf(P.Look), Size)); }, 1.0f);
+}
+
+/** Text runs and drawn colours that are a sponsor's (name, short name, patch or brand colours) inside R. */
+int SponsorMarksLook(const ss::ui::DrawList& L, const ss::ui::Rect& R)
+{
+	std::set<std::string> Names;
+	std::set<uint32_t> Inks;
+	for (const ss::sponsor::Brand& B : ss::sponsor::Brands())
+	{
+		Names.insert(B.Name);
+		Names.insert(B.Short);
+		uint32_t Ground = 0, Thread = 0;
+		if (ss::ui::sponsorart::PatchColors(B.Id, Ground, Thread))
+		{
+			Inks.insert(Ground);
+			Inks.insert(Thread);
+		}
+		Inks.insert(B.Color);
+		Inks.insert(B.Ink);
+	}
+	const auto Inside = [&R](float X, float Y) { return X >= R.X && X <= R.X + R.W && Y >= R.Y && Y <= R.Y + R.H; };
+	int Count = 0;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text)
+		{
+			Count += Inside(Cmd.Text.X, Cmd.Text.BaselineY) && (Names.count(Cmd.Text.Text) || Inks.count(RgbLook(Cmd.Text.Col))) ? 1 : 0;
+			continue;
+		}
+		for (uint32_t K = 0; Cmd.Type == ss::ui::DrawCmd::Kind::Triangles && K < Cmd.VertexCount; ++K)
+		{
+			const ss::ui::Vertex& V = L.Vertices[Cmd.VertexStart + K];
+			Count += V.Col.A > 0.05f && Inside(V.X, V.Y) && Inks.count(RgbLook(V.Col)) ? 1 : 0;
+		}
+	}
+	return Count;
+}
+
+/** One drawing on a fresh canvas at a scale: its draw list (the art's fragments stay cached for the thread). */
+ss::ui::DrawList OnCanvasLook(const std::function<void(ss::ui::Canvas&)>& Paint, float Scale)
+{
+	ui_test::TableMeasurer M;
+	ss::ui::DrawList L;
+	ss::ui::Canvas C(L, M, 1280.0f, 800.0f, Scale);
+	Paint(C);
+	return L;
+}
+
+/** The felt mark's size and centre offset on each host's table (UI/RiverLine.cpp's Table). */
+float MarkSizeLook(SiteId Host)
+{
+	return Host == SiteId::RunItTwice ? 110.0f : 120.0f;
+}
+
+/**
+ * FestTableBudgets (§2.15.2, §2.7.4, §2.8.10): festival tables within 22k (Ignite) and 19k (RunItTwice) with the felt mark (RiverLine's
+ * printed); every look's felt mark at its host's size within 1.5k at both scales, one cached fragment that replays the same, nothing
+ * while Suppressed; every look's card back at the tables' sizes within 300 at both scales, cached per look and size; the tables wear
+ * the look (felt, back, mark; REIGN its own cloth and the Rose Brass rail); the REIGN felt mark and card back draw no sponsor mark
+ * (FestReignCopy's F-look half). Planted bugs: the mark at full detail; a sponsor patch drawn on the REIGN felt.
+ */
+void FestTableBudgets(const TakeoverLook& T)
+{
+	size_t MarkMax = 0, BackMax = 0;
+	std::string MarkWorst, BackWorst;
+	bool MarkCached = true, MarkSame = true, MarkGone = true, BackCached = true;
+	const float BackSizes[3][2] = {{44.0f, 62.0f}, {72.0f, 100.0f}, {84.0f, 118.0f}};
+	std::string PerLook;
+	for (const Brand B : AllLook)
+	{
+		size_t LookMark = 0, LookBack = 0;
+		const festart::FestivalLook& L = festart::LookOf(B);
+		const float Size = MarkSizeLook(HostLook(B));
+		for (const float Scale : {1.0f, 1.5f})
+		{
+			const ss::ui::DrawList First = OnCanvasLook([&](ss::ui::Canvas& C) { festart::FeltMark(C, L, 400.0f, 300.0f, Size, false); }, Scale);
+			bool Cached = false;
+			const ss::ui::DrawList Again = OnCanvasLook([&](ss::ui::Canvas& C) {
+				Cached = C.IsCached(festart::festart_detail::FestFeltMarkKey(L, Size));
+				festart::FeltMark(C, L, 400.0f, 300.0f, Size, false);
+			}, Scale);
+			const ss::ui::DrawList Hidden = OnCanvasLook([&](ss::ui::Canvas& C) { festart::FeltMark(C, L, 400.0f, 300.0f, Size, true); }, Scale);
+			MarkCached = MarkCached && Cached;
+			MarkSame = MarkSame && First.Vertices.size() == Again.Vertices.size() && First.Vertices.size() > 20;
+			MarkGone = MarkGone && Hidden.Vertices.empty() && Hidden.Cmds.empty();
+			LookMark = std::max(LookMark, First.Vertices.size());
+			if (First.Vertices.size() > MarkMax)
+			{
+				MarkMax = First.Vertices.size();
+				MarkWorst = std::string(NameLook(B)) + (Scale > 1.0f ? " at 1.5" : " at 1");
+			}
+			for (const auto& Wh : BackSizes)
+			{
+				const int Back = festart::kBackFestival + static_cast<int>(B);
+				const ss::ui::DrawList Bl = OnCanvasLook([&](ss::ui::Canvas& C) { festart::FestCardBack(C, Back, 100.0f, 100.0f, Wh[0], Wh[1]); }, Scale);
+				bool BCached = false;
+				OnCanvasLook([&](ss::ui::Canvas& C) { BCached = C.IsCached(festart::festart_detail::FestCardBackKey(L, Wh[0], Wh[1])); }, Scale);
+				BackCached = BackCached && BCached && Bl.Vertices.size() > 20;
+				LookBack = std::max(LookBack, Bl.Vertices.size());
+				if (Bl.Vertices.size() > BackMax)
+				{
+					BackMax = Bl.Vertices.size();
+					char Buf[64];
+					std::snprintf(Buf, sizeof(Buf), "%s %.0fx%.0f at %.1f", NameLook(B), Wh[0], Wh[1], Scale);
+					BackWorst = Buf;
+				}
+			}
+		}
+		PerLook += std::string(" ") + NameLook(B) + " " + std::to_string(LookMark) + "/" + std::to_string(LookBack) + ";";
+	}
+	std::printf("  takeover felt mark / card back, most vertices at either scale:%s\n", PerLook.c_str());
+	std::printf("  takeover felt marks: at most %zu vertices (%s); card backs: at most %zu (%s)\n", MarkMax, MarkWorst.c_str(), BackMax, BackWorst.c_str());
+	ExpectLook(MarkMax <= 1500 && MarkSame && MarkCached, "FestTableBudgets: every look's felt mark is within 1.5k vertices at both scales, one cached fragment replayed the same (worst " + MarkWorst + ")");
+	ExpectLook(MarkGone, "FestTableBudgets: a Suppressed felt mark draws nothing");
+	ExpectLook(BackMax <= 300 && BackCached, "FestTableBudgets: every look's card back is within 300 vertices at the tables' sizes and both scales, cached per look and size (worst " + BackWorst + ")");
+	// The REIGN felt mark and card back carry no sponsor mark (no sponsor's name, patch or brand colour).
+	const festart::FestivalLook& Reign = festart::LookOf(Brand::Reign);
+	const ss::ui::DrawList ReignMark = OnCanvasLook([&](ss::ui::Canvas& C) { festart::FeltMark(C, Reign, 400.0f, 300.0f, 110.0f, false); }, 1.0f);
+	const ss::ui::DrawList ReignBack = OnCanvasLook([&](ss::ui::Canvas& C) { festart::FestCardBack(C, festart::kBackFestival + static_cast<int>(Brand::Reign), 100.0f, 100.0f, 72.0f, 100.0f); }, 1.0f);
+	const ss::ui::Rect Everywhere{0.0f, 0.0f, 1280.0f, 800.0f};
+	int ReignTexts = 0;
+	for (const ss::ui::DrawList* L : {&ReignMark, &ReignBack})
+	{
+		for (const ss::ui::DrawCmd& Cmd : L->Cmds)
+		{
+			ReignTexts += Cmd.Type == ss::ui::DrawCmd::Kind::Text ? 1 : 0;
+		}
+	}
+	ExpectLook(ReignTexts == 0 && SponsorMarksLook(ReignMark, Everywhere) == 0 && SponsorMarksLook(ReignBack, Everywhere) == 0,
+		"FestTableBudgets: the REIGN felt mark and card back draw no sponsor mark (no words, no sponsor's colours)");
+	// The three tables (pages fest_table_*) and REIGN's (the dev look on WRIT's): the budget with the mark, and each wears its look.
+	std::vector<const TakePageLook*> Tables;
+	for (const TakePageLook& P : T.Pages)
+	{
+		if (P.Name.rfind("fest_table_", 0) == 0)
+		{
+			Tables.push_back(&P);
+		}
+	}
+	Tables.push_back(&T.ReignTable);
+	for (const TakePageLook* Pp : Tables)
+	{
+		const TakePageLook& P = *Pp;
+		const festart::FestivalLook& L = festart::LookOf(P.Look);
+		const size_t V1 = P.L1.Vertices.size(), V15 = P.L15.Vertices.size();
+		const size_t Cap = P.Host == SiteId::Ignite ? 22000 : P.Host == SiteId::RunItTwice ? 19000 : 0;
+		std::printf("  takeover table %-22s %-7s: %zu / %zu vertices at 1 / 1.5 (budget %s at 1, as rivals_ui measures)\n", P.Name.c_str(), NameLook(P.Look), V1, V15,
+			Cap ? std::to_string(Cap).c_str() : "none listed");
+		ExpectLook(P.Drawn && (Cap == 0 || V1 <= Cap), "FestTableBudgets: the festival table is within its budget with the felt mark (" + P.Name + ")");
+		const ss::ui::rlsites_detail::SiteLook& Own = ss::ui::rlsites_detail::SitesLook(P.Host);
+		const bool Felt = P.Look == Brand::Reign ? P.Felt == Own.Felt && P.FeltDark == Own.FeltDark : P.Felt == L.Felt && P.FeltDark == L.FeltDark;
+		ExpectLook(P.Drawn && Felt && P.Back == festart::kBackFestival + static_cast<int>(P.Look) && P.Marked,
+			"FestTableBudgets: the festival table wears its look's felt (REIGN: the club's own cloth), its card back and its felt mark (" + P.Name + ", " + NameLook(P.Look) + ")");
+	}
+	// REIGN's table: the rail's hairline in Rose Brass (alpha 0.85, the octagon's edges; WRIT's table has none) and no sponsor mark on its
+	// felt (FestReignCopy's F-look half).
+	const auto RailInk = [](const ss::ui::DrawList& L) {
+		int N = 0;
+		for (const ss::ui::Vertex& V : L.Vertices)
+		{
+			N += RgbLook(V.Col) == 0xe8b4a0u && std::fabs(V.Col.A - 0.85f) < 0.01f ? 1 : 0;
+		}
+		return N;
+	};
+	const TakePageLook* Writ = Tables.size() >= 2 ? Tables[Tables.size() - 2] : nullptr;
+	const int ReignRail = RailInk(T.ReignTable.L1);
+	const int WritRail = Writ ? RailInk(Writ->L1) : -1;
+	const ss::ui::Rect FeltR{170.0f, 210.0f, 840.0f, 440.0f};
+	std::printf("  takeover REIGN table: %d Rose Brass rail vertices (WRIT's %d); sponsor marks on the felt %d\n", ReignRail, WritRail, SponsorMarksLook(T.ReignTable.L1, FeltR));
+	ExpectLook(T.ReignTable.Drawn && ReignRail >= 16 && WritRail == 0, "FestTableBudgets: a REIGN table's rail is Rose Brass on the club's own cloth, a WRIT table's is not");
+	ExpectLook(T.ReignTable.Drawn && SponsorMarksLook(T.ReignTable.L1, FeltR) == 0, "FestTableBudgets: no sponsor mark on the REIGN felt");
+}
+
+/** Each look of a host through the dev look (ss.Fest.Look) on the page Lap shows, at both scales; the dev look off after. */
+void DevPagesLook(TakeoverLook& T, LaptopLook& Lap, SiteId Host)
+{
+	for (const Brand B : AllLook)
+	{
+		if (HostLook(B) != Host)
+		{
+			continue;
+		}
+		festart::DevLook(B);
+		LookDrawLook D;
+		D.B = B;
+		D.Host = Host;
+		D.L1 = Lap.Settled(1.0f);
+		D.L15 = Lap.Frame(1.5f);
+		T.Looks.push_back(std::move(D));
+	}
+	festart::DevLook(Brand::None);
+}
+
+/** The vertices that show, and the text runs, wearing one of Rgbs. */
+int CountRgbLook(const ss::ui::DrawList& L, const std::set<uint32_t>& Rgbs)
+{
+	int N = 0;
+	for (const ss::ui::Vertex& V : L.Vertices)
+	{
+		N += V.Col.A > 0.05f && Rgbs.count(RgbLook(V.Col)) ? 1 : 0;
+	}
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		N += Cmd.Type == ss::ui::DrawCmd::Kind::Text && Rgbs.count(RgbLook(Cmd.Text.Col)) ? 1 : 0;
+	}
+	return N;
+}
+
+/** Whether a text run wears Rgb (a page's own tokens; the crests draw no text). */
+bool TextWearsLook(const ss::ui::DrawList& L, uint32_t Rgb)
+{
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Col.A > 0.5f && RgbLook(Cmd.Text.Col) == Rgb)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * The seven pages (§2.15.2, QF-18: F-look's fest_takeover_* and fest_table_*), each drawn at both scales and emitted, on one session a
+ * host (its world starts at the festival's first event: no days to catch up): RiverLine's lobby during RCOP 2026 (its 29.9k + 2k
+ * printed; F-hubs asserts it, FH-7) and an RCOP event's table; Ignite's PLAY during FEIGN, at 02:00 the next night (Afterburner wins)
+ * and a FEIGN event's table; RunItTwice's THE BOARD during its first edition (WRIT 2027) and a WRIT event's table. On the same
+ * sessions: each look's host page through the dev look (FestLeak's and FestContrast's page halves) and REIGN's table (the dev look on
+ * WRIT's: its own cloth, the Rose Brass rail, the keyhole mark).
+ */
+TakeoverLook TakeoverPagesLook()
+{
+	using Page = ss::ui::RiverLine::Page;
+	TakeoverLook T;
+	const ss::fest::Festival* Rcop = ss::fest::FestivalOf("rcop");
+	const ss::fest::Festival* Feign = FirstOnLook(SiteId::Ignite, Brand::Feign);
+	const ss::fest::Festival* Rit = FirstOnLook(SiteId::RunItTwice);
+	ExpectLook(Rcop && Feign && Rit, "FestTableBudgets: the calendar has RCOP 2026, FEIGN and a RunItTwice edition");
+	if (!Rcop || !Feign || !Rit)
+	{
+		return T;
+	}
+	auto T0 = std::chrono::steady_clock::now();
+	const auto Clock = [&T0](TakePageLook& P) {
+		const auto T1 = std::chrono::steady_clock::now();
+		P.Seconds = std::chrono::duration<double>(T1 - T0).count();
+		T0 = T1;
+	};
+	ss::net::EventInstance E;
+	double World = 0.0;
+	// RiverLine: RCOP 2026's first numbered event in late registration.
+	if (FestEventLook(*Rcop, Rcop->FirstDay * 1440.0, E, World))
+	{
+		LaptopLook Lap("fest-takeover-rl", SiteId::RiverLine, World);
+		Lap.Open(Page::Lobby);
+		TakePageLook P{"fest_takeover_rl_lobby", SiteId::RiverLine, Brand::Rcop};
+		MeasureLook(P, Lap);
+		std::printf("  takeover: RiverLine's lobby with festival crests: %zu / %zu vertices at 1 / 1.5 (its measured 29.9k + 2k: F-hubs asserts, FH-7)\n", P.L1.Vertices.size(),
+			P.L15.Vertices.size());
+		DevPagesLook(T, Lap, SiteId::RiverLine);
+		Clock(P);
+		T.Pages.push_back(std::move(P));
+		TakePageLook Tb{"fest_table_rl", SiteId::RiverLine, Brand::Rcop};
+		if (SeatLook(Lap, *Rcop, E))
+		{
+			TableDrawLook(Tb, Lap);
+		}
+		Clock(Tb);
+		T.Pages.push_back(std::move(Tb));
+	}
+	// Ignite: FEIGN's first event; Afterburner at 02:00 the next night; the next event's table.
+	if (FestEventLook(*Feign, Feign->FirstDay * 1440.0, E, World))
+	{
+		LaptopLook Lap("fest-takeover-ig", SiteId::Ignite, World);
+		Lap.Open(Page::Lobby);
+		TakePageLook P{"fest_takeover_ig_play", SiteId::Ignite, Brand::Feign};
+		MeasureLook(P, Lap);
+		DevPagesLook(T, Lap, SiteId::Ignite);
+		Clock(P);
+		T.Pages.push_back(std::move(P));
+		const double Night = (std::floor(World / 1440.0) + 1.0) * 1440.0 + 120.0;
+		Lap.At(Night);
+		TakePageLook Ab{"fest_takeover_ig_afterburner", SiteId::Ignite, Brand::None};
+		MeasureLook(Ab, Lap);
+		Clock(Ab);
+		T.Pages.push_back(std::move(Ab));
+		TakePageLook Tb{"fest_table_ig", SiteId::Ignite, Brand::Feign};
+		if (FestEventLook(*Feign, Night, E, World))
+		{
+			Lap.At(World);
+			if (SeatLook(Lap, *Feign, E))
+			{
+				TableDrawLook(Tb, Lap);
+			}
+		}
+		Clock(Tb);
+		T.Pages.push_back(std::move(Tb));
+	}
+	// RunItTwice: its first edition's first event (WRIT 2027): THE BOARD, the table, REIGN's table through the dev look.
+	if (FestEventLook(*Rit, Rit->FirstDay * 1440.0, E, World))
+	{
+		LaptopLook Lap("fest-takeover-rit", SiteId::RunItTwice, World);
+		Lap.Open(Page::Lobby);
+		TakePageLook P{"fest_takeover_rit_board", SiteId::RunItTwice, Rit->Which};
+		MeasureLook(P, Lap);
+		DevPagesLook(T, Lap, SiteId::RunItTwice);
+		Clock(P);
+		T.Pages.push_back(std::move(P));
+		TakePageLook Tb{"fest_table_rit", SiteId::RunItTwice, Rit->Which};
+		T.ReignTable = TakePageLook{"REIGN (dev look)", SiteId::RunItTwice, Brand::Reign};
+		if (SeatLook(Lap, *Rit, E))
+		{
+			TableDrawLook(Tb, Lap);
+			festart::DevLook(Brand::Reign);
+			TableDrawLook(T.ReignTable, Lap, false);
+			festart::DevLook(Brand::None);
+		}
+		Clock(Tb);
+		T.Pages.push_back(std::move(Tb));
+	}
+	ExpectLook(T.Pages.size() == 7, "FestTableBudgets: the seven takeover pages were drawn");
+	// Each takeover page wears its look in its own text (accent and label tokens; the crests draw none): RunItTwice's in Accent2 (its
+	// Accent stays Signal Red); the afterburner page wears Afterburner's accent and none of FEIGN's.
+	const uint32_t NightAccent = ss::net::Def(SiteId::Ignite).NightPalette[8];
+	for (const TakePageLook& P : T.Pages)
+	{
+		std::printf("  takeover time %-28s %.2f s\n", P.Name.c_str(), P.Seconds);
+		if (P.Name.rfind("fest_takeover_", 0) != 0)
+		{
+			continue;
+		}
+		const festart::FestivalLook& F = festart::LookOf(P.Look == Brand::None ? Brand::Feign : P.Look);
+		bool Worn = TextWearsLook(P.L1, NightAccent) && !TextWearsLook(P.L1, F.Accent) && !TextWearsLook(P.L1, F.Accent2) && !TextWearsLook(P.L1, F.Gold);
+		if (P.Look != Brand::None)
+		{
+			// The look's swapped tokens (those it changes on its host: REIGN's Accent2 alone).
+			const std::array<uint32_t, 16>& Own = ss::net::Def(P.Host).Palette;
+			std::set<uint32_t> Mark;
+			for (const uint32_t C : {F.Accent, F.Accent2, F.Gold, F.Felt, F.FeltDark, F.Bg2})
+			{
+				if (std::find(Own.begin(), Own.end(), C) == Own.end())
+				{
+					Mark.insert(C);
+				}
+			}
+			int Other = -1;
+			for (const LookDrawLook& D : T.Looks)
+			{
+				if (Other < 0 && D.Host == P.Host && D.B != P.Look)
+				{
+					Other = CountRgbLook(D.L1, Mark);
+				}
+			}
+			const int Mine = CountRgbLook(P.L1, Mark);
+			std::printf("  takeover page %s: %d vertices and runs in its look's %zu swapped tokens (%d in another look's)\n", P.Name.c_str(), Mine, Mark.size(), Other);
+			Worn = Other >= 0 && Mine > Other;
+		}
+		ExpectLook(P.Drawn && Worn, "FestSkinRule: the page wears its festival's look (" + P.Name + (P.Look == Brand::None ? ": Afterburner's night, not FEIGN" : std::string(": ") + NameLook(P.Look)) + ")");
+	}
+	return T;
+}
+
+/**
+ * FestLeak's and FestContrast's page halves (§2.15.2): SitesNoLeak's rule over every Ignite and RunItTwice festival page (the calendar's
+ * pages and tables, and each host's page in each of its looks through the dev look) at both scales, and on every look's host page at
+ * both scales the drawn text holds: accent runs on Bg >= 4.5 on RiverLine and Ignite looks, Ink runs on Panel and Muted runs on Bg
+ * >= 4.5; a RunItTwice look changes no run to Signal Red (its own red runs are the host's light, the same in every look). Planted bugs:
+ * as FL-1's (FEIGN's Bg2 0e1726; Ring Rush's accent c84a5e).
+ */
+void FestPagesLeakContrast(const TakeoverLook& T)
+{
+	int Checked = 0, Leaky = 0;
+	std::string Leaks;
+	const auto Leak = [&](const ss::ui::DrawList& L, SiteId Host, const std::string& What, bool Table) {
+		std::string Seen;
+		const ss::ui::rlsites_detail::SiteLook& K = ss::ui::rlsites_detail::SitesLook(Host);
+		const int N = Table ? LeaksLook(L, Host, Seen, {K.Cx - K.Rx, K.Cy - K.Ry, 2.0f * K.Rx, 2.0f * K.Ry}) : LeaksLook(L, Host, Seen);
+		++Checked;
+		if (N > 0)
+		{
+			++Leaky;
+			Leaks += " " + What + ":" + Seen;
+		}
+	};
+	for (const TakePageLook& P : T.Pages)
+	{
+		if (P.Host != SiteId::RiverLine && P.Drawn)
+		{
+			const bool Table = P.Name.rfind("fest_table_", 0) == 0;
+			Leak(P.L1, P.Host, P.Name, Table);
+			Leak(P.L15, P.Host, P.Name + "@1.5", Table);
+		}
+	}
+	for (const Brand B : AllLook)
+	{
+		if (HostLook(B) == SiteId::RiverLine)
+		{
+			continue;
+		}
+		const festart::FestivalLook& L = festart::LookOf(B);
+		for (const float Scale : {1.0f, 1.5f})
+		{
+			Leak(OnCanvasLook([&](ss::ui::Canvas& C) { festart::FeltMark(C, L, 600.0f, 400.0f, MarkSizeLook(HostLook(B)), false); }, Scale), HostLook(B),
+				std::string("mark/") + NameLook(B), false);
+			Leak(OnCanvasLook([&](ss::ui::Canvas& C) { festart::FestCardBack(C, festart::kBackFestival + static_cast<int>(B), 400.0f, 300.0f, 84.0f, 118.0f); }, Scale), HostLook(B),
+				std::string("back/") + NameLook(B), false);
+		}
+	}
+	int Accents = 0, Inks = 0, Low = 0, Looks = 0;
+	std::string LowWhat;
+	std::map<Brand, std::multiset<std::string>> Red;
+	for (const LookDrawLook& D : T.Looks)
+	{
+		++Looks;
+		const std::array<uint32_t, 16> X = HexesLook(DressedLook(D.B));
+		const uint32_t Bg = X[0], Panel = X[2], Ink = X[5], Muted = X[6], Accent = X[8];
+		for (const ss::ui::DrawList* L : {&D.L1, &D.L15})
+		{
+			if (D.Host != SiteId::RiverLine)
+			{
+				Leak(*L, D.Host, std::string("page/") + NameLook(D.B), false);
+			}
+			for (const ss::ui::DrawCmd& Cmd : L->Cmds)
+			{
+				if (Cmd.Type != ss::ui::DrawCmd::Kind::Text || Cmd.Text.Col.A < 0.9f || Cmd.Text.BaselineY > ss::ui::RiverLine::Height - 38.0f)
+				{
+					continue;
+				}
+				const uint32_t C = RgbLook(Cmd.Text.Col);
+				double Ratio = 99.0;
+				if (C == Accent && D.Host != SiteId::RunItTwice)
+				{
+					++Accents;
+					Ratio = ContrastLook(Accent, Bg);
+				}
+				else if (C == Ink)
+				{
+					++Inks;
+					Ratio = ContrastLook(Ink, Panel);
+				}
+				else if (C == Muted)
+				{
+					++Inks;
+					Ratio = ContrastLook(Muted, Bg);
+				}
+				if (D.Host == SiteId::RunItTwice && C == 0xd2141au && L == &D.L1)
+				{
+					Red[D.B].insert(Cmd.Text.Text);
+				}
+				if (Ratio < 4.5)
+				{
+					++Low;
+					LowWhat = LowWhat.empty() ? std::string(" (first: ") + NameLook(D.B) + " \"" + Cmd.Text.Text + "\")" : LowWhat;
+				}
+			}
+		}
+	}
+	bool RedSame = Red.size() == 3;
+	for (const auto& R : Red)
+	{
+		RedSame = RedSame && R.second == Red.begin()->second;
+	}
+	std::string RedWhat;
+	for (const std::string& S : std::set<std::string>(Red.empty() ? std::set<std::string>() : std::set<std::string>(Red.begin()->second.begin(), Red.begin()->second.end())))
+	{
+		RedWhat += (RedWhat.empty() ? "" : ", ") + ("\"" + S + "\"");
+	}
+	std::printf("  takeover pages: leak-checked %d draws (%d leaky%s); %d looks' pages: contrast over %d accent runs and %d Ink or Muted runs (%d under 4.5); RunItTwice's "
+				"red runs, the same in its three looks: %s\n",
+		Checked, Leaky, Leaks.c_str(), Looks, Accents, Inks, Low, RedWhat.c_str());
+	ExpectLook(Checked >= 40 && Leaky == 0, "FestLeak: no RiverLine palette colour on any Ignite or RunItTwice festival page (a table's felt), felt mark or card back, in any of the six rival looks" + Leaks);
+	ExpectLook(Looks == 10 && Accents > 0 && Inks > 0 && Low == 0, "FestContrast: on every look's pages at both scales, accent text on Bg, Ink on Panel and Muted on Bg read at 4.5:1 or more" + LowWhat);
+	ExpectLook(RedSame, "FestContrast: a RunItTwice look sets no run in Signal Red its other looks don't (red is light, never ink)");
+}
 } // namespace
 
 namespace u4_ui_test
@@ -2031,5 +2951,9 @@ void SegLook()
 	FestBandBudget();
 	FestBandstand();
 	FestCopyUiLook();
+	FestSkinRule();
+	const TakeoverLook Takeover = TakeoverPagesLook();
+	FestTableBudgets(Takeover);
+	FestPagesLeakContrast(Takeover);
 }
 } // namespace u4_ui_test

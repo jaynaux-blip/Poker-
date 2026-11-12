@@ -12,6 +12,7 @@
 #include "ShortStack/Structure.h"
 #include "ShortStack/UI/Avatars.h"
 #include "ShortStack/UI/BadgeArt.h"
+#include "ShortStack/UI/FestivalArt.h"
 #include "ShortStack/UI/SiteArt.h"
 #include "IgniteArt.h"
 #include "RiverLineShared.h"
@@ -218,6 +219,14 @@ Color TblA(uint32_t Rgb, float A)
 	Color Cl = Hex(Rgb);
 	Cl.A = A;
 	return Cl;
+}
+
+/** Update 4 G1 FL-4 (F-look; SPEC v1.7 §2.7.4): the festival a table look is dressed for (SitesTableLook sets its card back to
+ *  festart::kBackFestival + the brand), or Brand::None. */
+fest::Brand TblFestOf(const TblLook& L)
+{
+	const int B = L.CardBack - festart::kBackFestival;
+	return B > static_cast<int>(fest::Brand::None) && B < static_cast<int>(fest::Brand::Count) ? static_cast<fest::Brand>(B) : fest::Brand::None;
 }
 
 /** The felt's rect inset by D units (outward when D < 0). */
@@ -428,7 +437,15 @@ void TblOctagonTable(Canvas& C, const TblLook& L, double Now, bool Still, bool H
 	C.GlowPolygon(Drop, Rgba(0, 0, 0, 0.6f), 10.0f);
 	const Rect Rr = TblFeltRect(L, -22.0f);
 	C.FillPolygon(Rail, Paint::Linear({0.0f, Rr.Y}, {0.0f, Rr.Y + Rr.H}, Hex(rlsites_detail::SitesRitGloss), Hex(0x0c0c0f)));
-	C.StrokePolyline(Rail, true, TblA(rlsites_detail::SitesRitChrome, 0.55f), 1.0f);
+	// Update 4 G1 FL-4 (§2.7.4, v1.6): at a REIGN table the rail's hairline is Rose Brass (the look's Accent2) on the club's own cloth.
+	if (TblFestOf(L) == fest::Brand::Reign)
+	{
+		C.StrokePolyline(Rail, true, TblA(festart::LookOf(fest::Brand::Reign).Accent2, 0.85f), 1.5f);
+	}
+	else
+	{
+		C.StrokePolyline(Rail, true, TblA(rlsites_detail::SitesRitChrome, 0.55f), 1.0f);
+	}
 	{
 		const std::vector<Vec2> Hi = TblOctagon(L, -19.5f);
 		C.StrokePolyline({Hi[7], Hi[0], Hi[1], Hi[2]}, false, Rgba(255, 255, 255, 0.06f), 3.0f);
@@ -1812,6 +1829,7 @@ void RiverLine::Table(double Now)
 	const bool Still = Previewing;
 	const bool FinalTable = T.Remaining <= std::max(2, T.Spec.TableSize);
 	const net::SiteId Site = rlsites_detail::SitesOfTable(S);
+	const fest::Brand FestOn = TblFestOf(Look); // Update 4 G1 FL-4: a festival event's table (§2.7.4)
 	const bool InBb = rlsites_detail::SitesBetsInBb(*this, Look);
 	const Chips TableBb = S.CurHand ? std::max<Chips>(1, S.CurHand->BigBlind) : std::max<Chips>(1, T.CurrentLevel().Bb);
 
@@ -1822,15 +1840,25 @@ void RiverLine::Table(double Now)
 		C->FillEllipse(FeltCx, FeltCy, FeltRx + 30.0f, FeltRy + 30.0f, Paint::Linear({0.0f, FeltCy - FeltRy}, {0.0f, FeltCy + FeltRy}, rlsites_detail::SitesTone(0x2a3342), rlsites_detail::SitesTone(0x10151d)));
 		C->FillEllipse(FeltCx, FeltCy, FeltRx, FeltRy, Paint::Radial({FeltCx, FeltCy - 40.0f}, 30.0f, {FeltCx, FeltCy}, FeltRx, FeltHi, 0.7f, FeltMid, FeltLo));
 		C->StrokeEllipse(FeltCx, FeltCy, FeltRx - 40.0f, FeltRy - 34.0f, Rgba(255, 255, 255, 0.08f), 2.0f);
-		C->SetAlpha(0.14f);
-		// The site's own mark on its felt (update 2 §5.11).
-		if (Site == net::SiteId::RiverLine)
+		if (FestOn != fest::Brand::None)
 		{
-			Logo(FeltCx - 95.0f, FeltCy + 88.0f, 1.25f);
+			// Update 4 G1 FL-4 (§2.7.4): a festival's table wears its felt mark (the low-detail crest at alpha 0.14) where the
+			// site's own mark sits.
+			C->SetAlpha(1.0f);
+			festart::FeltMark(*C, festart::LookOf(FestOn), FeltCx, FeltCy + 112.0f, 120.0f, false);
 		}
 		else
 		{
-			siteart::Logo(*C, {FeltCx - 125.0f, FeltCy + 92.0f, 250.0f, 42.0f}, Site);
+			C->SetAlpha(0.14f);
+			// The site's own mark on its felt (update 2 §5.11).
+			if (Site == net::SiteId::RiverLine)
+			{
+				Logo(FeltCx - 95.0f, FeltCy + 88.0f, 1.25f);
+			}
+			else
+			{
+				siteart::Logo(*C, {FeltCx - 125.0f, FeltCy + 92.0f, 250.0f, 42.0f}, Site);
+			}
 		}
 		C->SetAlpha(1.0f);
 	}
@@ -1840,6 +1868,11 @@ void RiverLine::Table(double Now)
 		if (Look.Shape == rlsites_detail::TableShape::Capsule)
 		{
 			TblCapsule(*C, Look, Now, Still, FinalTable, igniteart::IgniteBpmAt(World));
+			if (FestOn != fest::Brand::None)
+			{
+				// Update 4 G1 FL-4 (§2.7.4): the festival's felt mark joins the capsule, top centre (the sign keeps the foot).
+				festart::FeltMark(*C, festart::LookOf(FestOn), FeltCx, FeltCy - 150.0f, 120.0f, false);
+			}
 			// The flame and "Ignite" as a neon sign (§2.5): siteart's NeonSign, three soft Hot Pink copies at 0.06/0.10/0.16 under
 			// a crisp one at 0.22, in colours' own alpha (the parent alpha carries through), centred under the board.
 			const float SignSize = 40.0f;
@@ -1849,6 +1882,12 @@ void RiverLine::Table(double Now)
 		else
 		{
 			TblOctagonTable(*C, Look, Now, Still, HeroTurn, FinalTable);
+			if (FestOn != fest::Brand::None)
+			{
+				// Update 4 G1 FL-4 (§2.7.4): the festival's felt mark joins the octagon, between the pot and the lower third (the
+				// turnstone keeps the top). Suppressed is G3's (B-ui: INTRODUCTIONS or a lower third).
+				festart::FeltMark(*C, festart::LookOf(FestOn), FeltCx, FeltCy + 118.0f, 110.0f, false);
+			}
 		}
 	}
 
