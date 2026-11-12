@@ -12,9 +12,18 @@
 // FestLastRank and FestPointsTo (G/WorldFestDetail.h, R-4) and fest::MarkCutoff are the marks' rule and the ladder; FestTop,
 // FestStanding, FestKnown and FestRaceKey read the live race, else the last crown's top ten (FestLast, the Afterglow). The ranked
 // race is kept in World's FestViews (R-10; a copied world starts without it), rebuilt when the world's stamp (serial, Rev, HeroRev)
-// moves or a race writer here drops it. No RNG (§2.12): sums and a sort with a total order. The crown (FestHour, FestCrownedAt,
-// HeroMark, HeroMarks) is FW-2b's; until then a race stays open past its last event and a stale key is cleared, uncrowned, when the
-// next festival opens (the calendar never meets that case once FestHour crowns).
+// moves or a race writer here drops it. No RNG (§2.12): sums and a sort with a total order.
+//
+// G1, FW-2b (F-world; PLAN_FWORLD Corrections item 1): the crown (§2.6.1 steps 1-7). FestHour, from World::AdvanceTo's hourly block,
+// crowns the live race in the first hour slice at or after fest::LastEnd with no Pending of its series left in the queue (the hero
+// still seated in its Main holds it, up to the two days the world waits for them), so every skip crowns in the same slice; it clears
+// FestLast once the Afterglow's three days have run from the crown. The crown ranks the race (S scorers; none: the race just closes,
+// no champion), pushes the Player of the Series Honor (EventId "<series>#pos", Entries the points), posts EventKind::FestivalCrown
+// with the site's bits (and FlagHero for the hero's), gives a person who wins +6 online fame, keeps the hero's mark (with its crown
+// ticket from FINALIST up while fest::kCrownTickets), keeps the top ten in FestLast and closes the race. FestDay crowns a stale race
+// first (the calendar never leaves one). A crowned key never reopens and never crowns twice. FestCrownedAt reads the crown Honors
+// (kept per world state beside the race view); HeroMark and HeroMarks read the hero's marks; FestTicketPaid (G/WorldFestDetail.h)
+// is the session's receipt for a paid crown ticket. Step 8's refunds and the tickets' payment are the session's (FestStep, FW-6).
 #include "ShortStack/Game/WorldFest.h"
 
 #include "ShortStack/Game/World.h"
@@ -53,6 +62,16 @@ struct WorldViews
 		std::vector<std::pair<int, int>> Known;               // FestKnown: (npc, rank), race order
 	};
 	RaceView Race;
+	/** The crown Honors by series id (FestCrownedAt, which fest::PhaseOf reads), kept per world state and the Honors' count. */
+	struct CrownView
+	{
+		bool Valid = false;
+		uint64_t Serial = 0;
+		int Rev = -1, HeroRev = -1;
+		size_t Honors = 0;
+		std::vector<std::pair<std::string, double>> At; // (series id, the crown's minute), sorted by id
+	};
+	CrownView Crowns;
 };
 
 /** World's friend for the festival modules (§6.2): the store World keeps for them (F-world's reads and writes from G1). */
@@ -81,6 +100,18 @@ struct WorldAccess
 			W.FestViews.P->Race.Valid = false;
 		}
 	}
+	// FW-2b: the crown's reads and writes (§2.6.1).
+	/** The world's Honors (the crown pushes its Honor here, the world\thonor line). */
+	static std::vector<world::Honor>& Titles(world::World& W) { return W.Titles; }
+	/** The planned events, read only (a const read never clones the shared queue). */
+	static const world::CowVec<world::Pending>& Queue(const world::World& W) { return W.Queue; }
+	/** The world's log, the post the crown just made (Sim::Post) to flag. */
+	static world::WorldEvent& LastPost(world::World& W) { return W.Log.back(); }
+	/** A person to change, and their row refreshed after (the views' rows read it). */
+	static world::Npc& Edit(world::World& W, int Id) { return W.Edit(Id); }
+	static void Refresh(world::World& W, int Id) { W.Refresh(Id); }
+	/** Something of the player's changed (their marks): the session's next save writes the world. */
+	static void HeroChanged(world::World& W) { ++W.HeroRev; }
 };
 } // namespace fest
 
@@ -186,6 +217,105 @@ int FestRankIn(const fest::WorldViews::RaceView& V, int Npc)
 {
 	const auto It = std::lower_bound(V.RankOf.begin(), V.RankOf.end(), std::make_pair(Npc, 0));
 	return It != V.RankOf.end() && It->first == Npc ? It->second : 0;
+}
+
+/** The crown Honors by series id, rebuilt when the world's stamp or the Honors' count moved (the crown pushes one; a load moves the
+ *  serial). */
+const fest::WorldViews::CrownView& FestCrownView(const World& W)
+{
+	fest::WorldViews::CrownView& V = fest::WorldAccess::Views(W).Crowns;
+	const WorldStamp Stamp = W.SnapshotStamp();
+	const std::vector<Honor>& Honors = W.Honors();
+	if (V.Valid && V.Serial == Stamp.Serial && V.Rev == Stamp.Rev && V.HeroRev == Stamp.HeroRev && V.Honors == Honors.size())
+	{
+		return V;
+	}
+	V = fest::WorldViews::CrownView();
+	for (const Honor& H : Honors)
+	{
+		if (IsCrownHonor(H))
+		{
+			V.At.emplace_back(H.EventId.substr(0, H.EventId.size() - 4), H.At); // "<series>#pos"
+		}
+	}
+	// One crown a key (a crowned key never reopens); were there two, the first stands.
+	std::stable_sort(V.At.begin(), V.At.end(), [](const std::pair<std::string, double>& A, const std::pair<std::string, double>& B) { return A.first < B.first; });
+	V.Serial = Stamp.Serial;
+	V.Rev = Stamp.Rev;
+	V.HeroRev = Stamp.HeroRev;
+	V.Honors = Honors.size();
+	V.Valid = true;
+	return V;
+}
+
+/**
+ * The crown of F's race at Now (§2.6.1 steps 1-7; deterministic, no RNG): rank it (S scorers; none, or a key already crowned: the
+ * race closes with no champion); the Player of the Series Honor; the FestivalCrown post with the site's bits (and FlagHero for the
+ * hero's); +6 online fame to a person who wins (half the Player of the Year's 12); the hero's mark, if they scored, with its crown
+ * ticket from FINALIST up while fest::kCrownTickets; FestLast with the top ten; the race closed.
+ */
+void FestCrown(World& W, const fest::Festival& F, double Now)
+{
+	FestRace& Race = fest::WorldAccess::Race(W);
+	const std::vector<std::pair<int, FestScore>> Order = FestRank(Race);
+	const int Scorers = static_cast<int>(Order.size());
+	const std::string Key = Race.Key;
+	Race = FestRace();
+	fest::WorldAccess::DropRace(W);
+	if (Scorers == 0 || FestCrownedKey(W, Key))
+	{
+		return;
+	}
+	// 2. The Honor (the world\thonor line; Entries holds the points, the Player of the Year precedent).
+	const int Winner = Order.front().first;
+	const Npc* Person = Winner >= 0 ? W.Get(Winner) : nullptr;
+	const int Points = static_cast<int>(std::llround(Order.front().second.Points));
+	Honor H;
+	H.Year = YearOf(F.FirstDay);
+	H.Title = F.Name + " Player of the Series";
+	H.EventId = Key + "#pos";
+	H.Npc = Winner;
+	H.Name = Person ? Person->Name : Winner < 0 ? W.HeroName : std::string();
+	H.Prize = 0;
+	H.Entries = Points;
+	H.At = Now;
+	fest::WorldAccess::Titles(W).push_back(H);
+	// 3. The post: the site's bits, so a rival's crown shows on its own News and stays off RiverLine's.
+	Sim::Post(W, Now, EventKind::FestivalCrown, Winner, F.Name, static_cast<Chips>(Order.front().second.Cashes), Points);
+	fest::WorldAccess::LastPost(W).Flags |= Sim::SiteFlags(F.Site) | (Winner < 0 ? FlagHero : 0);
+	// 4. A person's fame.
+	if (Person)
+	{
+		Npc& N = fest::WorldAccess::Edit(W, Winner);
+		N.Fame[static_cast<size_t>(Rep::Online)] = static_cast<float>(static_cast<double>(N.Fame[static_cast<size_t>(Rep::Online)]) + 6.0);
+		fest::WorldAccess::Refresh(W, Winner);
+	}
+	// 5 and 7. The hero's mark, and the crown ticket it earns (paid once by the session's FestStep).
+	for (size_t K = 0; K < Order.size(); ++K)
+	{
+		if (Order[K].first != -1)
+		{
+			continue;
+		}
+		HeroFestMark M;
+		M.Key = Key;
+		M.Rank = static_cast<int>(K) + 1;
+		M.Scorers = Scorers;
+		M.Mark = MarkFor(M.Rank, Scorers);
+		M.Points = Order[K].second.Points;
+		M.Ticket = fest::kCrownTickets && M.Mark >= FestMark::Finalist;
+		fest::WorldAccess::Marks(W).push_back(M);
+		fest::WorldAccess::HeroChanged(W);
+		break;
+	}
+	// 6. The last crown, through the Afterglow: the top ten in rank order.
+	FestFinal& Last = fest::WorldAccess::Last(W);
+	Last = FestFinal();
+	Last.Key = Key;
+	Last.At = Now;
+	Last.Scorers = Scorers;
+	Last.Top.assign(Order.begin(), Order.begin() + std::min<std::ptrdiff_t>(10, static_cast<std::ptrdiff_t>(Order.size())));
+	fest::WorldAccess::DropRace(W);
 }
 } // namespace worldfest_detail
 
@@ -294,17 +424,52 @@ void FestDay(World& W, int Today)
 		{
 			continue; // open already
 		}
-		// A stale key (an earlier festival's race still open; impossible under the calendar once FestHour crowns, FW-2b) is crowned
-		// first there; until then it closes uncrowned.
+		// A stale key (an earlier festival's race still open: impossible under the calendar, FestHour crowns each race within two days
+		// of its last event) is crowned first (§2.5.2 rule 1), now; a key that names no festival just closes.
+		if (!Race.Key.empty())
+		{
+			const fest::Festival* Stale = fest::FestivalOf(Race.Key);
+			if (Stale)
+			{
+				worldfest_detail::FestCrown(W, *Stale, W.Clock());
+			}
+		}
 		Race = FestRace();
 		Race.Key = F->SeriesId;
 		fest::WorldAccess::DropRace(W);
 	}
 }
 
-void FestHour(World& /*W*/, double /*Now*/)
+void FestHour(World& W, double Now)
 {
-	// Phase A: no race to crown, no Afterglow to end (FW-2b: the crown, §2.6.1).
+	// The Afterglow ends three days after the crown (§2.6.1): the last crown's top ten are gone.
+	FestFinal& Last = fest::WorldAccess::Last(W);
+	if (!Last.Key.empty() && Now >= Last.At + static_cast<double>(fest::kAfterglowDays) * 1440.0)
+	{
+		Last = FestFinal();
+		fest::WorldAccess::DropRace(W);
+	}
+	// The crown (§2.6.1): the live race's festival past its last event's scheduled end (a compare an hour), and no event of its series
+	// left in the queue (the scan only from then: one the hero is still seated in waits for them).
+	const std::string& Key = fest::WorldAccess::Race(W).Key;
+	if (Key.empty())
+	{
+		return;
+	}
+	const fest::Festival* F = fest::FestivalOf(Key);
+	if (!F || Now < fest::LastEnd(*F))
+	{
+		return;
+	}
+	const World& Read = W;
+	for (const Pending& P : fest::WorldAccess::Queue(Read))
+	{
+		if (P.Series == Key)
+		{
+			return;
+		}
+	}
+	worldfest_detail::FestCrown(W, *F, Now);
 }
 
 void FestScoreResult(World& W, const Pending& P, int Npc, int Place)
@@ -370,9 +535,12 @@ std::vector<std::pair<int, int>> FestKnown(const World& W)
 	return worldfest_detail::FestRaceView(W).Known;
 }
 
-double FestCrownedAt(const World& /*W*/, const std::string& /*Key*/)
+double FestCrownedAt(const World& W, const std::string& Key)
 {
-	return -1.0;
+	// The crown Honor's minute (fest::PhaseOf's Closing and Afterglow, §2.1.4); -1: never crowned (no race, no scorer, an old save).
+	const fest::WorldViews::CrownView& V = worldfest_detail::FestCrownView(W);
+	const auto It = std::lower_bound(V.At.begin(), V.At.end(), Key, [](const std::pair<std::string, double>& A, const std::string& K) { return A.first < K; });
+	return It != V.At.end() && It->first == Key ? It->second : -1.0;
 }
 
 std::vector<FestRollRow> FestRoll(const World& /*W*/, fest::Brand /*B*/)
@@ -415,18 +583,38 @@ std::vector<HeroFestPin> HeroFestPins(const World& /*W*/)
 	return {};
 }
 
-FestMark HeroMark(const World& /*W*/, const std::string& /*Key*/)
+FestMark HeroMark(const World& W, const std::string& Key)
 {
+	// The hero's mark in edition Key, kept from its crown (§2.5.3; one record an edition scored in): None before it or without one.
+	for (const HeroFestMark& M : fest::WorldAccess::Marks(W))
+	{
+		if (M.Key == Key)
+		{
+			return M.Mark;
+		}
+	}
 	return FestMark::None;
 }
 
-// ---- G1's appends (the lead's pre-wave commit H0, PLAN_G1 §4.2): stubs until F-world's bodies (FestRaceKey FW-2a, HeroMarks FW-2b,
-// HeroFestResults FW-3, FestWhyLine FW-4). No race, mark or festival result exists before them, so each answers "none".
-
-const std::vector<HeroFestMark>& HeroMarks(const World& /*W*/)
+void FestTicketPaid(World& W, const std::string& Key)
 {
-	static const std::vector<HeroFestMark> FestMarksNone;
-	return FestMarksNone;
+	for (HeroFestMark& M : fest::WorldAccess::Marks(W))
+	{
+		if (M.Key == Key && M.Ticket)
+		{
+			M.Ticket = false;
+			fest::WorldAccess::HeroChanged(W);
+		}
+	}
+}
+
+// ---- G1's appends (the lead's pre-wave commit H0, PLAN_G1 §4.2): F-world's bodies (FestRaceKey FW-2a, HeroMarks FW-2b); stubs until
+// theirs (HeroFestResults FW-3, FestWhyLine FW-4), each answering "none".
+
+const std::vector<HeroFestMark>& HeroMarks(const World& W)
+{
+	// Every mark the hero keeps, crown order (World's HeroFest: the world\tfest\tmark lines).
+	return fest::WorldAccess::Marks(W);
 }
 
 const std::string& FestRaceKey(const World& W)
