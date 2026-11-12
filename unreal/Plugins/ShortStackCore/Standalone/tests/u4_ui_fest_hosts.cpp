@@ -264,7 +264,9 @@ size_t HostsRuns(const ss::ui::DrawList& L)
  *  event starting later that day ("FEIGN TONIGHT · #{No}", U32), else The Spark (or what's up next) as today. On F-net's calendar every
  *  FEIGN 2026 day at noon and late evening, the days either side; then drawn on Ignite's PLAY: FEIGN's Buildup (the Lighthouse's
  *  countdown, no takeover yet) and its first day (the pick on the bandstand, the Lighthouse's day line, chip 10, the floor's shelf, no
- *  Prize Counter under the arch), with the festival chip and label's cost printed (PLAN_FHUBS FH-3's budget row; FH-7 asserts it).
+ *  Prize Counter under the arch) at noon, and again at 19:00 when The Spark's TONIGHT slide has an event of its own (the pick's label
+ *  and card drawn, not The Spark's head), with the festival chip and label's cost printed (PLAN_FHUBS FH-3's budget row; FH-7
+ *  asserts it).
  *  Plant: The Spark kept during the festival. */
 void FestBandstandPick()
 {
@@ -343,6 +345,21 @@ void FestBandstandPick()
 	ui_test::Expect(ui_test::DrewRun(During, Short), "FestBandstandPick: chip 10 reads the festival's Short");
 	ui_test::Expect(ui_test::DrewRun(During, Short + " \xC2\xB7 ON THE FLOOR"), "FestBandstandPick: the floor's first shelf is FEIGN · ON THE FLOOR");
 	ui_test::Expect(!ui_test::Drew(During, "PRIZE COUNTER") && !ui_test::Drew(During, "Welcome bonus"), "FestBandstandPick: the Prize Counter's lines are hidden under FEIGN's arch");
+	// The same day at 19:00, when The Spark's own TONIGHT slide has an event too (at noon it has none): the festival's pick still wins
+	// the bandstand, its label and its card drawn, The Spark's TONIGHT head not.
+	const double Evening = static_cast<double>(Feign->FirstDay) * ss::net::MinutesPerDay + 19.0 * 60.0;
+	P.At(Evening);
+	P.OpenPlay();
+	const ss::ui::DrawList Eve = P.Settled();
+	ss::net::EventInstance EvePick;
+	std::string EveLabel;
+	const bool HasEve = ri::IgniteBandstandFest(P.S.WorldMinutes(), EvePick, EveLabel);
+	ui_test::Expect(HasEve, "FestBandstandPick: FEIGN's first day has an event still to start at 19:00");
+	ui_test::Expect(HasEve && ui_test::DrewRun(Eve, EveLabel), ("FestBandstandPick: at 19:00 the bandstand draws " + EveLabel).c_str());
+	ui_test::Expect(!ui_test::Drew(Eve, "TONIGHT \xC2\xB7 BANDSTAND"), "FestBandstandPick: at 19:00 The Spark's TONIGHT slide is not kept during the festival");
+	const std::string EveCard = HostsRunAt(Eve, 230.0f, 196.0f);
+	const std::string EveCode = Short + " #" + std::to_string(HasEve ? Net.TemplateOf(EvePick).EventNo : 0) + ":";
+	ui_test::Expect(HasEve && EveCard.compare(0, EveCode.size(), EveCode) == 0, ("FestBandstandPick: at 19:00 the bandstand's card is the picked event (" + EveCode + "), not " + EveCard).c_str());
 	const double Took = std::chrono::duration<double>(std::chrono::steady_clock::now() - Began).count();
 	// The budget row (PLAN_FHUBS FH-3: the Ignite floor's chip and label <= 1k; printed here, asserted in FH-7 with F-look's attraction
 	// merged): chip 10's face drawn alone at both scales (on, the busiest) plus the shelf's label and sub-line (two text runs, no
