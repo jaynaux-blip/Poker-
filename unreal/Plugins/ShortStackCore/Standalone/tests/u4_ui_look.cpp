@@ -994,8 +994,9 @@ bool CachedLook(uint64_t Key)
  * - The motions move and settle: WRIT's letters flap in one by one; FEIGN's bob on a slow sine within 8% of the size; PUSH's gauge fills on
  *   open to the day's progress (its needle at the day's share of the bar), moving once a world minute, each minute's settled mark one
  *   cached fragment; GRIT's curtains part; RCOP's waves rise and climb through the day, cached per world minute; Summer Slam's rays turn
- *   for good; REIGN's door-light comes up on Main day only; the crests' motions run once and come back to the crest at rest; PENNANT's
- *   dome chase lights its bulbs one by one; the Clasp glints over the cached bracelet and never on the silhouette.
+ *   for good; REIGN's door-light comes up on Main day only; the crests' motions run once and come back to the crest at rest (and a
+ *   festival event's emblem never moves); PENNANT's dome chase lights its bulbs one by one; the Clasp glints over the cached bracelet and
+ *   never on the silhouette.
  * - The word-marks (§2.7.2): each look's face (BlackItalic, BoldCondensed, or the site's bold title face), the festival's name spelled in
  *   capitals where the look sets caps and as written for RiverLine's four, RunItTwice's three twice-printed (a Signal Red under-copy at
  *   the site's offset), WRIT and REIGN tracked wide (0.28 of the size), FEIGN's funhouse letters, PENNANT's stitched underline and PUSH's
@@ -1133,6 +1134,18 @@ void FestMotionsLook()
 		ExpectLook(CrestAtLook(B, 40.0f, End * 0.5).Hash != Rest && CrestAtLook(B, 40.0f, End * 0.2).Hash != Rest && CrestAtLook(B, 40.0f, End).Hash == Rest &&
 				CrestAtLook(B, 40.0f, End + 3.7).Hash == Rest && CrestAtLook(B, 40.0f, -2.0).Hash == Rest,
 			std::string("FestCrestLowDetail (motions): the crest's motion runs once and comes back to the crest at rest (") + NameLook(B) + ")");
+	}
+	{
+		// Event emblems never move: a Ring Rush ring event's emblem part-way through the ring's turn is the emblem at rest.
+		ss::net::EventTemplate T;
+		T.Id = "ring27-fl7";
+		T.Name = "$215 Ring Event";
+		T.Series = "ring27";
+		T.BuyInCents = 21500;
+		T.Ring = true;
+		const auto EmblemAt = [&T](double Time) { return RunMarkLook([&](ss::ui::Canvas& C) { ss::ui::eventart::Emblem(C, T, 200.0f, 200.0f, 40.0f, Time); }).Hash; };
+		ExpectLook(ss::net::Site(SiteId::RiverLine).FindSeries("ring27") != nullptr && EmblemAt(0.6) == EmblemAt(0.0) && EmblemAt(0.3) == EmblemAt(0.0),
+			"FestCrestLowDetail (motions): a festival event's emblem never moves (the series crest alone does)");
 	}
 	{
 		// PENNANT's dome chase (bulbs are drawn above 44 units): a halo runs round the dome bulb by bulb while it runs, none at rest.
