@@ -820,11 +820,13 @@ ArtRunLook RunArtLook(const std::function<void(ss::ui::Canvas&)>& Paint, uint64_
  * fragment each (Canvas::IsCached holds their key after the first drawing and not before; a second drawing copies exactly what the
  * first put down), at most 1.8k vertices at 54 units and 400 with Lod at 30, at both scales (1 and 1.5 pixels a unit); the two title
  * objects (Tier 1: The Pennant Ribbon, The Spade Finial) at most 0.9k, cached, unlike their trophies, and no other brand draws one;
- * each championship's trophy (RCOP, PENNANT, REIGN) stands 1.15 times each of its site's other festival trophies (measured heights,
- * within 1.12-1.18) at 30 (Lod), 54 and 96; the RCOP Cup engraves one line per edition (each field changes it, a bigger field's line
- * sits higher, twelve lines within the budget); FestPin for every grade (0, the empty socket, to 3) and mark at most 0.4k at 40 (ten
- * slots inside §2.8.7's 4k), cached, each its own; the ten trophies, the ten belts and each brand's pins pairwise distinct; each look's
- * Trophy is fest::TrophyName's (R-3). Printed: every count, height and ratio. Drawn under a skin no page wears, so its keys are its own.
+ * a trophy fills its box at every size (its measured height 0.78 of Size, within 0.03, so a fragment cached at one size is never
+ * replayed at another) and each championship's trophy (RCOP, PENNANT, REIGN) stands 1.15 times each of its site's other festival
+ * trophies (measured heights, within 1.12-1.18) at 30 (Lod), 54 and 96; the RCOP Cup engraves one line per edition (each field
+ * changes it, a bigger field's line sits higher, twelve lines within the budget); FestPin for every grade (0, the empty socket, to 3)
+ * and mark at most 0.4k at 40 (ten slots inside §2.8.7's 4k), cached, each its own; the ten trophies, the ten belts and each brand's
+ * pins pairwise distinct; each look's Trophy is fest::TrophyName's (R-3). Printed: every count, height and ratio. Drawn under a skin
+ * no page wears, so its keys are its own.
  * Planted bug: the trophy drawn live (uncached).
  */
 void FestTrophyCached()
@@ -927,7 +929,8 @@ void FestTrophyCached()
 		"FestTrophyCached: the ten trophies, the ten belts and the ten gold pins are pairwise distinct");
 	std::printf("  trophy cache: 10 trophies, 10 belts at 54 and 30 and 2 title objects, 2 scales: %zu vertices (Shared pool: 1.5M)\n", CacheVertices);
 
-	// A championship's trophy outranks its site's other festival trophies: 1.15 times their height at every size (§2.6.4, §2.7.5).
+	// A trophy fills its box at every size (0.78 of it), and a championship's outranks its site's other festival trophies: 1.15 times
+	// their height at every size (§2.6.4, §2.7.5).
 	struct SiteTrophies
 	{
 		Brand Championship;
@@ -943,9 +946,15 @@ void FestTrophyCached()
 			for (int K = 0; K < 2; ++K)
 			{
 				const auto HeightOf = [&](Brand B) {
-					return RunArtLook([B, Size, Lod](ss::ui::Canvas& C) { fa::FestTrophy(C, B, 200.0f, 200.0f, Size, 0.0, Lod); },
+					const float H = RunArtLook([B, Size, Lod](ss::ui::Canvas& C) { fa::FestTrophy(C, B, 200.0f, 200.0f, Size, 0.0, Lod); },
 						ead::FestTrophyKey(B, Size, Lod, NoFields, 0), Scales[K])
-						.Height;
+										.Height;
+					const float Fill = 0.78f * (ss::fest::IsChampionship(B) ? 1.15f : 1.0f);
+					char At[64];
+					std::snprintf(At, sizeof(At), " (%s at %.0f%s, scale %.1f: %.3f)", NameLook(B), static_cast<double>(Size), Lod ? " Lod" : "",
+						static_cast<double>(Scales[K]), static_cast<double>(H / Size));
+					ExpectLook(std::fabs(H / Size - Fill) <= 0.03f, std::string("FestTrophyCached: a trophy fills its box at every size (0.78 of it, a championship's 0.90)") + At);
+					return H;
 				};
 				const float Top = HeightOf(Site.Championship);
 				std::string Line;
