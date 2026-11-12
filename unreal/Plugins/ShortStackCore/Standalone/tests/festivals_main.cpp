@@ -26,6 +26,13 @@
 // GRIT then REIGN; the starts and the championship days' instances; the caps; the room words, codes and title forms; the screens and
 // the copy), and three checks land with F-net's halves: FestMajorFloor (T.Main only over the Wildfire Main's median pool), FestLadderSeats
 // (the step ladder's keys, seats, values and walk to the Main ticket) and FestMainTicket (the year-free Main tickets through Takes).
+//
+// G1, FN-2b (F-net; PLAN_FNET's Corrections item 1, PLAN_G1 item 39): PUSH and WRIT, the siblings' last two, inserted after FEIGN and
+// before GRIT. Their rows join every check above: the calendar (and "ten a year from 2027", one of each brand, in §2.1.3's chain),
+// the facts and the draws (PUSH 28, WRIT 14 with HighRoller, both titled), the appended templates walked in the six plans' order
+// (FEIGN, PUSH, PENNANT; WRIT, GRIT, REIGN: Ignite 2,198 and RunItTwice 2,487, PENNANT's, GRIT's and REIGN's indices shifted once),
+// the starts (WRIT's numbered never at its Main's 18:00), the caps (Standing Room Only 2,875, The Summons 2,963), the room words,
+// the codes (SPEC's PUSH and WRIT samples and PIE's "WRIT 03: $2,100 Strong Room PKO"), the screens and the copy.
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
 #include "CopyLint.h"
 #include "Trademarks.h"
@@ -167,8 +174,10 @@ double FestNetLastEndByTemplates(const ss::net::Network& N, const std::string& S
 // ------------------------------------------------------------------ FestCalendarOneStage (F-net)
 
 /** §2.1.1 rules 2-3: one stage across the three sites to 2040. FN-1: RiverLine's four (RCOP alone in 2026); the rival rows join as
- *  FN-2a, FN-3 and FN-2b build them ("ten a year from 2027" is FN-2b's). Planted: RCOP 2027 opening Oct 14 (inside Micro Madness);
- *  PENNANT opening Mar 29 (9 clear days after Ring Rush); REIGN opening Jul 25 (over RiverLine's high-roller list). */
+ *  FN-2a, FN-3 and FN-2b build them ("ten a year from 2027" is FN-2b's: every year 2027-2040 holds the ten brands once each, in
+ *  §2.1.3's chain, and 2026 RCOP and FEIGN). Planted: RCOP 2027 opening Oct 14 (inside Micro Madness); PENNANT opening Mar 29 (9
+ *  clear days after Ring Rush); REIGN opening Jul 25 (over RiverLine's high-roller list); PUSH moved to Sep 10 (4 clear days after
+ *  Summer Slam, FN-2b); WRIT's first edition in 2028 (nine in 2027, FN-2b). */
 void FestCalendarOneStageNet()
 {
 	namespace fest = ss::fest;
@@ -271,9 +280,9 @@ void FestCalendarOneStageNet()
 	Expect(Four && Once, "RiverLine's four every year 2027-2040 (Ring Rush, The Championship Online, Summer Slam, RCOP, in that order) and RCOP alone in 2026; "
 						 "every edition has a brand and no brand runs twice in a year");
 
-	// FN-2a, FN-3: the rival festivals built so far, each on its host every year from its first edition to 2040 (FEIGN on Ignite from
-	// 2026, GRIT on RunItTwice from 2027; FN-3: PENNANT on Ignite and REIGN on RunItTwice from 2027, whose windows have zero slack
-	// against the series beside them; PUSH and WRIT join at FN-2b, and "ten a year from 2027" with them).
+	// FN-2a, FN-3, FN-2b: the rival festivals, each on its host every year from its first edition to 2040 (FEIGN on Ignite from 2026,
+	// GRIT on RunItTwice from 2027; FN-3: PENNANT on Ignite and REIGN on RunItTwice from 2027, whose windows have zero slack against the
+	// series beside them; FN-2b: PUSH on Ignite and WRIT on RunItTwice from 2027).
 	struct Rival
 	{
 		fest::Brand Which;
@@ -281,7 +290,7 @@ void FestCalendarOneStageNet()
 		int FirstYear;
 	};
 	const Rival Rivals[] = {{fest::Brand::Feign, net::SiteId::Ignite, 2026}, {fest::Brand::Grit, net::SiteId::RunItTwice, 2027}, {fest::Brand::Pennant, net::SiteId::Ignite, 2027},
-		{fest::Brand::Reign, net::SiteId::RunItTwice, 2027}};
+		{fest::Brand::Reign, net::SiteId::RunItTwice, 2027}, {fest::Brand::Push, net::SiteId::Ignite, 2027}, {fest::Brand::Writ, net::SiteId::RunItTwice, 2027}};
 	std::string RivalBad;
 	for (const Rival& R : Rivals)
 	{
@@ -305,8 +314,29 @@ void FestCalendarOneStageNet()
 			RivalBad = std::string(": ") + fest::BrandKey(R.Which) + " has " + std::to_string(RivalYears.size()) + " editions" + (OnSite ? "" : ", not all on its host");
 		}
 	}
-	Expect(RivalBad.empty(), "FEIGN on Ignite every year 2026-2040, GRIT on RunItTwice, PENNANT on Ignite and REIGN on RunItTwice every year 2027-2040, one edition a year" +
-								 RivalBad);
+	Expect(RivalBad.empty(), "FEIGN on Ignite every year 2026-2040, GRIT on RunItTwice, PENNANT on Ignite, REIGN on RunItTwice, PUSH on Ignite and WRIT on RunItTwice every "
+							 "year 2027-2040, one edition a year" + RivalBad);
+
+	// FN-2b, "ten a year from 2027" (SPEC.md §2.15.1, PLAN_G1 item 39): every year 2027-2040 holds exactly the ten brands, once each, in
+	// §2.1.3's chain (WRIT, Ring Rush, PENNANT, GRIT, The Championship Online, REIGN, Summer Slam, PUSH, RCOP, FEIGN), and 2026 holds
+	// RCOP and FEIGN only.
+	const std::vector<std::string> Chain = {"writ", "ring", "pennant", "grit", "tco", "reign", "slam", "push", "rcop", "feign"};
+	std::map<int, std::vector<std::string>> ByYear;
+	for (const fest::Festival& F : All)
+	{
+		ByYear[F.Year].push_back(fest::BrandKey(F.Which));
+	}
+	std::string TenBad = ByYear[2026] == std::vector<std::string>{"rcop", "feign"} ? std::string() : "; 2026 holds " + std::to_string(ByYear[2026].size());
+	for (int Year = 2027; Year <= fest::kLastYear; ++Year)
+	{
+		if (ByYear[Year] != Chain && TenBad.empty())
+		{
+			TenBad = "; " + std::to_string(Year) + " holds " + std::to_string(ByYear[Year].size()) + " editions" + (ByYear[Year].size() == Chain.size() ? " out of the chain's order" : "");
+		}
+	}
+	Expect(TenBad.empty() && ByYear.size() == static_cast<size_t>(fest::kLastYear - fest::kFirstYear + 1),
+		"ten a year from 2027: every year 2027-2040 holds the ten brands once each in the chain's order (WRIT, Ring Rush, PENNANT, GRIT, The Championship Online, REIGN, Summer "
+		"Slam, PUSH, RCOP, FEIGN), 2026 RCOP and FEIGN" + TenBad);
 }
 
 // ------------------------------------------------------------------ FestCalendarFacts (F-net's half: no world)
@@ -325,7 +355,7 @@ struct FestNetFacts
 	bool Flagship;
 };
 
-/** §2.1.3's rows: RiverLine's four (FN-1), FEIGN and GRIT (FN-2a), PENNANT and REIGN (FN-3; PUSH and WRIT join at FN-2b). */
+/** §2.1.3's rows: RiverLine's four (FN-1), FEIGN and GRIT (FN-2a), PENNANT and REIGN (FN-3), PUSH and WRIT (FN-2b). */
 const FestNetFacts FestNetRiverLine[] = {
 	{ss::fest::Brand::RingRush, ss::net::SiteId::RiverLine, 3, 6, 14, 2027, 14, 16 * 60, "Ring Rush", "ring", 40, false},
 	{ss::fest::Brand::Tco, ss::net::SiteId::RiverLine, 6, 4, 19, 2027, 19, 18 * 60, "The Championship Online", "tco", 70, false},
@@ -335,6 +365,8 @@ const FestNetFacts FestNetRiverLine[] = {
 	{ss::fest::Brand::Feign, ss::net::SiteId::Ignite, 11, 30, 10, 2026, 10, 18 * 60, "FEIGN", "feign", 32, false},
 	{ss::fest::Brand::Pennant, ss::net::SiteId::Ignite, 3, 30, 13, 2027, 13, 18 * 60, "PENNANT", "pennant", 50, false},
 	{ss::fest::Brand::Reign, ss::net::SiteId::RunItTwice, 7, 26, 13, 2027, 13, 18 * 60, "REIGN", "reign", 45, false},
+	{ss::fest::Brand::Push, ss::net::SiteId::Ignite, 9, 16, 10, 2027, 10, 18 * 60, "PUSH", "push", 28, false},
+	{ss::fest::Brand::Writ, ss::net::SiteId::RunItTwice, 1, 22, 10, 2027, 10, 18 * 60, "WRIT", "writ", 14, false},
 };
 
 /** A championship edition's satellites in ladder order (§2.1.2, §2.3.2): Step 1's two templates, Step 2's, Step 3's, the Mega and
@@ -397,7 +429,8 @@ void FestNetPhases(const ss::fest::Festival& F, std::string& Bad)
 }
 
 /** §2.1.2-§2.1.4, §2.10 item 1 with no world. Planted: Buildup starting at T-6; PassFestival answering in Closing; RCOP's Flagship
- *  false; Micro Madness 2026 left at Draw 0; Top Floor Series without HighRoller; PENNANT's first edition at 2026 (FN-3). */
+ *  false; Micro Madness 2026 left at Draw 0; Top Floor Series without HighRoller; PENNANT's first edition at 2026 (FN-3); WRIT without
+ *  HighRoller (FN-2b). */
 void FestCalendarFactsNet()
 {
 	namespace fest = ss::fest;
@@ -405,7 +438,7 @@ void FestCalendarFactsNet()
 	const std::vector<fest::Festival>& All = fest::All();
 
 	// Each brand's site, window, Main day and start, first edition and edition numbers, ids, names and flags (a rival's ids are its
-	// site's key, the brand and the year: "ignite.feign26"; its satellites the edition's Mega and Last Chance).
+	// site's key, the brand and the year: "ignite.feign26"; its satellites the edition's Mega and Last Chance, WRIT's The Summons).
 	for (const FestNetFacts& B : FestNetRiverLine)
 	{
 		std::vector<const fest::Festival*> Rows;
@@ -428,6 +461,7 @@ void FestCalendarFactsNet()
 			const int MainDay = First + B.MainNo - 1;
 			const std::vector<std::string> Seats = B.Which == fest::Brand::Rcop ? std::vector<std::string>{"step4", "mega-rcop"}
 				: fest::IsChampionship(B.Which) ? FestNetLadder(Id)
+				: B.Which == fest::Brand::Writ ? std::vector<std::string>{Id + "-sat1"}
 				: B.Site != net::SiteId::RiverLine ? std::vector<std::string>{Id + "-sat1", Id + "-sat2"}
 												   : std::vector<std::string>{};
 			const bool Ok = F.Site == B.Site && F.Year == Year && F.Edition == Year - B.FirstYear + 1 && F.FirstDay == First && F.LastDay == First + B.Days - 1 &&
@@ -467,6 +501,23 @@ void FestCalendarFactsNet()
 			   GritSr->Title == "The Grinders' RunItTwice" && !fest::FestivalOf("runittwice.grit26"),
 		"GRIT 2027: RunItTwice, May 12-23, its Main on night 12 at 6:00 PM, edition I (no 2026 edition), 27 events (24 shows and 3 headliners), "
 		"titled The Grinders' RunItTwice");
+	// FN-2b: the siblings' last two (§2.1.3): PUSH 2027 on Ignite (Sep 16-25, 21 events, "Pier's Upbeat Summer Hold'em") and WRIT 2027 on
+	// RunItTwice (Jan 22-31, 13 events: twelve numbered and the Main; "The Winter RunItTwice"; its one satellite The Summons), each
+	// edition I, no 2026 edition.
+	const fest::Festival* Push = fest::FestivalOf("ignite.push27");
+	const fest::Festival* Writ = fest::FestivalOf("runittwice.writ27");
+	const net::SeriesInfo* PushSr = net::Site(net::SiteId::Ignite).FindSeries("ignite.push27");
+	const net::SeriesInfo* WritSr = net::Site(net::SiteId::RunItTwice).FindSeries("runittwice.writ27");
+	Expect(Push && Push->Site == net::SiteId::Ignite && Push->Name == "PUSH 2027" && Push->Edition == 1 && Push->FirstDay == ss::world::DayOn(2027, 9, 16) &&
+			   Push->LastDay == ss::world::DayOn(2027, 9, 25) && Push->MainStart == FestNetAt(Push->LastDay, 18 * 60) && Push->MainId == "ignite.push27-main" && PushSr &&
+			   PushSr->Events == 21 && PushSr->Title == "Pier's Upbeat Summer Hold'em" && !PushSr->HighRoller && !fest::FestivalOf("ignite.push26") && Writ &&
+			   Writ->Site == net::SiteId::RunItTwice && Writ->Name == "WRIT 2027" && Writ->Edition == 1 && Writ->FirstDay == ss::world::DayOn(2027, 1, 22) && Writ->FirstDay == 109 &&
+			   Writ->LastDay == ss::world::DayOn(2027, 1, 31) && Writ->MainStart == FestNetAt(Writ->LastDay, 18 * 60) && WritSr && WritSr->Events == 13 &&
+			   WritSr->Title == "The Winter RunItTwice" && WritSr->HighRoller && Writ->Satellites == std::vector<std::string>{"runittwice.writ27-sat1"} &&
+			   !fest::FestivalOf("runittwice.writ26"),
+		"PUSH 2027: Ignite, Sep 16-25, its Main ignite.push27-main on day 10 at 6:00 PM, 21 events, titled Pier's Upbeat Summer Hold'em; WRIT 2027: RunItTwice, Jan 22-31 "
+		"(days 109-118), its Main on day 10 at 6:00 PM, 13 events, titled The Winter RunItTwice, a high-roller series, its one satellite The Summons; each edition I (no 2026 "
+		"edition)");
 	// FN-3: the championships (§2.1.3's v1.6 rows): the Main on day 13 at 18:00, the Micro Main on day 11 and the Mini on day 12, both
 	// 18:00; edition I in 2027 (2026's windows fell before Night One); no full title.
 	const net::Network& IgNet = net::Site(net::SiteId::Ignite);
@@ -534,18 +585,18 @@ void FestCalendarFactsNet()
 			std::to_string(net::DayOf(RcopEnd)) + ": " + LastEvent + "), at or after its Main's (" + net::TimeLabel(MainEnd) + "), in the early hours of day 35");
 	bool Ends = true;
 	for (const char* Id : {"ring27", "tco27", "slam27", "rcop27", "ring40", "rcop40", "ignite.feign26", "runittwice.grit27", "ignite.feign40", "ignite.pennant27",
-			 "runittwice.reign27", "ignite.pennant40", "runittwice.reign40"})
+			 "runittwice.reign27", "ignite.pennant40", "runittwice.reign40", "ignite.push27", "runittwice.writ27", "ignite.push40", "runittwice.writ40"})
 	{
 		const fest::Festival* F = fest::FestivalOf(Id);
 		Ends = Ends && F && fest::LastEnd(*F) == FestNetLastEndByTemplates(net::Site(F->Site), Id) && fest::LastEnd(*F) >= F->MainStart;
 	}
 	Expect(Ends, "LastEnd agrees with each event's own scheduled finish (every run) on Ring Rush, The Championship Online, Summer Slam and RCOP 2027 and on 2040's, "
-				 "FEIGN 2026 and 2040, GRIT 2027, PENNANT and REIGN 2027 and 2040");
+				 "FEIGN 2026 and 2040, GRIT 2027, PENNANT, REIGN, PUSH and WRIT 2027 and 2040");
 
 	// PhaseOf with no world at every boundary, and PassFestival only in Announced, Buildup and Live.
 	std::string Phases;
 	for (const char* Id : {"rcop", "ring27", "tco27", "slam27", "rcop27", "slam40", "ignite.feign26", "runittwice.grit27", "ignite.feign40", "ignite.pennant27",
-			 "runittwice.reign27"})
+			 "runittwice.reign27", "ignite.push27", "runittwice.writ27"})
 	{
 		if (const fest::Festival* F = fest::FestivalOf(Id))
 		{
@@ -567,11 +618,12 @@ void FestCalendarFactsNet()
 		bool HighRoller;
 		bool Festival;
 		bool Flagship;
-		const char* Title = ""; // SeriesInfo::Title (§2.11 N17-N19): GRIT's "The Grinders' RunItTwice" (FN-2a); "" on every other
+		const char* Title = ""; // SeriesInfo::Title (§2.11 N17-N19): GRIT's (FN-2a), PUSH's and WRIT's (FN-2b); "" on every other
 	};
 	const DrawRow Draws[] = {
 		{"rcop", 110, false, true, true}, {"slam", 80, false, true, true}, {"tco", 70, false, true, false}, {"ring", 40, false, true, false},
 		{"feign", 32, false, true, false}, {"grit", 32, false, true, false, "The Grinders' RunItTwice"}, {"pennant", 50, false, true, false}, {"reign", 45, false, true, false},
+		{"push", 28, false, true, false, "Pier's Upbeat Summer Hold'em"}, {"writ", 14, true, true, false, "The Winter RunItTwice"},
 		{"mm", 22, false, false, false}, {"win", 12, false, false, false}, {"spr", 12, false, false, false}, {"hol", 12, false, false, false},
 		{"hrs", 4, true, false, false}, {"openspring", 10, false, false, false}, {"open", 10, false, false, false}, {"wildfeb", 8, false, false, false},
 		{"wildaug", 8, false, false, false}, {"ironworks", 6, false, false, false},
@@ -602,8 +654,8 @@ void FestCalendarFactsNet()
 	}
 	Expect(Seen > 0 && Wrong.empty(),
 		"every series on every site (" + std::to_string(Seen) + ") carries the SPEC's 3.2.1 Draw (RCOP 110, Summer Slam 80, The Championship Online 70, PENNANT 50, REIGN 45, "
-		"Ring Rush 40, FEIGN 32, GRIT 32, Micro Madness 22, the seasonal 12, the Open 10, Wildfire 8, Ironworks 6, Top Floor 4 with HighRoller); Festival and Brand on the "
-		"festivals, Flagship on RCOP and Summer Slam (none of the six rivals: L2), GRIT's Title" + Wrong);
+		"Ring Rush 40, FEIGN 32, GRIT 32, PUSH 28, Micro Madness 22, WRIT 14 with HighRoller, the seasonal 12, the Open 10, Wildfire 8, Ironworks 6, Top Floor 4 with "
+		"HighRoller); Festival and Brand on the festivals, Flagship on RCOP and Summer Slam (none of the six rivals: L2), GRIT's, PUSH's and WRIT's Titles" + Wrong);
 
 	// §2.9.2 (FN-2a): a rival's "series a week out" post skips a festival series (it is announced at T-30, FN-7's posts), while a
 	// plain series keeps it: Ignite's News a day after FEIGN 2026's T-7 holds no FEIGN post, and a day after Wildfire Winter 2027's
@@ -688,7 +740,8 @@ void FestChampTitlesNet()
 		!fest::IsTitleTemplate("ignite.pennant27-hr") && !fest::IsTitleTemplate("ignite.pennant27-on") && !fest::IsTitleTemplate("ignite.pennant27-mega") &&
 		!fest::IsTitleTemplate("ignite.pennant27-33") && !fest::IsTitleTemplate("ignite.pennant27-s3a") && !fest::IsTitleTemplate("ignite.pennant27-sat1") &&
 		!fest::IsTitleTemplate("ignite.pennant-main") && !fest::IsTitleTemplate("runittwice.reign-main") && !fest::IsTitleTemplate("runittwice.reign27-27") &&
-		!fest::IsTitleTemplate("runittwice.reign40-s1b") && !fest::IsTitleTemplate("ignite.feign27-hr");
+		!fest::IsTitleTemplate("runittwice.reign40-s1b") && !fest::IsTitleTemplate("ignite.feign27-hr") && fest::IsTitleTemplate("ignite.push27-main") &&
+		fest::IsTitleTemplate("runittwice.writ27-main") && !fest::IsTitleTemplate("ignite.push27-mega") && !fest::IsTitleTemplate("runittwice.writ27-sat1");
 	Expect(Bad.empty() && Rcop26 && SlamOne && Agree && NotTitles && Majors && Champs && Championships == 15 + 14 + 14,
 		"every championship edition (" + std::to_string(Championships) + ": RCOP's 15, rcop-main, rcop-mini, rcop-micro in 2026; PENNANT's and REIGN's 14 each) has TitleIds "
 		"{main, mini, micro}, every other {MainId} (Summer Slam's, though its Mini is a major); IsTitleTemplate holds exactly the " + std::to_string(Titles) +
@@ -765,19 +818,30 @@ std::vector<std::string> FestNetRooms(ss::fest::Brand B)
 		return {"Encore", "Second House", "Footlights", "Stage Door", "Dress Circle", "Box Office", "Opening Act", "Overture", "Interval", "Front Row", "Spotlight",
 			"Understudy"};
 	}
+	if (B == ss::fest::Brand::Push)
+	{
+		return {"Sea Spray", "Promenade", "Striker", "Boardwalk", "Saltwater", "Iron Pier", "Gull's Rest", "Tide Clock", "Ferris Light", "Lifebuoy", "Harbour Lamp",
+			"Deckchair", "Rock Candy", "Breakwater", "Pier End", "Seawall", "Anchor Rope", "Shell Cove"};
+	}
+	if (B == ss::fest::Brand::Writ)
+	{
+		return {"Long Gallery", "Seal Room", "Map Room", "Reading Room", "Strong Room", "Writing Room", "Clerk's Office", "Hilary Term", "Gatehouse", "Back Stair",
+			"Morning Room", "Witness Box"};
+	}
 	return {};
 }
 
 /** The plan facts the checks hold the rival festivals to (SPEC v1.7 §2.3.2): numbered events, the most a day, headliners and
- *  satellite templates (a championship's steps run on two days: 3 x 2 + 2), each site's in its plan order (§2.3.1: FEIGN then
- *  PENNANT on Ignite, GRIT then REIGN on RunItTwice; FN-2b inserts PUSH after FEIGN and WRIT before GRIT). */
+ *  satellite templates (a championship's steps run on two days: 3 x 2 + 2), each site's in its plan order (§2.3.1: FEIGN, PUSH and
+ *  PENNANT on Ignite, WRIT, GRIT and REIGN on RunItTwice; FN-2b inserted PUSH after FEIGN and WRIT before GRIT). */
 struct FestNetPlan
 {
 	ss::fest::Brand Which;
 	int Numbered, PerDay, Headliners, Satellites;
 	ss::net::SiteId Site;
 };
-const FestNetPlan FestNetPlans[] = {{ss::fest::Brand::Feign, 24, 3, 3, 2, ss::net::SiteId::Ignite}, {ss::fest::Brand::Pennant, 33, 3, 6, 8, ss::net::SiteId::Ignite},
+const FestNetPlan FestNetPlans[] = {{ss::fest::Brand::Feign, 24, 3, 3, 2, ss::net::SiteId::Ignite}, {ss::fest::Brand::Push, 18, 2, 3, 2, ss::net::SiteId::Ignite},
+	{ss::fest::Brand::Pennant, 33, 3, 6, 8, ss::net::SiteId::Ignite}, {ss::fest::Brand::Writ, 12, 2, 1, 1, ss::net::SiteId::RunItTwice},
 	{ss::fest::Brand::Grit, 12, 1, 3, 2, ss::net::SiteId::RunItTwice}, {ss::fest::Brand::Reign, 24, 2, 6, 8, ss::net::SiteId::RunItTwice}};
 
 const FestNetPlan* FestNetPlanOf(ss::fest::Brand B)
@@ -832,12 +896,13 @@ std::string FestNetFinalTarget(const ss::net::Network& N, const std::string& Tic
 }
 
 /** §2.3.1, §2.3.4: the festivals append after every existing rival template (the prefixes hash to Phase A's constants,
- *  tests/sites_main.cpp:362-363), plan by plan in each site's order, edition by edition: FEIGN's 15 x 29 = 435 then PENNANT's 14 x
- *  47 = 658 on Ignite, GRIT's 14 x 17 = 238 then REIGN's 14 x 38 = 532 on RunItTwice (FEIGN 2026 at Ignite's 783-811, the
- *  fixture's FEIGN I); each edition in the fixed order (numbered No 1..N, the headliners in calendar order, the satellites in ladder
- *  order); ids unique across the three sites; every satellite's seat chains to its edition's Main ticket, valued at the buy-in of
- *  the rung it seats. Planted: the festival loop placed before the series loop; the championship plan placed before FEIGN; a Step 2
- *  row seating into a ticket no template takes. */
+ *  tests/sites_main.cpp:362-363), plan by plan in each site's order, edition by edition: FEIGN's 15 x 29 = 435, PUSH's 14 x 23 = 322
+ *  and PENNANT's 14 x 47 = 658 on Ignite (2,198), WRIT's 14 x 14 = 196, GRIT's 14 x 17 = 238 and REIGN's 14 x 38 = 532 on RunItTwice
+ *  (2,487) (FEIGN 2026 at Ignite's 783-811, the fixture's FEIGN I, PUSH 2027 at 1,218, PENNANT 2027 at 1,540; WRIT 2027 at
+ *  RunItTwice's 1,521, GRIT 2027 at 1,717, REIGN 2027 at 1,955); each edition in the fixed order (numbered No 1..N, the headliners in
+ *  calendar order, the satellites in ladder order); ids unique across the three sites; every satellite's seat chains to its
+ *  edition's Main ticket, valued at the buy-in of the rung it seats. Planted: the festival loop placed before the series loop; the
+ *  championship plan placed before FEIGN; a Step 2 row seating into a ticket no template takes; PUSH appended after PENNANT (FN-2b). */
 void FestTemplatesAppendedNet()
 {
 	namespace fest = ss::fest;
@@ -857,7 +922,7 @@ void FestTemplatesAppendedNet()
 		net::SiteId Id;
 		size_t Prefix, Appended;
 	};
-	const SiteRow Sites[] = {{&Ig, net::SiteId::Ignite, 783, 435 + 658}, {&Rt, net::SiteId::RunItTwice, 1521, 238 + 532}};
+	const SiteRow Sites[] = {{&Ig, net::SiteId::Ignite, 783, 435 + 322 + 658}, {&Rt, net::SiteId::RunItTwice, 1521, 196 + 238 + 532}};
 	std::string Bad;
 	for (const SiteRow& S : Sites)
 	{
@@ -924,11 +989,15 @@ void FestTemplatesAppendedNet()
 			Bad += Bad.empty() ? std::string(": ") + net::KeyOf(S.Id) + " has " + std::to_string(S.N->Templates().size()) + " templates, editions end at " + std::to_string(At) : "";
 		}
 	}
-	const bool Feign26 = Ig.Templates().size() > 811 && Ig.Templates()[783].Id == "ignite.feign26-1" && Ig.Templates()[811].Id == "ignite.feign26-sat2";
+	const auto IdAt = [](const net::Network& N, size_t I) { return I < N.Templates().size() ? N.Templates()[I].Id : std::string(); };
+	const bool Feign26 = IdAt(Ig, 783) == "ignite.feign26-1" && IdAt(Ig, 811) == "ignite.feign26-sat2" && IdAt(Ig, 1218) == "ignite.push27-1" &&
+		IdAt(Ig, 1240) == "ignite.push27-sat2" && IdAt(Ig, 1540) == "ignite.pennant27-1" && IdAt(Rt, 1521) == "runittwice.writ27-1" && IdAt(Rt, 1534) == "runittwice.writ27-sat1" &&
+		IdAt(Rt, 1717) == "runittwice.grit27-1" && IdAt(Rt, 1955) == "runittwice.reign27-1";
 	Expect(Bad.empty() && Feign26,
-		"Ignite gains FEIGN's 15 x 29 = 435 and PENNANT's 14 x 47 = 658 templates (1,876) and RunItTwice GRIT's 14 x 17 = 238 and REIGN's 14 x 38 = 532 (2,291), after every "
-		"existing template, plan by plan (FEIGN 2026 at Ignite's 783-811), each edition in order: numbered No 1..N, the headliners in calendar order numbered after them, the "
-		"satellites in ladder order, each seat chaining to its Main's ticket at the rung's buy-in (no series, no number, no seat guarantee)" + Bad);
+		"Ignite gains FEIGN's 15 x 29 = 435, PUSH's 14 x 23 = 322 and PENNANT's 14 x 47 = 658 templates (2,198) and RunItTwice WRIT's 14 x 14 = 196, GRIT's 14 x 17 = 238 and "
+		"REIGN's 14 x 38 = 532 (2,487), after every existing template, plan by plan (FEIGN 2026 at Ignite's 783-811, PUSH 2027 at 1,218-1,240, PENNANT 2027 from 1,540; WRIT "
+		"2027 at RunItTwice's 1,521-1,534, GRIT 2027 from 1,717, REIGN 2027 from 1,955), each edition in order: numbered No 1..N, the headliners in calendar order numbered "
+		"after them, the satellites in ladder order, each seat chaining to its Main's ticket at the rung's buy-in (no series, no number, no seat guarantee)" + Bad);
 
 	// Ids unique across the three sites.
 	std::set<std::string> Ids;
@@ -950,8 +1019,10 @@ void FestTemplatesAppendedNet()
  *  event share a minute on one day (every run counted); no satellite starts at a headliner's minute (one beside a numbered event is
  *  allowed); no day holds more numbered events than the plan's PerDay. FN-2a: FEIGN and GRIT, every edition; FN-3: PENNANT and REIGN
  *  (0 violations 2027-2040; REIGN's numbered starts 14:00 and 17:00, PENNANT's 15:00, 17:30 and 20:00), and the championship days'
- *  instances §2.14 gives world_u4's row (PENNANT's day 10 holds 14 of its own, REIGN's 11). Planted: v1.0's (No - 1) % PerDay slot;
- *  REIGN numbered at 15:00 + Slot x 180 (18:00 meets the Micro Main on day 11). */
+ *  instances §2.14 gives world_u4's row (PENNANT's day 10 holds 14 of its own, REIGN's 11); FN-2b: PUSH (15:00 and 17:30; its #18 and
+ *  Main Last Chance together at 15:00 on day 10) and WRIT (15:00 and 18:00; its #12 alone on Main day at 15:00, never at the Main's
+ *  18:00). Planted: v1.0's (No - 1) % PerDay slot; REIGN numbered at 15:00 + Slot x 180 (18:00 meets the Micro Main on day 11); WRIT
+ *  numbered at 18:00 + Slot x 180 (its #12 meets the Main, FN-2b). */
 void FestStartsApartNet()
 {
 	namespace fest = ss::fest;
@@ -1032,6 +1103,29 @@ void FestStartsApartNet()
 	const bool Samples = F8 && F9 && F10 && F16 && F17 && Top && G7 && F8->StartMinute == 20 * 60 && F9->StartMinute == 15 * 60 && F10->StartMinute == 17 * 60 + 30 &&
 		F16->StartMinute == 18 * 60 && F17->StartMinute == 21 * 60 + 30 && F16->OnlyDay == Top->OnlyDay && Top->StartMinute == 20 * 60 && F16->OnlyDay == 62 &&
 		FestNetRuns(*G7) == std::vector<int>{19 * 60, 22 * 60} && G7->OnlyDay == ss::world::DayOn(2027, 5, 18);
+	// FN-2b: PUSH's and WRIT's numbered starts, every edition, and their Main days.
+	std::set<int> PushStarts, WritStarts;
+	for (const fest::Festival* F : FestNetRivalEditions())
+	{
+		const FestNetPlan* Plan = FestNetPlanOf(F->Which);
+		for (const net::EventTemplate* T : FestNetEditionTemplates(*F))
+		{
+			if (Plan && T->Fmt != net::Format::Satellite && T->EventNo <= Plan->Numbered && (F->Which == fest::Brand::Push || F->Which == fest::Brand::Writ))
+			{
+				(F->Which == fest::Brand::Push ? PushStarts : WritStarts).insert(T->StartMinute);
+			}
+		}
+	}
+	const net::EventTemplate* W12 = Rt.FindTemplate("runittwice.writ27-12");
+	const net::EventTemplate* WMain = Rt.FindTemplate("runittwice.writ27-main");
+	const net::EventTemplate* W2 = Rt.FindTemplate("runittwice.writ27-2");
+	const net::EventTemplate* P18 = Ig.FindTemplate("ignite.push27-18");
+	const net::EventTemplate* PLast = Ig.FindTemplate("ignite.push27-sat2");
+	const bool Siblings = PushStarts == std::set<int>{15 * 60, 17 * 60 + 30} && WritStarts == std::set<int>{15 * 60, 18 * 60} && W12 && WMain && W2 && P18 && PLast &&
+		W12->OnlyDay == WMain->OnlyDay && W12->StartMinute == 15 * 60 && WMain->StartMinute == 18 * 60 && W2->OnlyDay == 109 && W2->StartMinute == 18 * 60 &&
+		P18->OnlyDay == PLast->OnlyDay && P18->StartMinute == 15 * 60 && PLast->StartMinute == 15 * 60;
+	Expect(Siblings, "PUSH's numbered start at 3:00 and 5:30 PM, WRIT's at 3:00 and 6:00 PM; WRIT 2027's No 12 is alone on its Main day at 3:00 PM, never at the Main's "
+					 "6:00 PM (its No 2 takes 6:00 PM on Jan 22, a day with no headliner); PUSH 2027's No 18 and its Main Last Chance share 3:00 PM on day 10");
 	// FN-3: the championships' numbered starts, every edition, and their day 10 (§2.14).
 	std::set<int> PennantStarts, ReignStarts;
 	for (const fest::Festival* F : FestNetRivalEditions())
@@ -1069,7 +1163,7 @@ void FestStartsApartNet()
 	const bool Champs = PennantStarts == std::set<int>{15 * 60, 17 * 60 + 30, 20 * 60} && ReignStarts == std::set<int>{14 * 60, 17 * 60} && Pen10 == 14 && Reign10 == 11 &&
 		Pen27 && Pen27->FirstDay + 9 == 185 && Reign27 && Reign27->FirstDay + 9 == 303;
 	Expect(Days > 0 && Bad.empty() && Samples && Champs,
-		"FEIGN, GRIT, PENNANT and REIGN, every edition (" + std::to_string(Days) + " festival days): numbered starts rise with No inside a day, no headliner shares a minute with another "
+		"FEIGN, PUSH, PENNANT, WRIT, GRIT and REIGN, every edition (" + std::to_string(Days) + " festival days): numbered starts rise with No inside a day, no headliner shares a minute with another "
 		"event, no two numbered runs share one, no satellite starts at a headliner's minute, no day over its PerDay; FEIGN 2026's No 8 at 8:00 PM, No 9 and 10 at 3:00 and 5:30 PM, "
 		"No 16 at 6:00 PM on Dec 6 (The Big Top's 8:00 PM) and No 17 at 9:30 PM; GRIT 2027's No 7 on May 18 at 7:00 and 10:00 PM; PENNANT's numbered at 3:00, 5:30 and 8:00 PM "
 		"and REIGN's at 2:00 and 5:00 PM only; PENNANT 2027's day 10 (world day 185) holds 14 of its instances (3 numbered, the High Roller, Step 1 x 8, Step 3 x 2) and "
@@ -1081,7 +1175,8 @@ void FestStartsApartNet()
 /** §2.3.3: until G3 every rival festival template's largest draw stays under 3,000, every edition to 2040: a series event's
  *  Field x Scale x 1.15, a satellite's Field x Scale x the site's largest day factor x 1.25 (Make's draws). FN-2a: FEIGN and GRIT
  *  (The Big Top 2,760 and The Matinee 2,875); FN-3: PENNANT and REIGN, whose megas are the tightest (General Admission 2,990.1, The
- *  Side Door 2,989.8). Planted: The Big Top at 2,700 entries; General Admission at 2,610 entries (3,001.5). */
+ *  Side Door 2,989.8); FN-2b: PUSH and WRIT (Standing Room Only 2,875, The Summons 2,963 at the Sunday factor 1.5). Planted: The Big
+ *  Top at 2,700 entries; General Admission at 2,610 entries (3,001.5); The Summons at 1,700 entries (3,187, FN-2b). */
 void FestRivalCapG1Net()
 {
 	namespace fest = ss::fest;
@@ -1123,6 +1218,21 @@ void FestRivalCapG1Net()
 	const bool Megas = Largest1(net::SiteId::Ignite, "ignite.pennant27-mega") == 2990.1 && Largest1(net::SiteId::RunItTwice, "runittwice.reign27-mega") == 2989.8 &&
 		Largest1(net::SiteId::Ignite, "ignite.pennant40-mega") == 2990.1;
 	Expect(Megas, "the championship megas' largest draws are General Admission's 2,990.1 and The Side Door's 2,989.8, every edition");
+	// FN-2b: Standing Room Only (a series event, x 1.15) and The Summons (a satellite: RunItTwice's Sunday factor x 1.25), every edition.
+	double SummonsDay = 0.0;
+	for (int Wd = 0; Wd < 7; ++Wd)
+	{
+		SummonsDay = std::max(SummonsDay, net::netsites_detail::NetSitesDayFactor(net::Def(net::SiteId::RunItTwice), Wd));
+	}
+	const auto Summons = [SummonsDay](const char* Id) {
+		const net::EventTemplate* T = net::Site(net::SiteId::RunItTwice).FindTemplate(Id);
+		return T ? std::round(static_cast<double>(T->Field) * net::Def(net::SiteId::RunItTwice).Traffic.Scale * SummonsDay * 1.25 * 10.0) / 10.0 : -1.0;
+	};
+	std::printf("festivals: Standing Room Only's largest draw %.1f, The Summons' %.1f (day factor %.2f)\n", Largest1(net::SiteId::Ignite, "ignite.push27-mega"),
+		Summons("runittwice.writ27-sat1"), SummonsDay);
+	const bool Siblings = std::lround(Largest1(net::SiteId::Ignite, "ignite.push27-mega")) == 2875 && std::lround(Largest1(net::SiteId::Ignite, "ignite.push40-mega")) == 2875 &&
+		std::lround(Summons("runittwice.writ27-sat1")) == 2963 && std::lround(Summons("runittwice.writ40-sat1")) == 2963 && SummonsDay == 1.5;
+	Expect(Siblings, "Standing Room Only's largest draw rounds to 2,875 and The Summons' to 2,963 (1,580 entries x RunItTwice's Sunday 1.5 x 1.25), every edition");
 	Expect(Templates > 0 && Over == 0,
 		"every rival festival template's largest draw is under 3,000 every edition (" + std::to_string(Templates) + " templates; largest " + std::to_string(Largest) + ", " + Which +
 			")" + FirstOver);
@@ -1134,9 +1244,10 @@ void FestRivalCapG1Net()
  *  (Fnv1a(SeriesId) + (No - 1) x 7) % RoomCount, skipping words already used; no word repeats inside an edition; FEIGN 2026's #7 Tilt
  *  Floor, #8 Air Jets, #9 Swing Boats, #10 Mirror Maze, #11 Carousel, #12 Rope Bridge, #16 Ticket Booth; GRIT 2027's #7 Dress Circle
  *  and #10 Second House; FN-3: PENNANT 2027's #10 Can of Corn and REIGN 2027's 03 Sash Window, and a championship's three titles in
- *  caps on Ignite (MICRO MAIN EVENT, MINI MAIN EVENT, MAIN EVENT) and in the bracket on RunItTwice; every word passes both trademark
- *  tiers and the design-word lint (PLAN_G1 item 19). Planted: the k-th word drawn with repeats; "Main Event" printed mixed-case on
- *  Ignite (FN-3). */
+ *  caps on Ignite (MICRO MAIN EVENT, MINI MAIN EVENT, MAIN EVENT) and in the bracket on RunItTwice; FN-2b: PUSH 2027's #4 Breakwater
+ *  and WRIT 2027's 11 Long Gallery (rooms_check.py's); every word passes both trademark tiers and the design-word lint (PLAN_G1 item
+ *  19). Planted: the k-th word drawn with repeats; "Main Event" printed mixed-case on Ignite (FN-3); two of PUSH's words swapped in
+ *  the plan's list (FN-2b). */
 void FestNamesThemedNet()
 {
 	namespace fest = ss::fest;
@@ -1183,7 +1294,8 @@ void FestNamesThemedNet()
 		const net::EventTemplate* T = N.FindTemplate(Id);
 		return T && T->Name.find(std::string(" ") + Word + " ") != std::string::npos;
 	};
-	const bool Samples = Has(Ig, "ignite.feign26-7", "Tilt Floor") && Has(Ig, "ignite.feign26-8", "Air Jets") && Has(Ig, "ignite.feign26-9", "Swing Boats") &&
+	const bool Samples = Has(Ig, "ignite.push27-4", "Breakwater") && Has(Rt, "runittwice.writ27-11", "Long Gallery") && Has(Rt, "runittwice.writ27-3", "Strong Room") &&
+		Has(Ig, "ignite.push27-1", "Harbour Lamp") && Has(Ig, "ignite.feign26-7", "Tilt Floor") && Has(Ig, "ignite.feign26-8", "Air Jets") && Has(Ig, "ignite.feign26-9", "Swing Boats") &&
 		Has(Ig, "ignite.feign26-10", "Mirror Maze") && Has(Ig, "ignite.feign26-11", "Carousel") && Has(Ig, "ignite.feign26-12", "Rope Bridge") &&
 		Has(Ig, "ignite.feign26-16", "Ticket Booth") && Has(Rt, "runittwice.grit27-7", "Dress Circle") && Has(Rt, "runittwice.grit27-10", "Second House") &&
 		Has(Ig, "ignite.pennant27-10", "Can of Corn") && Has(Rt, "runittwice.reign27-3", "Sash Window");
@@ -1212,7 +1324,7 @@ void FestNamesThemedNet()
 		"PENNANT's and REIGN's " + std::to_string(TitleRows) + " title rows print in their site's form: \"PENNANT #37: $2.20 MICRO MAIN EVENT\", \"PENNANT #38: $22 MINI MAIN "
 		"EVENT\", \"PENNANT #39: $215 MAIN EVENT\" on Ignite, \"REIGN 28: $22 NLHE [Micro Main Event]\" ... \"REIGN 30: $2,100 NLHE [Main Event]\" on RunItTwice" + TitleBad);
 	std::string Hits;
-	for (fest::Brand B : {fest::Brand::Feign, fest::Brand::Grit, fest::Brand::Pennant, fest::Brand::Reign})
+	for (fest::Brand B : {fest::Brand::Feign, fest::Brand::Push, fest::Brand::Writ, fest::Brand::Grit, fest::Brand::Pennant, fest::Brand::Reign})
 	{
 		for (const std::string& W : FestNetRooms(B))
 		{
@@ -1223,9 +1335,10 @@ void FestNamesThemedNet()
 		}
 	}
 	Expect(Names > 0 && Bad.empty() && Samples && Hits.empty(),
-		"every FEIGN, GRIT, PENNANT and REIGN numbered name (" + std::to_string(Names) + ") carries its list's word at (Fnv1a(SeriesId) + (No - 1) x 7) % RoomCount, none twice in "
-		"an edition; FEIGN 2026's #7 Tilt Floor ... #12 Rope Bridge and #16 Ticket Booth, GRIT 2027's #7 Dress Circle and #10 Second House, PENNANT 2027's #10 Can of Corn, REIGN "
-		"2027's 03 Sash Window; every word passes both trademark tiers and the design words" + Bad + Hits);
+		"every FEIGN, PUSH, WRIT, GRIT, PENNANT and REIGN numbered name (" + std::to_string(Names) + ") carries its list's word at (Fnv1a(SeriesId) + (No - 1) x 7) % "
+		"RoomCount, none twice in an edition; FEIGN 2026's #7 Tilt Floor ... #12 Rope Bridge and #16 Ticket Booth, PUSH 2027's #1 Harbour Lamp and #4 Breakwater, WRIT "
+		"2027's 03 Strong Room and 11 Long Gallery, GRIT 2027's #7 Dress Circle and #10 Second House, PENNANT 2027's #10 Can of Corn, REIGN 2027's 03 Sash Window; every word "
+		"passes both trademark tiers and the design words" + Bad + Hits);
 }
 
 // ------------------------------------------------------------------ FestCodes (F-net)
@@ -1233,8 +1346,10 @@ void FestNamesThemedNet()
 /** §2.3.2, §2.11 H14, §6 PA-4: Ignite's lines "<Short> #<No>: <BuyIn> <Room> <Kind>" and its Main in caps; RunItTwice's with no "#"
  *  and two digits, its headliners "NLHE [<Headliner>]"; Network::NameOf gives each GRIT show's 19:00 instance "-E" and its 22:00
  *  instance "-L" and every other instance its template's name, and the listing and News read it; no tier letter (GRIT's runs aside),
- *  "[Day" or "RIT-"; SeriesInfo::Title GRIT's, "" for FEIGN, PENNANT and REIGN; FN-3: the championships' print (SPEC's samples and
- *  PIE's lines). Planted: NameOf giving GRIT's 22:00 run the 19:00 run's "-E"; "Main Event" printed mixed-case on Ignite (FN-3). */
+ *  "[Day" or "RIT-"; SeriesInfo::Title GRIT's, PUSH's and WRIT's, "" for FEIGN, PENNANT and REIGN; FN-3: the championships' print
+ *  (SPEC's samples and PIE's lines); FN-2b: PUSH's and WRIT's (SPEC's samples, WRIT's ladder and PIE's "WRIT 03: $2,100 Strong Room
+ *  PKO" on day 110). Planted: NameOf giving GRIT's 22:00 run the 19:00 run's "-E"; "Main Event" printed mixed-case on Ignite (FN-3);
+ *  WRIT's ladder read at No % 5 (FN-2b). */
 void FestCodesNet()
 {
 	namespace fest = ss::fest;
@@ -1267,6 +1382,29 @@ void FestCodesNet()
 				   "\"PENNANT #34: $11 Play Ball\" ... \"PENNANT #38: $22 MINI MAIN EVENT\", \"REIGN 30: $2,100 NLHE [Main Event]\", \"REIGN 03: $530 Sash Window NLHE\", "
 				   "\"REIGN 04: $33 Dumbwaiter NLHE\", \"REIGN 27: $5,250 NLHE [High Roller]\", \"REIGN 25: $215 NLHE [Coats Off]\" ... \"REIGN 29: $215 NLHE [Mini Main "
 				   "Event]\"; the satellites \"Step 1 · PENNANT Main\" ... \"Step 3 · REIGN Main\", \"Main Mega Satellite\", \"Main Last Chance\"");
+	// FN-2b (§2.3.2's PUSH and WRIT samples; WRIT's ladder, Ladder[(No x 3) % 5]; PIE's "WRIT 03" line on day 110).
+	const net::EventTemplate* W3 = Rt.FindTemplate("runittwice.writ27-3");
+	const net::EventTemplate* Summons = Rt.FindTemplate("runittwice.writ27-sat1");
+	bool Ladder = true;
+	for (int No = 1; No <= 12; ++No)
+	{
+		const net::EventTemplate* T = Rt.FindTemplate("runittwice.writ28-" + std::to_string(No));
+		const ss::Chips Want[] = {21500, 32000, 53000, 105000, 210000};
+		Ladder = Ladder && T && T->BuyInCents == Want[(No * 3) % 5];
+	}
+	const bool Siblings = NameIs(Ig, "ignite.push27-4", "PUSH #4: $16.50 Breakwater No-Limit Hold'em") && !Ig.FindTemplate("ignite.push27-21") &&
+		NameIs(Ig, "ignite.push27-main", "PUSH #21: $109 MAIN EVENT") && NameIs(Ig, "ignite.push27-mega", "PUSH #19: $1.10 Standing Room Only") &&
+		NameIs(Ig, "ignite.push27-hr", "PUSH #20: $215 High Roller") && NameIs(Ig, "ignite.push27-3", "PUSH #3: $4.40 Gull's Rest Turbo") &&
+		NameIs(Ig, "ignite.push27-2", "PUSH #2: $27.50 Shell Cove PKO") && NameIs(Ig, "ignite.push27-sat1", "Main Mega Satellite") &&
+		NameIs(Ig, "ignite.push27-sat2", "Main Last Chance") && NameIs(Rt, "runittwice.writ27-11", "WRIT 11: $1,050 Long Gallery PKO") &&
+		NameIs(Rt, "runittwice.writ27-main", "WRIT 13: $1,050 NLHE [Main Event]") && NameIs(Rt, "runittwice.writ27-3", "WRIT 03: $2,100 Strong Room PKO") && W3 &&
+		W3->OnlyDay == 110 && NameIs(Rt, "runittwice.writ27-1", "WRIT 01: $1,050 Map Room NLHE") && NameIs(Rt, "runittwice.writ27-12", "WRIT 12: $320 Hilary Term NLHE") &&
+		Summons && Summons->Name == "The Summons" && Summons->Seats == "WRIT Main Event seats" && Summons->SeatTicket == "runittwice.writ27-main" &&
+		Summons->SeatValueCents == 105000 && Summons->GtdCents == 0 && Summons->Blurb == "$22 for a seat in the Main Event: one for every $1,050 in the pool." && Ladder;
+	Expect(Siblings, "PUSH's and WRIT's lines: \"PUSH #4: $16.50 Breakwater No-Limit Hold'em\", \"PUSH #19: $1.10 Standing Room Only\", \"PUSH #20: $215 High Roller\", "
+					 "\"PUSH #21: $109 MAIN EVENT\", \"WRIT 11: $1,050 Long Gallery PKO\", \"WRIT 13: $1,050 NLHE [Main Event]\", PIE's \"WRIT 03: $2,100 Strong Room PKO\" "
+					 "(day 110); WRIT's numbered buy-ins Ladder[(No x 3) % 5] of $215, $320, $530, $1,050, $2,100; The Summons seats the Main ($1,050, \"WRIT Main Event seats\", "
+					 "no seat guarantee, blurb B6 filled)");
 	Expect(Lines, "the codes in each site's form: \"FEIGN #9: $16.50 Swing Boats Mystery\", \"FEIGN #1: $3.30 Wonky Stairs Flip & Run\", \"FEIGN #25: $2.20 The Big Top\", "
 				  "\"FEIGN #27: $55 MAIN EVENT\", \"GRIT 13: $109 NLHE [Opening Night]\", \"GRIT 15: $530 NLHE [Main Event]\", \"GRIT 07: $33 Dress Circle Turbo\"; the satellites "
 				  "\"Main Mega Satellite\" and \"Main Last Chance\"");
@@ -1314,7 +1452,10 @@ void FestCodesNet()
 		const net::Network* N;
 		int From, To;
 	};
-	for (const Span& Sp : {Span{&Ig, 56, 66}, Span{&Ig, Pen ? Pen->FirstDay : 0, Pen ? Pen->LastDay + 1 : 0}, Span{&Rt, Reign ? Reign->FirstDay : 0, Reign ? Reign->LastDay + 1 : 0}})
+	const fest::Festival* Push = fest::FestivalOf("ignite.push27");
+	const fest::Festival* Writ = fest::FestivalOf("runittwice.writ27");
+	for (const Span& Sp : {Span{&Ig, 56, 66}, Span{&Ig, Pen ? Pen->FirstDay : 0, Pen ? Pen->LastDay + 1 : 0}, Span{&Rt, Reign ? Reign->FirstDay : 0, Reign ? Reign->LastDay + 1 : 0},
+			 Span{&Ig, Push ? Push->FirstDay : 0, Push ? Push->LastDay + 1 : 0}, Span{&Rt, Writ ? Writ->FirstDay : 0, Writ ? Writ->LastDay + 1 : 0}})
 	{
 		for (const net::EventInstance& E : Sp.N->Window(FestNetAt(Sp.From), FestNetAt(Sp.To)))
 		{
@@ -1326,7 +1467,7 @@ void FestCodesNet()
 	}
 	Expect(Shows == 24 && Bad.empty() && Pie == "GRIT 02-E: $16.50 Box Office PKO",
 		"Network::NameOf names GRIT 2027's " + std::to_string(Shows) + " shows by their run (\"GRIT 07-E\" at 7 PM, \"GRIT 07-L\" at 10 PM, one of each a night; the PIE line "
-		"\"GRIT 02-E: $16.50 Box Office PKO\" on May 13), every other instance (FEIGN's, PENNANT's and REIGN's with their steps' runs, the headliners, the dailies) its "
+		"\"GRIT 02-E: $16.50 Box Office PKO\" on May 13), every other instance (FEIGN's, PUSH's, WRIT's, PENNANT's and REIGN's with their steps' runs, the headliners, the dailies) its "
 		"template's name; the listing reads it (" + Pie + ")" + Bad);
 
 	// The forms: Ignite "<Short> #<No>: ", RunItTwice "<Short> <NN>: " (and "-E"/"-L" from NameOf only); no tier letter, "[Day" or RIT-.
@@ -1354,10 +1495,14 @@ void FestCodesNet()
 	const net::SeriesInfo* FeignSr = Ig.FindSeries("ignite.feign26");
 	const net::SeriesInfo* PenSr = Ig.FindSeries("ignite.pennant27");
 	const net::SeriesInfo* ReignSr = Rt.FindSeries("runittwice.reign27");
+	const net::SeriesInfo* PushSr = Ig.FindSeries("ignite.push27");
+	const net::SeriesInfo* WritSr = Rt.FindSeries("runittwice.writ27");
 	Expect(Form.empty() && GritSr && GritSr->Title == "The Grinders' RunItTwice" && FeignSr && FeignSr->Title.empty() && GritSr->Short == "GRIT" && FeignSr->Short == "FEIGN" &&
-			   PenSr && PenSr->Title.empty() && PenSr->Short == "PENNANT" && ReignSr && ReignSr->Title.empty() && ReignSr->Short == "REIGN",
-		"every FEIGN, GRIT, PENNANT and REIGN event's code is its site's form (Ignite \"FEIGN #<No>: \", \"PENNANT #<No>: \", RunItTwice \"GRIT <NN>: \", \"REIGN <NN>: \", "
-		"no tier letter, \"[Day\" or RIT-); GRIT's Title is \"The Grinders' RunItTwice\", FEIGN, PENNANT and REIGN have none" + Form);
+			   PenSr && PenSr->Title.empty() && PenSr->Short == "PENNANT" && ReignSr && ReignSr->Title.empty() && ReignSr->Short == "REIGN" && PushSr &&
+			   PushSr->Title == "Pier's Upbeat Summer Hold'em" && PushSr->Short == "PUSH" && WritSr && WritSr->Title == "The Winter RunItTwice" && WritSr->Short == "WRIT",
+		"every FEIGN, PUSH, PENNANT, WRIT, GRIT and REIGN event's code is its site's form (Ignite \"FEIGN #<No>: \", \"PUSH #<No>: \", \"PENNANT #<No>: \", RunItTwice "
+		"\"WRIT <NN>: \", \"GRIT <NN>: \", \"REIGN <NN>: \", no tier letter, \"[Day\" or RIT-); GRIT's Title is \"The Grinders' RunItTwice\", PUSH's \"Pier's Upbeat "
+		"Summer Hold'em\", WRIT's \"The Winter RunItTwice\"; FEIGN, PENNANT and REIGN have none" + Form);
 }
 
 // ------------------------------------------------------------------ FestMajorFloor (F-net's half)
@@ -1595,17 +1740,19 @@ void FestMainTicketNet()
 		}
 	}
 	const bool Own = net::Site(net::SiteId::Ignite).TicketOf("ignite.feign27-main") == "ignite.feign27-main" &&
-		net::Site(net::SiteId::RunItTwice).TicketOf("runittwice.grit27-main") == "runittwice.grit27-main";
+		net::Site(net::SiteId::RunItTwice).TicketOf("runittwice.grit27-main") == "runittwice.grit27-main" &&
+		net::Site(net::SiteId::Ignite).TicketOf("ignite.push27-main") == "ignite.push27-main" &&
+		net::Site(net::SiteId::RunItTwice).TicketOf("runittwice.writ27-main") == "runittwice.writ27-main";
 	Expect(Editions == 28 && Bad.empty() && Own,
 		"each championship Main takes its year-free ticket (ignite.pennant-main, runittwice.reign-main) in every edition 2027-2040 (" + std::to_string(Editions) +
 			"); NextFor of it finds that edition's Main, and after the 2028 Main the 2029 Main; the key is at home on its site, seats at the Main's buy-in and is no "
-			"template's id; FEIGN's and GRIT's Mains take their own ids" + Bad);
+			"template's id; FEIGN's, GRIT's, PUSH's and WRIT's Mains take their own ids" + Bad);
 }
 
 // ------------------------------------------------------------------ FestNamesScreened (F-net)
 
 /** §2.11, §2.15.1: the festival names, titles, taglines, trophies (TrophyName: P1-P12 exactly), satellites, headliners and every
- *  string fest::Inventory lists (FN-2a: FEIGN's and GRIT's), every room word and the ten brands' keys (the rival names, §2.1.3: the
+ *  string fest::Inventory lists (the six rival festivals' from FN-2b), every room word and the ten brands' keys (the rival names, §2.1.3: the
  *  ids follow the names) pass both trademark tiers with PA-1's entries; lowercase "push" is never flagged; no inventory string holds
  *  "Ignite Series" or "Ignite Championship". Planted: a deny entry "writ" added to the source tier (scratch Trademarks.h); the
  *  PENNANT trophy answered for its title object. */
@@ -1624,7 +1771,7 @@ void FestNamesScreenedNet()
 		Strings.push_back(fest::TrophyName(static_cast<fest::Brand>(B), 0));
 		Strings.push_back(fest::TrophyName(static_cast<fest::Brand>(B), 1));
 	}
-	for (fest::Brand B : {fest::Brand::Feign, fest::Brand::Grit, fest::Brand::Pennant, fest::Brand::Reign})
+	for (fest::Brand B : {fest::Brand::Feign, fest::Brand::Push, fest::Brand::Writ, fest::Brand::Grit, fest::Brand::Pennant, fest::Brand::Reign})
 	{
 		for (const std::string& W : FestNetRooms(B))
 		{
@@ -1727,14 +1874,15 @@ std::string FestNetFill(const std::string& Template, std::map<std::string, std::
 	return copylint::Fill(Out, Vars);
 }
 
-/** §1.2 items 2-5, 9-10, 12-13, §2.11: every fest::Inventory entry (FN-2a: FEIGN's and GRIT's names, titles, taglines, event names,
+/** §1.2 items 2-5, 9-10, 12-13, §2.11: every fest::Inventory entry (the six rival festivals' from FN-2b: names, titles, taglines, event names,
  *  blurbs and seats texts) by its kind (label: no closing stop, 200; sentence: a stop, 600; the F-world kinds as FW-1's lint), filled
  *  from the samples (copylint's, sites_main's SitesCopy values and fworld_to_fnet_1's) through CopyLint, both trademark tiers, the
  *  design words after the fill, U1, "players" (X1), DESIGN §2.6's avoided words, "marquee" and "pavilion", the glyph rule (ASCII and
  *  · — – … é ’) and FestChampWord; no rival festival name, Short, Title, tagline, event name, blurb, seats text or trophy holds
  *  "championship"; every {Festival} template filled again with "The Championship Online 2027" holds no "the The" and every {Date} a
  *  next year's date with its year; NameAfterArticle and DateInSentence answer §1.2 item 13's forms. Planted: "players" in a count;
- *  "GRIT Championship" as a Title; "Ignite's championship" in a tagline; NameAfterArticle and DateInSentence left at H0's stubs. */
+ *  "GRIT Championship" as a Title; "Ignite's championship" in a tagline; NameAfterArticle and DateInSentence left at H0's stubs;
+ *  PUSH's tagline without its closing stop (FN-2b). */
 void FestCopyNet()
 {
 	namespace fest = ss::fest;
