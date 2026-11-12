@@ -897,8 +897,8 @@ MarkRunLook RunMarkLook(const std::function<void(ss::ui::Canvas&)>& Paint, float
 }
 
 /** Whether B differs from A by more than float rounding: another vertex or run count, or a vertex or run moved by more than 0.02 units or
- *  recoloured by more than 0.004 (a live drawing and the cached copy of the same frame differ only in their last bits, so a motion that
- *  doesn't move reads unmoved). */
+ *  recoloured by more than 0.004. Both are drawn live (a motion's frame against the same motion a hair from its rest or its end): a cached
+ *  copy can be tessellated differently from a live drawing of the same frame (another origin), so no motion is judged against one. */
 bool MovedLook(const MarkRunLook& A, const MarkRunLook& B)
 {
 	if (A.Verts.size() != B.Verts.size() || A.Runs.size() != B.Runs.size())
@@ -1116,7 +1116,7 @@ void FestMotionsLook()
 		const std::string Name = MarkNameLook(Brand::Push);
 		const double End = fd::FestWordSettle(L, Name);
 		const MarkRunLook Full = MarkLook(Brand::Push, End, Day, false);
-		ExpectLook(MovedLook(MarkLook(Brand::Push, 0.3, Day, false), Full) && MarkLook(Brand::Push, End + 4.0, Day, false).Hash == Full.Hash,
+		ExpectLook(MovedLook(MarkLook(Brand::Push, 0.3, Day, false), MarkLook(Brand::Push, End - 1e-6, Day, false)) && MarkLook(Brand::Push, End + 4.0, Day, false).Hash == Full.Hash,
 			"FestCrestLowDetail (motions): PUSH's gauge fills on hub open, then holds");
 		ExpectLook(MarkLook(Brand::Push, End, Day + 0.2f / 1440.0f, false).Hash == Full.Hash && MarkLook(Brand::Push, End, Day + 1.0f / 1440.0f, false).Hash != Full.Hash &&
 				CachedLook(fd::FestWordMarkKey(L, Name, 46.0f, 576)) && !CachedLook(fd::FestWordMarkKey(L, Name, 46.0f, 1439)),
@@ -1135,7 +1135,7 @@ void FestMotionsLook()
 	}
 	// The banner's motions.
 	{
-		ExpectLook(MovedLook(BannerLook(Brand::Grit, 0.3, Day, false, false), BannerLook(Brand::Grit, 1.4, Day, false, false)) &&
+		ExpectLook(MovedLook(BannerLook(Brand::Grit, 0.3, Day, false, false), BannerLook(Brand::Grit, 1.4 - 1e-6, Day, false, false)) &&
 				BannerLook(Brand::Grit, 1.4, Day, false, false).Hash == BannerLook(Brand::Grit, 6.0, Day, false, false).Hash,
 			"FestCrestLowDetail (motions): GRIT's curtains part on hub open, then hold");
 		const festart::FestivalLook& Rcop = festart::LookOf(Brand::Rcop);
@@ -1143,30 +1143,29 @@ void FestMotionsLook()
 		const float Dawn = InkLook(BannerLook(Brand::Rcop, 1.6, 0.1f, false, false), Rcop.Accent2, 0.4f).Y;
 		const float Dusk = InkLook(BannerLook(Brand::Rcop, 1.6, 0.9f, false, false), Rcop.Accent2, 0.4f).Y;
 		std::printf("  motions: RCOP's top wave at y %.1f (day 0.1) and %.1f (day 0.9)\n", static_cast<double>(Dawn), static_cast<double>(Dusk));
-		ExpectLook(MovedLook(BannerLook(Brand::Rcop, 0.5, Day, false, false), Risen) && BannerLook(Brand::Rcop, 9.0, Day, false, false).Hash == Risen.Hash && Dawn > Dusk + 20.0f,
+		ExpectLook(MovedLook(BannerLook(Brand::Rcop, 0.5, Day, false, false), BannerLook(Brand::Rcop, 1.6 - 1e-6, Day, false, false)) && BannerLook(Brand::Rcop, 9.0, Day, false, false).Hash == Risen.Hash && Dawn > Dusk + 20.0f,
 			"FestCrestLowDetail (motions): RCOP's waves rise on hub open to the day's mark, which climbs through the day");
 		ExpectLook(BannerLook(Brand::Rcop, 1.6, Day + 0.2f / 1440.0f, false, false).Hash == Risen.Hash && BannerLook(Brand::Rcop, 1.6, Day + 1.0f / 1440.0f, false, false).Hash != Risen.Hash &&
 				CachedLook(fd::FestBannerKey(Rcop, BannerRectLook(Brand::Rcop), 1, 576)),
 			"FestCrestLowDetail (motions): RCOP's wave moves once a world minute, each minute's settled wave one cached fragment");
 		ExpectLook(MovedLook(BannerLook(Brand::Slam, 0.0, Day, false, false), BannerLook(Brand::Slam, 5.0, Day, false, false)),
 			"FestCrestLowDetail (motions): Summer Slam's rays turn for good (live)");
-		const MarkRunLook LitRun = BannerLook(Brand::Reign, 0.8, Day, true, false);
-		const uint64_t Lit = LitRun.Hash;
+		const uint64_t Lit = BannerLook(Brand::Reign, 0.8, Day, true, false).Hash;
 		bool MainOnly = true;
 		for (const Brand B : AllLook)
 		{
 			MainOnly = MainOnly && (B == Brand::Reign) == (BannerLook(B, 5.0, Day, true, false).Hash != BannerLook(B, 5.0, Day, false, false).Hash);
 		}
-		ExpectLook(MovedLook(BannerLook(Brand::Reign, 0.3, Day, true, false), LitRun) && BannerLook(Brand::Reign, 4.0, Day, true, false).Hash == Lit && MainOnly,
+		ExpectLook(MovedLook(BannerLook(Brand::Reign, 0.3, Day, true, false), BannerLook(Brand::Reign, 0.8 - 1e-6, Day, true, false)) && BannerLook(Brand::Reign, 4.0, Day, true, false).Hash == Lit && MainOnly,
 			"FestCrestLowDetail (motions): REIGN's door-light comes up on Main day (and only REIGN's banner knows Main day)");
 	}
 	// The crests' motions: once round and back to the crest at rest (40 units: no glints twinkle on the clock).
 	for (const Brand B : {Brand::RingRush, Brand::Reign, Brand::Writ})
 	{
 		const double End = ead::FestCrestSeconds(B);
-		const MarkRunLook RestRun = CrestAtLook(B, 40.0f, 0.0);
-		const uint64_t Rest = RestRun.Hash;
-		ExpectLook(MovedLook(CrestAtLook(B, 40.0f, End * 0.5), RestRun) && MovedLook(CrestAtLook(B, 40.0f, End * 0.2), RestRun) && CrestAtLook(B, 40.0f, End).Hash == Rest &&
+		const uint64_t Rest = CrestAtLook(B, 40.0f, 0.0).Hash;
+		const MarkRunLook Starting = CrestAtLook(B, 40.0f, End * 1e-6); // live, a hair into the run: the rest pose through the live path
+		ExpectLook(MovedLook(CrestAtLook(B, 40.0f, End * 0.5), Starting) && MovedLook(CrestAtLook(B, 40.0f, End * 0.2), Starting) && CrestAtLook(B, 40.0f, End).Hash == Rest &&
 				CrestAtLook(B, 40.0f, End + 3.7).Hash == Rest && CrestAtLook(B, 40.0f, -2.0).Hash == Rest,
 			std::string("FestCrestLowDetail (motions): the crest's motion runs once and comes back to the crest at rest (") + NameLook(B) + ")");
 	}
