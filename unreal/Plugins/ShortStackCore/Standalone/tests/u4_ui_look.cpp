@@ -8,6 +8,9 @@
 // G1 FL-2 (F-look): FestCrestLowDetail, the crests (§2.7.4): the low-detail path's and the full crest's budgets at both scales, each
 // festival's frame, motif and RCOP's wave band, a rival festival unlike a plain rival series, the crest cache counted. Draws, emits
 // nothing.
+// G1 FL-3 (F-look): FestTrophyCached, the trophies, title objects, belts and pins (§2.7.5, §2.8.7): each one cached fragment (asked of
+// Canvas::IsCached through UI/EventArt.cpp's keys), their budgets at both scales, the championships' 1.15, the RCOP Cup's engraving,
+// R-3's names. Draws, emits nothing.
 #include "UiSeg.h"
 #include "ShortStack/Common.h"
 #include "ShortStack/Game/Festival.h"
@@ -23,6 +26,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <functional>
 #include <set>
 #include <string>
@@ -31,7 +35,7 @@
 
 // UI/EventArt.cpp's private frame outline (external linkage, as UI/FestivalArt.cpp reaches its SlotOf): FestCrestLowDetail checks the
 // six festival frames draw their own outlines. The enum is declared opaque here; its values are FestivalLook::Frame's (static_asserted
-// in UI/EventArt.cpp).
+// in UI/EventArt.cpp). And the festival art's cache keys (G1 FL-3): FestTrophyCached asks Canvas::IsCached for them.
 namespace ss
 {
 namespace ui
@@ -42,6 +46,9 @@ namespace eventart_detail
 {
 enum class Frame : int;
 std::vector<Vec2> FramePts(Frame F, float K);
+uint64_t FestTrophyKey(fest::Brand B, float Size, bool Lod, const std::vector<int>& Fields, int Tier);
+uint64_t FestBeltKey(fest::Brand B, float Size, bool Lod);
+uint64_t FestPinKey(fest::Brand B, int Grade, world::FestMark Mark, float Size);
 } // namespace eventart_detail
 } // namespace eventart
 } // namespace ui
@@ -749,6 +756,242 @@ void FestCrestLowDetail()
 	}
 	std::printf("  crest: %d series flagged Festival (F-net's data) each find their own brand's look\n", Flagged);
 }
+
+/** One drawing of a cached festival piece on a fresh canvas at Scale: whether its Key was cached before and after the drawing, whether
+ *  a second drawing on another canvas put down exactly the same (the copy), its vertices, a fingerprint, its measured height (the
+ *  vertices at alpha 0.25 or more: solid art, not its anti-aliased fringe or a faint glow) and the topmost vertex wearing Mark. */
+struct ArtRunLook
+{
+	size_t Vertices = 0;
+	uint64_t Hash = 0;
+	float Height = 0.0f;
+	float MarkTop = 1e9f;
+	bool Fresh = false;
+	bool Cached = false;
+	bool Copy = false;
+};
+
+uint64_t ListPrintLook(const ss::ui::DrawList& L)
+{
+	uint64_t H = 0xcbf29ce484222325ull;
+	for (const ss::ui::Vertex& V : L.Vertices)
+	{
+		const float F[6] = {V.X, V.Y, V.Col.R, V.Col.G, V.Col.B, V.Col.A};
+		H = FnvLook(H, F, sizeof(F));
+	}
+	return L.Indices.empty() ? H : FnvLook(H, L.Indices.data(), L.Indices.size() * sizeof(uint32_t));
+}
+
+ArtRunLook RunArtLook(const std::function<void(ss::ui::Canvas&)>& Paint, uint64_t Key, float Scale, uint32_t Mark = 0)
+{
+	ui_test::TableMeasurer M;
+	ss::ui::DrawList First;
+	ss::ui::DrawList Second;
+	ss::ui::Canvas C1(First, M, 400.0f, 400.0f, Scale);
+	ArtRunLook R;
+	R.Fresh = !C1.IsCached(Key);
+	Paint(C1);
+	R.Cached = C1.IsCached(Key);
+	ss::ui::Canvas C2(Second, M, 400.0f, 400.0f, Scale);
+	Paint(C2);
+	R.Vertices = First.Vertices.size();
+	R.Hash = ListPrintLook(First);
+	R.Copy = Second.Vertices.size() == R.Vertices && ListPrintLook(Second) == R.Hash;
+	float Top = 1e9f;
+	float Bottom = -1e9f;
+	for (const ss::ui::Vertex& V : First.Vertices)
+	{
+		if (V.Col.A >= 0.25f)
+		{
+			Top = std::min(Top, V.Y);
+			Bottom = std::max(Bottom, V.Y);
+		}
+		if (Mark != 0 && V.Col.A >= 0.2f && RgbLook(V.Col) == Mark)
+		{
+			R.MarkTop = std::min(R.MarkTop, V.Y);
+		}
+	}
+	R.Height = Bottom > Top ? Bottom - Top : 0.0f;
+	return R;
+}
+
+/**
+ * FestTrophyCached (§2.7.5, §2.8.7, §2.15.2; §8.5's "Crests; trophies" row): for every brand, FestTrophy and FestBelt are one cached
+ * fragment each (Canvas::IsCached holds their key after the first drawing and not before; a second drawing copies exactly what the
+ * first put down), at most 1.8k vertices at 54 units and 400 with Lod at 30, at both scales (1 and 1.5 pixels a unit); the two title
+ * objects (Tier 1: The Pennant Ribbon, The Spade Finial) at most 0.9k, cached, unlike their trophies, and no other brand draws one;
+ * each championship's trophy (RCOP, PENNANT, REIGN) stands 1.15 times each of its site's other festival trophies (measured heights,
+ * within 1.12-1.18) at 30 (Lod), 54 and 96; the RCOP Cup engraves one line per edition (each field changes it, a bigger field's line
+ * sits higher, twelve lines within the budget); FestPin for every grade (0, the empty socket, to 3) and mark at most 0.4k at 40 (ten
+ * slots inside §2.8.7's 4k), cached, each its own; the ten trophies, the ten belts and each brand's pins pairwise distinct; each look's
+ * Trophy is fest::TrophyName's (R-3). Printed: every count, height and ratio. Drawn under a skin no page wears, so its keys are its own.
+ * Planted bug: the trophy drawn live (uncached).
+ */
+void FestTrophyCached()
+{
+	namespace fa = ss::ui::festart;
+	namespace ead = ss::ui::eventart::eventart_detail;
+	using ss::world::FestMark;
+	const float Scales[2] = {1.0f, 1.5f};
+	ss::ui::Skin Probe = ss::ui::Skin::Current();
+	Probe.Gold = ss::ui::Hex(0xe6b422); // a gold no page wears: every key below is this check's own (Skin::Key)
+	const ss::ui::SkinScope ProbeScope(Probe);
+	const std::vector<int> NoFields;
+	std::vector<uint64_t> Trophies;
+	std::vector<uint64_t> Belts;
+	std::vector<uint64_t> GoldPins;
+	size_t CacheVertices = 0;
+	for (const Brand B : AllLook)
+	{
+		const std::string Who = std::string(" (") + NameLook(B) + ")";
+		ExpectLook(std::strcmp(festart::LookOf(B).Trophy, ss::fest::TrophyName(B)) == 0 && ss::fest::TrophyName(B)[0] != '\0',
+			"FestTrophyCached: the look's Trophy is fest::TrophyName's (R-3)" + Who);
+		const bool Titled = ss::fest::TrophyName(B, 1)[0] != '\0';
+		size_t Counts[4][2] = {};
+		for (int K = 0; K < 2; ++K)
+		{
+			const float S = Scales[K];
+			char Scale[24];
+			std::snprintf(Scale, sizeof(Scale), ", scale %.1f", static_cast<double>(S));
+			const ArtRunLook Trophy = RunArtLook([B](ss::ui::Canvas& C) { fa::FestTrophy(C, B, 200.0f, 200.0f, 54.0f, 0.0, false); },
+				ead::FestTrophyKey(B, 54.0f, false, NoFields, 0), S);
+			const ArtRunLook TrophyLod = RunArtLook([B](ss::ui::Canvas& C) { fa::FestTrophy(C, B, 200.0f, 200.0f, 30.0f, 0.0, true); },
+				ead::FestTrophyKey(B, 30.0f, true, NoFields, 0), S);
+			const ArtRunLook Belt = RunArtLook([B](ss::ui::Canvas& C) { fa::FestBelt(C, B, 200.0f, 200.0f, 54.0f, 0.0, false); }, ead::FestBeltKey(B, 54.0f, false), S);
+			const ArtRunLook BeltLod = RunArtLook([B](ss::ui::Canvas& C) { fa::FestBelt(C, B, 200.0f, 200.0f, 30.0f, 0.0, true); }, ead::FestBeltKey(B, 30.0f, true), S);
+			const ArtRunLook Title = RunArtLook([B](ss::ui::Canvas& C) { fa::FestTrophy(C, B, 200.0f, 200.0f, 54.0f, 0.0, false, {}, 1); },
+				ead::FestTrophyKey(B, 54.0f, false, NoFields, 1), S);
+			Counts[0][K] = Trophy.Vertices;
+			Counts[1][K] = TrophyLod.Vertices;
+			Counts[2][K] = Belt.Vertices;
+			Counts[3][K] = BeltLod.Vertices;
+			CacheVertices += Trophy.Vertices + TrophyLod.Vertices + Belt.Vertices + BeltLod.Vertices + Title.Vertices;
+			ExpectLook(Trophy.Fresh && Trophy.Cached && Trophy.Copy && TrophyLod.Fresh && TrophyLod.Cached && TrophyLod.Copy,
+				"FestTrophyCached: the trophy is one cached fragment and a second drawing adds only the copy" + Who + Scale);
+			ExpectLook(Belt.Fresh && Belt.Cached && Belt.Copy && BeltLod.Fresh && BeltLod.Cached && BeltLod.Copy,
+				"FestTrophyCached: the belt is one cached fragment and a second drawing adds only the copy" + Who + Scale);
+			ExpectLook(Trophy.Vertices > 0 && Trophy.Vertices <= 1800 && TrophyLod.Vertices > 0 && TrophyLod.Vertices <= 400,
+				"FestTrophyCached: a trophy is at most 1.8k vertices at 54 and 400 with Lod at 30" + Who + Scale);
+			ExpectLook(Belt.Vertices > 0 && Belt.Vertices <= 1800 && BeltLod.Vertices > 0 && BeltLod.Vertices <= 400,
+				"FestTrophyCached: a belt is at most 1.8k vertices at 54 and 400 with Lod at 30" + Who + Scale);
+			if (Titled)
+			{
+				ExpectLook(Title.Fresh && Title.Cached && Title.Copy && Title.Vertices > 0 && Title.Vertices <= 900 && Title.Hash != Trophy.Hash,
+					"FestTrophyCached: the title object is its own cached piece of at most 0.9k vertices at 54" + Who + Scale);
+				std::printf("  trophy: %-11s title object '%s' at 54: %zu vertices (scale %.1f)\n", NameLook(B), ss::fest::TrophyName(B, 1), Title.Vertices, static_cast<double>(S));
+			}
+			else
+			{
+				ExpectLook(Title.Vertices == 0, "FestTrophyCached: a brand without a title object draws none at Tier 1" + Who + Scale);
+			}
+			if (K == 0)
+			{
+				Trophies.push_back(Trophy.Hash);
+				Belts.push_back(Belt.Hash);
+			}
+			// The pins: every grade and mark at the pin wall's 40.
+			std::set<uint64_t> Pins;
+			size_t PinMost = 0;
+			bool PinsCached = true;
+			for (int Grade = 0; Grade <= 3; ++Grade)
+			{
+				for (int Mk = static_cast<int>(FestMark::None); Mk < static_cast<int>(FestMark::Count); ++Mk)
+				{
+					const FestMark Mark = static_cast<FestMark>(Mk);
+					const ArtRunLook Pin = RunArtLook([B, Grade, Mark](ss::ui::Canvas& C) { fa::FestPin(C, B, Grade, Mark, 200.0f, 200.0f, 40.0f); },
+						ead::FestPinKey(B, Grade, Mark, 40.0f), S);
+					PinMost = std::max(PinMost, Pin.Vertices);
+					PinsCached = PinsCached && Pin.Fresh && Pin.Cached && Pin.Copy && Pin.Vertices > 0;
+					if (Grade > 0)
+					{
+						Pins.insert(Pin.Hash);
+					}
+					if (K == 0 && Grade == 3 && Mark == FestMark::None)
+					{
+						GoldPins.push_back(Pin.Hash);
+					}
+				}
+			}
+			ExpectLook(PinsCached && PinMost <= 400, "FestTrophyCached: every pin (each grade and mark) is cached and at most 0.4k vertices at 40" + Who + Scale);
+			ExpectLook(Pins.size() == 3u * static_cast<size_t>(FestMark::Count), "FestTrophyCached: each grade and mark draws its own pin" + Who + Scale);
+			if (K == 1)
+			{
+				std::printf("  trophy: %-11s '%s' at 54: %zu, %zu vertices; Lod at 30: %zu, %zu | belt at 54: %zu, %zu; Lod at 30: %zu, %zu | pins at 40: at most %zu\n",
+					NameLook(B), festart::LookOf(B).Trophy, Counts[0][0], Counts[0][1], Counts[1][0], Counts[1][1], Counts[2][0], Counts[2][1], Counts[3][0], Counts[3][1],
+					PinMost);
+			}
+		}
+	}
+	ExpectLook(std::set<uint64_t>(Trophies.begin(), Trophies.end()).size() == 10 && std::set<uint64_t>(Belts.begin(), Belts.end()).size() == 10 &&
+			std::set<uint64_t>(GoldPins.begin(), GoldPins.end()).size() == 10,
+		"FestTrophyCached: the ten trophies, the ten belts and the ten gold pins are pairwise distinct");
+	std::printf("  trophy cache: 10 trophies, 10 belts at 54 and 30 and 2 title objects, 2 scales: %zu vertices (Shared pool: 1.5M)\n", CacheVertices);
+
+	// A championship's trophy outranks its site's other festival trophies: 1.15 times their height at every size (§2.6.4, §2.7.5).
+	struct SiteTrophies
+	{
+		Brand Championship;
+		Brand Others[3];
+	};
+	const SiteTrophies Sites[3] = {{Brand::Rcop, {Brand::RingRush, Brand::Tco, Brand::Slam}}, {Brand::Pennant, {Brand::Feign, Brand::Push, Brand::None}},
+		{Brand::Reign, {Brand::Writ, Brand::Grit, Brand::None}}};
+	for (const SiteTrophies& Site : Sites)
+	{
+		for (const float Size : {30.0f, 54.0f, 96.0f})
+		{
+			const bool Lod = Size <= 30.0f;
+			for (int K = 0; K < 2; ++K)
+			{
+				const auto HeightOf = [&](Brand B) {
+					return RunArtLook([B, Size, Lod](ss::ui::Canvas& C) { fa::FestTrophy(C, B, 200.0f, 200.0f, Size, 0.0, Lod); },
+						ead::FestTrophyKey(B, Size, Lod, NoFields, 0), Scales[K])
+						.Height;
+				};
+				const float Top = HeightOf(Site.Championship);
+				std::string Line;
+				bool Outranks = true;
+				for (const Brand O : Site.Others)
+				{
+					if (O == Brand::None)
+					{
+						continue;
+					}
+					const float Ratio = Top / std::max(0.01f, HeightOf(O));
+					Outranks = Outranks && Ratio >= 1.12f && Ratio <= 1.18f;
+					char Part[48];
+					std::snprintf(Part, sizeof(Part), " %s %.3f", NameLook(O), static_cast<double>(Ratio));
+					Line += Part;
+				}
+				char Where[64];
+				std::snprintf(Where, sizeof(Where), " (%s at %.0f%s, scale %.1f)", NameLook(Site.Championship), static_cast<double>(Size), Lod ? " Lod" : "",
+					static_cast<double>(Scales[K]));
+				std::printf("  trophy: %s height %.2f; over its site's others:%s\n", Where, static_cast<double>(Top), Line.c_str());
+				ExpectLook(Outranks, std::string("FestTrophyCached: a championship's trophy stands 1.15 times its site's other festival trophies") + Where);
+			}
+		}
+	}
+
+	// The RCOP Cup engraves one line per edition at the height of its Main's field (UI/EventArt.cpp's FestCupEngraving, d8def0).
+	const uint32_t Engraving = 0xd8def0;
+	const auto Cup = [Engraving](const std::vector<int>& Fields, float Size) {
+		return RunArtLook([&Fields, Size](ss::ui::Canvas& C) { fa::FestTrophy(C, Brand::Rcop, 200.0f, 200.0f, Size, 0.0, false, Fields); },
+			ss::ui::eventart::eventart_detail::FestTrophyKey(Brand::Rcop, Size, false, Fields, 0), 1.0f, Engraving);
+	};
+	const ArtRunLook Bare = Cup({}, 96.0f);
+	const ArtRunLook Small = Cup({6052}, 96.0f);
+	const ArtRunLook Large = Cup({9000}, 96.0f);
+	const ArtRunLook Both = Cup({9000, 6052}, 96.0f);
+	const std::vector<int> Twelve{6052, 6400, 6800, 7100, 7500, 7900, 8200, 8600, 9000, 9400, 9800, 10400, 10900, 11500};
+	const ArtRunLook Many = Cup(Twelve, 54.0f);
+	const ArtRunLook Many15 = RunArtLook([&Twelve](ss::ui::Canvas& C) { fa::FestTrophy(C, Brand::Rcop, 200.0f, 200.0f, 54.0f, 0.0, false, Twelve); },
+		ead::FestTrophyKey(Brand::Rcop, 54.0f, false, Twelve, 0), 1.5f);
+	std::printf("  trophy: the RCOP Cup at 96: no field %zu vertices, 6,052 %zu (line top %.1f), 9,000 %zu (line top %.1f), both %zu; 14 fields (12 drawn) at 54: %zu, %zu\n",
+		Bare.Vertices, Small.Vertices, static_cast<double>(Small.MarkTop), Large.Vertices, static_cast<double>(Large.MarkTop), Both.Vertices, Many.Vertices, Many15.Vertices);
+	ExpectLook(Bare.MarkTop > 1e8f && Small.MarkTop < 1e8f && Large.MarkTop < Small.MarkTop && Both.Vertices > Small.Vertices &&
+			std::set<uint64_t>{Bare.Hash, Small.Hash, Large.Hash, Both.Hash}.size() == 4 && Small.Cached && Both.Cached,
+		"FestTrophyCached: the RCOP Cup engraves a line per edition, a bigger Main field's higher");
+	ExpectLook(Many.Vertices <= 1800 && Many15.Vertices <= 1800 && Many.Cached, "FestTrophyCached: the RCOP Cup with its lines is at most 1.8k vertices at 54");
+}
 } // namespace
 
 namespace u4_ui_test
@@ -759,5 +1002,6 @@ void SegLook()
 	FestContrast();
 	FestLeak();
 	FestCrestLowDetail();
+	FestTrophyCached();
 }
 } // namespace u4_ui_test

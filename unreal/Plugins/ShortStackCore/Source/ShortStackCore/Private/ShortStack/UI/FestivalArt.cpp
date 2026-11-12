@@ -9,6 +9,8 @@
 // of durable/update4/model/fest_brands/palette_check.py.
 // G1 FL-2 (F-look): the crests read the looks (UI/EventArt.cpp: FrameFor, SeriesGlyph and FestDress take LookFor first; SlotOf strips
 // a rival's site key), so RCOP's crest gains its wave band and a rival festival's series wears its own frame, motif and rim.
+// G1 FL-3 (F-look): each look's Trophy is fest::TrophyName's (LEAD_CALLS R-3; F-net's body, merged with FN-2a), and FestTrophy,
+// FestBelt and FestPin have their bodies in UI/EventArt.cpp beside the crests' pens (their stubs left this file).
 #include "ShortStack/UI/FestivalArt.h"
 
 #include "ShortStack/Common.h"
@@ -47,7 +49,7 @@ struct FestLookInks
 
 /** One row of §2.7.2's table; Key = Fnv1a("fest:" + the brand key) (§2.7.1). Face: a ui::Font, or -1 for the site's title face. */
 FestivalLook FestLookRow(fest::Brand B, const FestLookInks& I, int Frame, eventart::Glyph G, Rim R, int Face, bool Caps, bool Twice, float Tracking, Motion M,
-	SoundId Sting, const char* Trophy)
+	SoundId Sting)
 {
 	FestivalLook L;
 	L.Which = B;
@@ -67,7 +69,7 @@ FestivalLook FestLookRow(fest::Brand B, const FestLookInks& I, int Frame, eventa
 	L.Tracking = Tracking;
 	L.Move = M;
 	L.Sting = Sting;
-	L.Trophy = Trophy;
+	L.Trophy = fest::TrophyName(B); // §2.11's P1-P10 as F-net prints them (R-3)
 	L.Key = Fnv1a(std::string("fest:") + fest::BrandKey(B));
 	return L;
 }
@@ -76,7 +78,7 @@ FestivalLook FestLookRow(fest::Brand B, const FestLookInks& I, int Frame, eventa
  * §2.7.2's ten rows, indexed by fest::Brand (None: an empty look). RiverLine's four wear the site's title face as written (no caps)
  * and its sting; Ignite's three BlackItalic and FestIgnite; RunItTwice's three BoldCondensed, twice-printed, with FestRit, keeping
  * Signal Red as Accent and Hot White as Gold (§2.7.3: red is light, never ink); REIGN keeps the club's own black cloth and Bg2 and
- * swaps Accent2 only. Trophy: §2.11's P1-P12, tier 0 (FL-3 or FL-4 checks them against fest::TrophyName once F-net's body is in, R-3).
+ * swaps Accent2 only. Trophy: fest::TrophyName(B), tier 0 (FL-3, R-3).
  */
 std::array<FestivalLook, static_cast<size_t>(fest::Brand::Count)> FestLookTable()
 {
@@ -89,27 +91,27 @@ std::array<FestivalLook, static_cast<size_t>(fest::Brand::Count)> FestLookTable(
 	const auto Put = [&T](const FestivalLook& L) { T[static_cast<size_t>(L.Which)] = L; };
 	// RiverLine: RCOP keeps its Shield, laurel, crown and trophy glyph and gains the silver wave band (a crest layer, FL-2).
 	Put(FestLookRow(Brand::Rcop, {0xa78bfa, 0xc9d3e6, 0xf2c14e, 0x1c1550, 0x0e0a30, 0x120f2a, 0}, FestFrameShield, Glyph::Trophy, Rim::ByStakes, FaceSite, false, false, 0.0f,
-		Motion::WaveRise, SoundId::FestRiver, "The RCOP Cup"));
+		Motion::WaveRise, SoundId::FestRiver));
 	Put(FestLookRow(Brand::RingRush, {0xe0566e, 0xd9a441, 0xf2c14e, 0x4a0f1d, 0x2a0811, 0x1a0d14, 0}, FestFrameMedallion, Glyph::Ring, Rim::ByStakes, FaceSite, false, false,
-		0.0f, Motion::RingTurn, SoundId::FestRiver, "the ring"));
+		0.0f, Motion::RingTurn, SoundId::FestRiver));
 	Put(FestLookRow(Brand::Tco, {0x7b96ff, 0xcfd6e3, 0xf0c75e, 0x13286b, 0x0a1640, 0x0c1430, 0}, FestFrameMedallion, Glyph::Bracelet, Rim::ByStakes, FaceSite, false, false,
-		0.0f, Motion::Clasp, SoundId::FestRiver, "the bracelet"));
+		0.0f, Motion::Clasp, SoundId::FestRiver));
 	Put(FestLookRow(Brand::Slam, {0xff8a3d, 0x3cc8ff, 0xffd45c, 0x5a2a14, 0x341607, 0x1c120c, 0}, FestFrameSunburst, Glyph::Sun, Rim::ByStakes, FaceSite, false, false, 0.0f,
-		Motion::RaysTurn, SoundId::FestRiver, "The Slam Plate"));
+		Motion::RaysTurn, SoundId::FestRiver));
 	// Ignite.
 	Put(FestLookRow(Brand::Feign, {0xff4fa3, 0x5ff2c9, 0xffe45c, 0x3d1752, 0x220c30, 0x2a1238, 0}, FestFrameArch, Glyph::Mirror, Rim::CandyStripe, FaceBlackItalic, true,
-		false, 0.0f, Motion::Bob, SoundId::FestIgnite, "The Funhouse Mirror"));
+		false, 0.0f, Motion::Bob, SoundId::FestIgnite));
 	Put(FestLookRow(Brand::Push, {0xf2a93b, 0x7fd4ff, 0xffd76a, 0x1f1b4a, 0x110f2a, 0x1d1430, 0}, FestFrameTower, Glyph::PushButton, Rim::Brass, FaceBlackItalic, true, false,
-		0.0f, Motion::Gauge, SoundId::FestIgnite, "The Big Red Button"));
+		0.0f, Motion::Gauge, SoundId::FestIgnite));
 	Put(FestLookRow(Brand::Pennant, {0x21d958, 0xff6b57, 0xffe9a8, 0x0d3b45, 0x06222a, 0x101a2e, 0}, FestFramePavilion, Glyph::Pennant, Rim::Neon, FaceBlackItalic, true,
-		false, 0.0f, Motion::PavilionChase, SoundId::FestIgnite, "The Gold Pennant"));
+		false, 0.0f, Motion::PavilionChase, SoundId::FestIgnite));
 	// RunItTwice.
 	Put(FestLookRow(Brand::Writ, {0xd2141a, 0xe3e6ec, 0xffffff, 0x23252b, 0x101114, 0x0e0f13, 0xc9ced8}, FestFrameOctagon, Glyph::Seal, Rim::Chrome, FaceBoldCondensed, true,
-		true, FestTrackWide, Motion::Flap, SoundId::FestRit, "The Seal"));
+		true, FestTrackWide, Motion::Flap, SoundId::FestRit));
 	Put(FestLookRow(Brand::Grit, {0xd2141a, 0xf3e9d2, 0xffffff, 0x4a0b12, 0x24060a, 0x140a0c, 0xd9b25f}, FestFrameProscenium, Glyph::TwinStars, Rim::GoldLeaf,
-		FaceBoldCondensed, true, true, 0.0f, Motion::Curtains, SoundId::FestRit, "The Grindstone"));
+		FaceBoldCondensed, true, true, 0.0f, Motion::Curtains, SoundId::FestRit));
 	Put(FestLookRow(Brand::Reign, {0xd2141a, 0xe8b4a0, 0xffffff, 0x1a1a1f, 0x09090b, 0x111114, 0xe8b4a0}, FestFrameKeyhole, Glyph::Sceptre, Rim::Chrome, FaceBoldCondensed,
-		true, true, FestTrackWide, Motion::KeyTurn, SoundId::FestRit, "The Sceptre"));
+		true, true, FestTrackWide, Motion::KeyTurn, SoundId::FestRit));
 	return T;
 }
 } // namespace festart_detail
@@ -162,17 +164,7 @@ Skin Dressed(const Skin& Base, const FestivalLook& L)
 	return S;
 }
 
-void FestTrophy(Canvas& /*C*/, fest::Brand /*B*/, float /*Cx*/, float /*Cy*/, float /*Size*/, double /*Time*/, bool /*Lod*/, const std::vector<int>& /*Fields*/, int /*Tier*/)
-{
-}
-
-void FestBelt(Canvas& /*C*/, fest::Brand /*B*/, float /*Cx*/, float /*Cy*/, float /*Size*/, double /*Time*/, bool /*Lod*/)
-{
-}
-
-void FestPin(Canvas& /*C*/, fest::Brand /*B*/, int /*Grade*/, world::FestMark /*Mark*/, float /*Cx*/, float /*Cy*/, float /*Size*/)
-{
-}
+// FestTrophy, FestBelt and FestPin: UI/EventArt.cpp (G1 FL-3).
 
 void FestWordMark(Canvas& /*C*/, const FestivalLook& /*L*/, const std::string& /*Text*/, float /*X*/, float /*Y*/, float /*Size*/, double /*Time*/, bool /*Still*/)
 {
