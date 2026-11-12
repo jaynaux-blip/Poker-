@@ -273,6 +273,55 @@ std::string Two(int Year)
 	const int Y = Year % 100;
 	return (Y < 10 ? "0" : "") + std::to_string(Y);
 }
+
+/**
+ * Update 4 G1 (SPEC v1.7 §2.1.2, §2.2.1, §3.2.1, §12.1 I-3; F-net, FN-1): RiverLine's series flags by plan key, the same every year,
+ * in this one table (Build reads it for every series it makes; Network::BuildSeries for 2026's hand-built three, through
+ * FestCalDress). Festival and Brand on the four festivals only (RCOP, Ring Rush, The Championship Online, Summer Slam); Flagship, a
+ * Main that can start a Summer (read from G2), on RCOP and Summer Slam; Draw, the Scene Book's pull (§3.2.1's list; inert until G2),
+ * on every series; HighRoller, the high-roller arrival mix, on the high rollers' July (Top Floor Series). No Title (FEIGN, PENNANT,
+ * REIGN and RiverLine's four have none) and no juice: no template, instance or listing changes here (§2.2.1, U9).
+ */
+struct FestCalDressRow
+{
+	const char* Key;   // the plan's key (the series id's stem)
+	const char* Brand; // the festival's brand key; "" for a series
+	int Draw;
+	bool Flagship;
+	bool HighRoller;
+};
+const FestCalDressRow FestCalDressRows[] = {
+	{"rcop", "rcop", 110, true, false},
+	{"slam", "slam", 80, true, false},
+	{"tco", "tco", 70, false, false},
+	{"ring", "ring", 40, false, false},
+	{"mm", "", 22, false, false},
+	{"win", "", 12, false, false},
+	{"spr", "", 12, false, false},
+	{"hol", "", 12, false, false},
+	{"hrs", "", 4, false, true},
+};
+
+/** Dresses Sr from its plan key's row. History: a series already over before Night One (Summer Slam 2026, day -30: §2.1.3's first
+ *  edition is 2027) keeps its Draw but stays a series. */
+void FestCalDress(const char* Key, bool History, SeriesInfo& Sr)
+{
+	for (const FestCalDressRow& Row : FestCalDressRows)
+	{
+		if (std::strcmp(Row.Key, Key) == 0)
+		{
+			Sr.Draw = Row.Draw;
+			Sr.HighRoller = Row.HighRoller;
+			if (!History && Row.Brand[0] != '\0')
+			{
+				Sr.Festival = true;
+				Sr.Brand = Row.Brand;
+				Sr.Flagship = Row.Flagship;
+			}
+			return;
+		}
+	}
+}
 } // namespace calendar_detail
 
 using namespace calendar_detail;
@@ -431,6 +480,7 @@ void Network::BuildCalendar()
 		Sr.LastDay = Sr.FirstDay + Pl.Days - 1;
 		Sr.Color = Pl.Color;
 		Sr.Color2 = Rotate >= 0 ? Accents[Rotate % 5] : Pl.Color2;
+		FestCalDress(Pl.Key, false, Sr); // Update 4 G1 (FN-1): the festival flags and Draw (no draw from R: nothing below moves)
 		const std::vector<int> Slots = Times(Pl.PerDay);
 		Rng R("riverline/series/" + Sr.Id);
 		int Total = 0;

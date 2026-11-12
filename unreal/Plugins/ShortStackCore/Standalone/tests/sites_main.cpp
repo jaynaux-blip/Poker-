@@ -1227,7 +1227,10 @@ void RealSchedules()
 		int Sundays;
 		size_t TemplatesLo, TemplatesHi;
 	};
-	const Want Wants[] = {{net::SiteId::Ignite, 18, 110, 2200, 1, 650, 900}, {net::SiteId::RunItTwice, 22, 330, 21500, 3, 1400, 1650}};
+	// Update 4 G1 (SPEC v1.7 §2.3.4, §8.4; F-net): the template bands grow with the festivals BuildFestivals appends. FN-2a's interim
+	// bands, around its measured counts: Ignite 1,218 (783 + FEIGN's 435), RunItTwice 1,759 (1,521 + GRIT's 238); FN-3 and FN-2b move
+	// them to the final 2,100-2,300 (Ignite 2,198) and 2,400-2,600 (RunItTwice 2,487).
+	const Want Wants[] = {{net::SiteId::Ignite, 18, 110, 2200, 1, 1150, 1300}, {net::SiteId::RunItTwice, 22, 330, 21500, 3, 1700, 1850}};
 	std::set<std::string> Every;
 	for (const net::EventTemplate& T : net::Shared().Templates())
 	{
@@ -2625,6 +2628,11 @@ void SitesCopy()
 	Vars.insert({{"Site", "Ignite"}, {"Month", "November"}, {"Tier", "Gold"}, {"Rate", "14%"}, {"Rake", "$212.40"}, {"Released", "$35.00"},
 		{"Left", "$65.00"}, {"Min", "$10.00"}, {"Fee", "$1.50"}, {"Why", "A series title gets noticed around here."}, {"Money", "$197.00 is on its way from Ignite (Mon to Wed)."},
 		{"Gtd", "$25K"}, {"Entries", "410"}, {"Events", "40"}, {"Days", "17"}, {"Series", "RunItTwice Open 2026"}, {"Buyin", "$530"}, {"Window", "Mon to Wed"}, {"Method", "card"}});
+	// Update 4 G1 (SPEC v1.7 §2.11; F-world's fworld_to_fnet_1): the variables of the festival rows in the copy table (News and
+	// headlines, the Pass's letters, the crown letter, the step refund's ledger line), at realistic lengths (PENNANT I's announcement).
+	Vars.insert({{"Festival", "PENNANT"}, {"Date", "Mar 30"}, {"MainBuyIn", "$215"}, {"Added", "$10,000"}, {"MicroBuyIn", "$2.20"}, {"MiniBuyIn", "$22"},
+		{"Step1", "$1.10"}, {"MainDate", "Apr 11"}, {"Nights", "14"}, {"Show1", "7 PM"}, {"Show2", "10 PM"}, {"Prize", "$41,280"}, {"Trophy", "The Gold Pennant"},
+		{"Points", "1,284"}, {"Cashes", "9"}, {"Year", "2027"}, {"K", "2"}});
 	std::vector<std::pair<std::string, std::string>> Sentences;
 	for (const std::string& S : site::Inventory())
 	{
