@@ -11,6 +11,8 @@
 // a rival's site key), so RCOP's crest gains its wave band and a rival festival's series wears its own frame, motif and rim.
 // G1 FL-3 (F-look): each look's Trophy is fest::TrophyName's (LEAD_CALLS R-3; F-net's body, merged with FN-2a), and FestTrophy,
 // FestBelt and FestPin have their bodies in UI/EventArt.cpp beside the crests' pens (their stubs left this file).
+// G1 FL-5 (F-look): FestArtInventory holds the art's words (§2.11; every entry carries its kind): U32's foot sign "STEP INSIDE · THE HUB",
+// painted by UI/IgniteArt.cpp on FEIGN's arch and PENNANT's pavilion from the same literal (FestHubSign).
 #include "ShortStack/UI/FestivalArt.h"
 
 #include "ShortStack/Common.h"
@@ -114,6 +116,12 @@ std::array<FestivalLook, static_cast<size_t>(fest::Brand::Count)> FestLookTable(
 		true, true, FestTrackWide, Motion::KeyTurn, SoundId::FestRit));
 	return T;
 }
+
+/** U32's foot sign on FEIGN's arch and PENNANT's pavilion (§2.11, §2.7.4): UI/IgniteArt.cpp paints it, FestArtInventory lists it. */
+const char* FestHubSign()
+{
+	return "STEP INSIDE \xC2\xB7 THE HUB";
+}
 } // namespace festart_detail
 } // namespace festart
 } // namespace ui
@@ -121,10 +129,10 @@ std::array<FestivalLook, static_cast<size_t>(fest::Brand::Count)> FestLookTable(
 namespace fest
 {
 // Step A-2 (LEAD_CALLS Q-5; moved here from G/Festival.cpp by the integrator): the words the festival art prints, empty in Phase A.
-// F-look writes the body at G1.
+// G1 FL-5 (F-look): each entry with its kind (§2.11: label, sentence, ...), as FestCopyUi's art half reads them.
 std::vector<std::string> FestArtInventory()
 {
-	return {};
+	return {std::string("label\t") + ui::festart::festart_detail::FestHubSign()};
 }
 } // namespace fest
 

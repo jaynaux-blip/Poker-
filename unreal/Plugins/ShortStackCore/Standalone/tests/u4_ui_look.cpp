@@ -11,7 +11,14 @@
 // G1 FL-3 (F-look): FestTrophyCached, the trophies, title objects, belts and pins (§2.7.5, §2.8.7): each one cached fragment (asked of
 // Canvas::IsCached through UI/EventArt.cpp's keys), their budgets at both scales, the championships' 1.15, the RCOP Cup's engraving,
 // R-3's names. Draws, emits nothing.
+// G1 FL-5 (F-look): Ignite's band with the festival's attraction (§2.7.4): FestBandBudget (the band with each attraction within 15k at
+// both scales, its bulbs one cached row a chase step, asked of Canvas::IsCached through UI/IgniteArt.cpp's IgniteAttrBulbsKey; PLAY's
+// 34k / 400 is FL-final's, once F-hubs fills the band), FestBandstand's arch half (the arch in the Prize Counter's place only while FEIGN
+// is Live, the tower, the pavilion, the foot sign, the puck) and FestCopyUi's art half (FestArtInventory by kind through the copy rules;
+// every word the attractions paint is listed). Draws the band straight onto its own canvases, emits nothing.
 #include "UiSeg.h"
+#include "CopyLint.h"
+#include "Trademarks.h"
 #include "ShortStack/Common.h"
 #include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Network.h"
@@ -19,6 +26,7 @@
 #include "ShortStack/UI/EventArt.h"
 #include "ShortStack/UI/FestivalArt.h"
 #include "ShortStack/UI/Ui.h"
+#include "../../Source/ShortStackCore/Private/ShortStack/UI/IgniteArt.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/UI/RiverLineShared.h"
 #include <algorithm>
 #include <array>
@@ -28,6 +36,7 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <map>
 #include <set>
 #include <string>
 #include <utility>
@@ -51,6 +60,19 @@ uint64_t FestBeltKey(fest::Brand B, float Size, bool Lod);
 uint64_t FestPinKey(fest::Brand B, int Grade, world::FestMark Mark, float Size);
 } // namespace eventart_detail
 } // namespace eventart
+// UI/IgniteArt.cpp's (G1 FL-5): the cache key of the attraction's bulbs row for a band (FestBandBudget asks Canvas::IsCached for it), and
+// UI/FestivalArt.cpp's U32 foot sign (FestBandstand finds it on the band).
+namespace igniteart
+{
+uint64_t IgniteAttrBulbsKey(const IgniteBand& B);
+} // namespace igniteart
+namespace festart
+{
+namespace festart_detail
+{
+const char* FestHubSign();
+} // namespace festart_detail
+} // namespace festart
 } // namespace ui
 } // namespace ss
 
@@ -1001,6 +1023,458 @@ void FestTrophyCached()
 		"FestTrophyCached: the RCOP Cup engraves a line per edition, a bigger Main field's higher");
 	ExpectLook(Many.Vertices <= 1800 && Many15.Vertices <= 1800 && Many.Cached, "FestTrophyCached: the RCOP Cup with its lines is at most 1.8k vertices at 54");
 }
+
+// ------------------------------------------------------------------ Ignite's band: the attractions (G1 FL-5)
+
+namespace ia = ss::ui::igniteart;
+
+/** A band as F-hubs fills it (FH-3b): the hour's tones, the clocks, the weather and the festival's three fields. */
+ia::IgniteBand BandLook(Brand Fest, int Day, int Days, ss::site::show::Mood Mood, double Now, bool Busy)
+{
+	ia::IgniteBand B;
+	B.K = ia::IgniteTonesFor(Mood);
+	B.Now = Now;
+	B.World = 60.0 * 24.0 * 30.0 + 20.0 * 60.0;
+	B.Snow = Busy;
+	B.Fireworks = Busy;
+	B.Wildfire = Busy;
+	B.Fest = Fest;
+	B.FestDay = Day;
+	B.FestDays = Days;
+	return B;
+}
+
+/** The band's static layer, its live layer or both, drawn straight onto a fresh canvas at Scale (as F-hubs' IgniteBoardwalk draws
+ *  them: the static layer through its cache, the live one directly; the vertices are the same either way). */
+ss::ui::DrawList DrawBandLook(const ia::IgniteBand& B, float Scale, bool Static, bool Live)
+{
+	ui_test::TableMeasurer M;
+	ss::ui::DrawList L;
+	ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, Scale);
+	if (Static)
+	{
+		ia::IgniteBoardwalkStatic(C, B);
+	}
+	if (Live)
+	{
+		ia::IgniteBoardwalkLive(C, B);
+	}
+	return L;
+}
+
+/** How many vertices wear Rgb (at alpha MinA or more) inside R. */
+size_t WearsLook(const ss::ui::DrawList& L, uint32_t Rgb, const ss::ui::Rect& R, float MinA = 0.5f)
+{
+	size_t N = 0;
+	for (const ss::ui::Vertex& V : L.Vertices)
+	{
+		N += V.Col.A >= MinA && RgbLook(V.Col) == Rgb && V.X >= R.X && V.X <= R.X + R.W && V.Y >= R.Y && V.Y <= R.Y + R.H ? 1u : 0u;
+	}
+	return N;
+}
+
+/** The text runs of a draw list. */
+std::vector<ss::ui::TextItem> RunsLook(const ss::ui::DrawList& L)
+{
+	std::vector<ss::ui::TextItem> Out;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text)
+		{
+			Out.push_back(Cmd.Text);
+		}
+	}
+	return Out;
+}
+
+/** FestArtInventory's entries without their kind. */
+std::vector<std::string> ArtTextsLook()
+{
+	std::vector<std::string> Out;
+	for (const std::string& E : ss::fest::FestArtInventory())
+	{
+		const size_t Tab = E.find('\t');
+		Out.push_back(Tab == std::string::npos ? E : E.substr(Tab + 1));
+	}
+	return Out;
+}
+
+// The rects the checks read (UI/IgniteArt.cpp's geometry): the Prize Counter booth (its awning, back wall and counter), FEIGN's arch,
+// PUSH's tower with its foot, PENNANT's pavilion and the bandstand's shell it replaces, the puck's track.
+constexpr ss::ui::Rect BoothLook{1240.0f, 104.0f, 332.0f, 196.0f};
+constexpr ss::ui::Rect ArchLook{1258.0f, 98.0f, 312.0f, 204.0f};
+constexpr ss::ui::Rect TowerLook{908.0f, 74.0f, 52.0f, 228.0f};
+constexpr ss::ui::Rect PavilionLook{166.0f, 70.0f, 480.0f, 232.0f};
+constexpr ss::ui::Rect PuckTrackLook{928.0f, 100.0f, 12.0f, 170.0f};
+constexpr uint32_t BoothAwningLook = 0x6b3fd1; // the Prize Counter's violet awning stripe (its body alone wears it on the band)
+const Brand AttractionsLook[] = {Brand::Feign, Brand::Push, Brand::Pennant};
+
+/**
+ * FestBandBudget (§2.7.4's Ignite band row, §2.8.10 / §8.5's "Ignite's band with an attraction", §2.15.2): Ignite's band, static and
+ * live layers, with each attraction (FEIGN's arch, PUSH's tower, PENNANT's pavilion) is at most 15k vertices at both scales, in the
+ * day's and Afterburner's tones, at its busiest (snow, the Sunday Blaze's fireworks and the series' bunting at once) on four beats; the
+ * attraction's bulbs are one cached row a chase step (Canvas::IsCached holds IgniteAttrBulbsKey after a drawing and not before, a
+ * second drawing copies the first exactly, two steps two keys, no attraction no key). Printed: every count, what the attraction adds
+ * to the band, the Boardwalk pool's share of the chase rows, and PLAY: Ignite's PLAY at 34k vertices and 400 runs with an attraction
+ * needs F-hubs' band fill (FH-3b), so FL-final asserts it.
+ * Planted bug: the arch's bulbs uncached.
+ */
+void FestBandBudget()
+{
+	const float Scales[2] = {1.0f, 1.5f};
+	const ss::site::show::Mood Moods[2] = {ss::site::show::Mood::PrimeTime, ss::site::show::Mood::Afterburner};
+	const double Beats[4] = {41.0, 41.26, 41.5, 41.77};
+	size_t Plain[2][2] = {};
+	for (int Mi = 0; Mi < 2; ++Mi)
+	{
+		for (int K = 0; K < 2; ++K)
+		{
+			for (const double Now : Beats)
+			{
+				Plain[Mi][K] = std::max(Plain[Mi][K], DrawBandLook(BandLook(Brand::None, 0, 0, Moods[Mi], Now, true), Scales[K], true, true).Vertices.size());
+			}
+		}
+	}
+	std::printf("  band: Ignite's band today (busiest of four beats): %zu, %zu vertices (Prime Time, scale 1, 1.5); %zu, %zu (Afterburner)\n", Plain[0][0],
+		Plain[0][1], Plain[1][0], Plain[1][1]);
+	for (const Brand B : AttractionsLook)
+	{
+		const int Days = B == Brand::Pennant ? 13 : 10;
+		for (int Mi = 0; Mi < 2; ++Mi)
+		{
+			size_t Most[2] = {};
+			size_t Static[2] = {};
+			for (int K = 0; K < 2; ++K)
+			{
+				for (const double Now : Beats)
+				{
+					const ia::IgniteBand Band = BandLook(B, 3, Days, Moods[Mi], Now, true);
+					Most[K] = std::max(Most[K], DrawBandLook(Band, Scales[K], true, true).Vertices.size());
+					Static[K] = DrawBandLook(Band, Scales[K], true, false).Vertices.size();
+				}
+			}
+			std::printf("  band: %-7s %-11s static %zu, %zu; with the live layer %zu, %zu vertices (scale 1, 1.5); the attraction adds %+d, %+d\n", NameLook(B),
+				Mi == 0 ? "Prime Time" : "Afterburner", Static[0], Static[1], Most[0], Most[1], static_cast<int>(Most[0]) - static_cast<int>(Plain[Mi][0]),
+				static_cast<int>(Most[1]) - static_cast<int>(Plain[Mi][1]));
+			ExpectLook(Most[0] > 0 && Most[0] <= 15000 && Most[1] <= 15000,
+				std::string("FestBandBudget: Ignite's band with the attraction is at most 15k vertices at both scales (") + NameLook(B) + (Mi == 0 ? ", Prime Time)" : ", Afterburner)"));
+		}
+		// The bulbs: one cached row a chase step, replayed exactly; two steps, two rows.
+		for (int K = 0; K < 2; ++K)
+		{
+			const ia::IgniteBand Band = BandLook(B, 3, Days, ss::site::show::Mood::PrimeTime, 977.0 + 0.37 * static_cast<double>(static_cast<int>(B)), false);
+			const uint64_t Key = ia::IgniteAttrBulbsKey(Band);
+			ss::ui::Canvas::SetPoolBudget(ss::ui::Canvas::CachePool::Boardwalk, 1); // empties the pool (least recently used first)
+			ss::ui::Canvas::SetPoolBudget(ss::ui::Canvas::CachePool::Boardwalk, 0); // and puts its 120k back
+			ui_test::TableMeasurer M;
+			ss::ui::DrawList First;
+			ss::ui::DrawList Second;
+			ss::ui::Canvas C1(First, M, 1600.0f, 1000.0f, Scales[K]);
+			const bool Fresh = Key != 0 && !C1.IsCached(Key);
+			ia::IgniteBoardwalkLive(C1, Band);
+			const bool Cached = C1.IsCached(Key);
+			ss::ui::Canvas C2(Second, M, 1600.0f, 1000.0f, Scales[K]);
+			ia::IgniteBoardwalkLive(C2, Band);
+			const bool Copy = Second.Vertices.size() == First.Vertices.size() && ListPrintLook(Second) == ListPrintLook(First);
+			const ia::IgniteBand Next = BandLook(B, 3, Days, ss::site::show::Mood::PrimeTime, Band.Now + 60.0 / Band.K.Bpm, false);
+			char Scale[48];
+			std::snprintf(Scale, sizeof(Scale), " (%s, scale %.1f)", NameLook(B), static_cast<double>(Scales[K]));
+			ExpectLook(Fresh && Cached && Copy && ia::IgniteAttrBulbsKey(Next) != Key,
+				std::string("FestBandBudget: the attraction's bulbs are one cached row a chase step, replayed exactly") + Scale);
+		}
+		// The chase's rows in the Boardwalk pool (printed; the pool is 120k, least recently used): one per lit pattern in a cycle, and
+		// what the live layer gains over today's (the attraction's row, PUSH's puck; under the pavilion the dome's row replaces the
+		// bandstand's).
+		std::set<uint64_t> Rows;
+		for (int Step = 0; Step < 32; ++Step)
+		{
+			Rows.insert(ia::IgniteAttrBulbsKey(BandLook(B, 3, Days, ss::site::show::Mood::PrimeTime, (static_cast<double>(Step) + 0.5) * 60.0 / 124.0, false)));
+		}
+		const ia::IgniteBand Lit = BandLook(B, 3, Days, ss::site::show::Mood::PrimeTime, 0.6 * 60.0 / 124.0, false);
+		const int Gain = static_cast<int>(DrawBandLook(Lit, 1.0f, false, true).Vertices.size()) -
+			static_cast<int>(DrawBandLook(BandLook(Brand::None, 0, 0, ss::site::show::Mood::PrimeTime, Lit.Now, false), 1.0f, false, true).Vertices.size());
+		std::printf("  band: %-7s bulbs: %zu chase rows a cycle, each one cached row; the live layer gains %+d vertices over today's\n", NameLook(B), Rows.size(), Gain);
+	}
+	ExpectLook(ia::IgniteAttrBulbsKey(BandLook(Brand::None, 0, 0, ss::site::show::Mood::PrimeTime, 41.0, false)) == 0 &&
+			ia::IgniteAttrBulbsKey(BandLook(Brand::Feign, 0, 10, ss::site::show::Mood::PrimeTime, 41.0, false)) == 0,
+		"FestBandBudget: no attraction, no bulbs row (Fest None, or FEIGN before its first day)");
+	std::printf("  band: PLAY: needs F-hubs' band fill (FH-3b fills IgniteBand's Fest, FestDay and FestDays); FL-final asserts PLAY <= 34k vertices and 400 runs "
+				"with each attraction (the attraction adds the vertices above and at most one text run)\n");
+}
+
+/**
+ * FestBandstand, the arch's half (§2.7.4, §2.15.2; F-hubs' FestBandstandPick holds the bandstand's pick): FEIGN's arch stands, and the
+ * Prize Counter booth does not, only while FEIGN is Live (day 1 to its last); before its first day, after its last and for every other
+ * brand the band is today's byte for byte, both layers. PUSH stands its tower and PENNANT its pavilion over the bandstand (in place of
+ * the shell, its dome carrying the bulbs), each keeping the Prize Counter; the arch and the pavilion carry U32's foot sign once, inside
+ * their own rects, and it fits; PUSH's puck rises with the festival's days (the top on the last); no attraction wears a RiverLine hex
+ * (SitesNoLeak's rule). In the day's and Afterburner's tones.
+ * Planted bug: the Prize Counter still drawn under the arch.
+ */
+void FestBandstand()
+{
+	const ss::site::show::Mood Moods[2] = {ss::site::show::Mood::PrimeTime, ss::site::show::Mood::Afterburner};
+	const std::array<uint32_t, 16>& Home = ss::net::Def(SiteId::RiverLine).Palette;
+	const std::string Sign = ss::ui::festart::festart_detail::FestHubSign();
+	for (int Mi = 0; Mi < 2; ++Mi)
+	{
+		const char* Tone = Mi == 0 ? "Prime Time" : "Afterburner";
+		const ss::ui::DrawList Today = DrawBandLook(BandLook(Brand::None, 0, 0, Moods[Mi], 41.0, false), 1.0f, true, true);
+		const uint64_t TodayPrint = ListPrintLook(Today);
+		const uint32_t Shell = Mi == 0 ? 0x2a1546 : 0x1e1440;
+		const auto SignsIn = [&Sign](const ss::ui::DrawList& L, const ss::ui::Rect& R) {
+			int Inside = 0;
+			int All = 0;
+			for (const ss::ui::TextItem& T : RunsLook(L))
+			{
+				All += T.Text == Sign ? 1 : 0;
+				Inside += T.Text == Sign && T.X >= R.X && T.X <= R.X + R.W && T.BaselineY >= R.Y && T.BaselineY <= R.Y + R.H ? 1 : 0;
+			}
+			return std::make_pair(Inside, All);
+		};
+		// Today's band: the booth, the shell, no attraction, no sign.
+		ExpectLook(WearsLook(Today, BoothAwningLook, BoothLook) > 0 && WearsLook(Today, Shell, PavilionLook) > 0 && SignsIn(Today, PavilionLook).second == 0 &&
+				WearsLook(Today, festart::LookOf(Brand::Feign).Accent2, ArchLook) == 0 && WearsLook(Today, festart::LookOf(Brand::Push).Accent, TowerLook) == 0,
+			std::string("FestBandstand: today's band keeps the Prize Counter and the bandstand's shell and stands no attraction (") + Tone + ")");
+		// Only while Live: before day 1, after the last day and for any other brand the band is today's, byte for byte.
+		bool Same = true;
+		std::string Off;
+		const std::pair<Brand, int> NotLive[] = {{Brand::Feign, 0}, {Brand::Feign, 11}, {Brand::Push, 0}, {Brand::Pennant, 14}, {Brand::Rcop, 3}, {Brand::Writ, 3},
+			{Brand::Reign, 3}, {Brand::Slam, 3}};
+		for (const auto& Case : NotLive)
+		{
+			const int Days = Case.first == Brand::Pennant || Case.first == Brand::Reign ? 13 : 10;
+			const bool Equal = ListPrintLook(DrawBandLook(BandLook(Case.first, Case.second, Days, Moods[Mi], 41.0, false), 1.0f, true, true)) == TodayPrint;
+			Same = Same && Equal;
+			Off += Equal ? "" : std::string(" ") + NameLook(Case.first) + " day " + std::to_string(Case.second);
+		}
+		ExpectLook(Same, std::string("FestBandstand: outside a festival's days, and for every brand without an attraction, the band is today's byte for byte (") + Tone + ")" + Off);
+		// FEIGN Live: the arch, no booth, the sign once inside the arch.
+		for (const int Day : {1, 3, 10})
+		{
+			const ss::ui::DrawList L = DrawBandLook(BandLook(Brand::Feign, Day, 10, Moods[Mi], 41.0, false), 1.0f, true, true);
+			const auto Signs = SignsIn(L, ArchLook);
+			const size_t Mint = WearsLook(L, festart::LookOf(Brand::Feign).Accent2, ArchLook);
+			const size_t Pink = WearsLook(L, festart::LookOf(Brand::Feign).Accent, ArchLook);
+			char Where[96];
+			std::snprintf(Where, sizeof(Where), " (day %d of 10, %s: %zu mint, %zu pink, signs %d/%d)", Day, Tone, Mint, Pink, Signs.first, Signs.second);
+			ExpectLook(Mint >= 40 && Pink >= 40 && Signs.first == 1 && Signs.second == 1,
+				std::string("FestBandstand: FEIGN's arch stands at the boardwalk's end with its foot sign while FEIGN is Live") + Where);
+			ExpectLook(WearsLook(L, BoothAwningLook, BoothLook) == 0 && WearsLook(L, ss::ui::igniteart::IgGrape, BoothLook) == 0,
+				std::string("FestBandstand: the arch replaces the Prize Counter booth (none of the booth drawn under it)") + Where);
+		}
+		// PUSH: the tower, the booth kept, no sign; PENNANT: the pavilion in the shell's place, the booth kept, the sign once inside it.
+		const ss::ui::DrawList Push = DrawBandLook(BandLook(Brand::Push, 3, 10, Moods[Mi], 41.0, false), 1.0f, true, true);
+		const size_t Brass = WearsLook(Push, festart::LookOf(Brand::Push).Accent, TowerLook);
+		ExpectLook(Brass >= 24 && WearsLook(Push, BoothAwningLook, BoothLook) > 0 && WearsLook(Push, Shell, PavilionLook) > 0 && SignsIn(Push, PavilionLook).second == 0,
+			std::string("FestBandstand: PUSH stands its tower and keeps the Prize Counter and the bandstand (") + Tone + ": " + std::to_string(Brass) + " brass)");
+		const ss::ui::DrawList Pennant = DrawBandLook(BandLook(Brand::Pennant, 3, 13, Moods[Mi], 41.0, false), 1.0f, true, true);
+		const auto PavSigns = SignsIn(Pennant, PavilionLook);
+		const size_t Green = WearsLook(Pennant, festart::LookOf(Brand::Pennant).Accent, PavilionLook);
+		const size_t Bulbs = WearsLook(Pennant, festart::LookOf(Brand::Pennant).Gold, PavilionLook);
+		char Pav[96];
+		std::snprintf(Pav, sizeof(Pav), " (%s: %zu green, %zu bulb white, signs %d/%d)", Tone, Green, Bulbs, PavSigns.first, PavSigns.second);
+		ExpectLook(Green >= 40 && Bulbs >= 20 && WearsLook(Pennant, Shell, PavilionLook) == 0 && WearsLook(Pennant, BoothAwningLook, BoothLook) > 0 && PavSigns.first == 1 &&
+				PavSigns.second == 1,
+			std::string("FestBandstand: PENNANT's pavilion stands over the bandstand in the shell's place with its foot sign, the Prize Counter kept") + Pav);
+		// No attraction wears a RiverLine hex (the rival sites' leak rule, on the band alone).
+		for (const Brand B : AttractionsLook)
+		{
+			const ss::ui::DrawList L = DrawBandLook(BandLook(B, 3, B == Brand::Pennant ? 13 : 10, Moods[Mi], 41.0, true), 1.0f, true, true);
+			uint32_t Leak = 0;
+			for (const ss::ui::Vertex& V : L.Vertices)
+			{
+				const uint32_t C = RgbLook(V.Col);
+				Leak = Leak == 0 && V.Col.A > 0.02f && std::find(Home.begin(), Home.end(), C) != Home.end() ? C : Leak;
+			}
+			char Hit[96];
+			std::snprintf(Hit, sizeof(Hit), " (%s, %s%s%06x)", NameLook(B), Tone, Leak ? ": " : "", Leak);
+			ExpectLook(Leak == 0, std::string("FestBandstand: the attraction wears no RiverLine palette hex") + Hit);
+		}
+	}
+	// The sign fits its plate (the arch's 192, the pavilion's 176, 8 units of margin a side) at the sign's 11.5 Black.
+	{
+		ui_test::TableMeasurer M;
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		const float W = C.Measure(Sign, 11.5f, 900);
+		std::printf("  bandstand: the foot sign '%s' measures %.1f at 11.5 Black (plates 192 and 176)\n", Sign.c_str(), static_cast<double>(W));
+		ExpectLook(W > 0.0f && W <= 176.0f - 16.0f, "FestBandstand: the foot sign fits the arch's and the pavilion's plates");
+	}
+	// PUSH's puck rises with the festival: day 1 low, day 5 higher, the top on the last day.
+	{
+		float Prev = 1e9f;
+		bool Rises = true;
+		std::string Line;
+		for (const int Day : {1, 5, 10})
+		{
+			const ss::ui::DrawList L = DrawBandLook(BandLook(Brand::Push, Day, 10, ss::site::show::Mood::PrimeTime, 41.0, false), 1.0f, false, true);
+			float Sum = 0.0f;
+			int N = 0;
+			for (const ss::ui::Vertex& V : L.Vertices)
+			{
+				if (V.Col.A >= 0.9f && RgbLook(V.Col) == festart::LookOf(Brand::Push).Gold && V.X >= PuckTrackLook.X && V.X <= PuckTrackLook.X + PuckTrackLook.W &&
+					V.Y >= PuckTrackLook.Y && V.Y <= PuckTrackLook.Y + PuckTrackLook.H)
+				{
+					Sum += V.Y;
+					++N;
+				}
+			}
+			const float Y = N > 0 ? Sum / static_cast<float>(N) : 1e9f;
+			Rises = Rises && N > 0 && Y < Prev - 10.0f;
+			Prev = Y;
+			char Part[40];
+			std::snprintf(Part, sizeof(Part), " day %d: y %.1f", Day, static_cast<double>(Y));
+			Line += Part;
+		}
+		std::printf("  bandstand: PUSH's puck%s\n", Line.c_str());
+		ExpectLook(Rises && std::fabs(Prev - 122.0f) <= 4.0f, "FestBandstand: PUSH's puck rises with the festival's days, the top on its last" + Line);
+	}
+}
+
+/** FestChampWord's site rule (§2.11, F-net's FestNetChampWord): "Ignite championship", "Ignite's championship", or Ignite within three
+ *  words of "championship". */
+bool ChampWordLook(const std::string& Text)
+{
+	const std::string Low = trademarks::Lower(Text);
+	if (Low.find("ignite championship") != std::string::npos || Low.find("ignite's championship") != std::string::npos)
+	{
+		return true;
+	}
+	std::vector<std::string> Words;
+	std::string W;
+	for (const char C : Low + " ")
+	{
+		if ((C >= 'a' && C <= 'z') || (C >= '0' && C <= '9') || C == '\'')
+		{
+			W += C;
+		}
+		else if (!W.empty())
+		{
+			Words.push_back(W);
+			W.clear();
+		}
+	}
+	for (size_t I = 0; I < Words.size(); ++I)
+	{
+		for (size_t J = I >= 3 ? I - 3 : 0; Words[I].rfind("championship", 0) == 0 && J < std::min(Words.size(), I + 4); ++J)
+		{
+			if (J != I && Words[J].rfind("ignite", 0) == 0)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+/**
+ * FestCopyUi, the art half (§1.2 items 1-5, 9, 12-13, §2.11, §2.15.2; F-hubs' half reads FestUiInventory): every FestArtInventory entry
+ * carries a known kind and passes the copy lint by it (a label has no closing stop, 200; a sentence its stop), both trademark tiers, the
+ * design words after the sample fill, U1 ("AI", "bot(s)", "autoplay", "autopilot"), X1 ("players" in a count), "marquee" and "pavilion"
+ * (art names, never copy), "championship" (FestChampWord: the arch's and the pavilion's words are Ignite's, which never print it),
+ * "reign cabinet" (FestReignCopy), the glyph rule (ASCII and · — – … é ’) and the article and year rules (each {Festival} filled again
+ * with "The Championship Online 2027": no "the The"). And the art draws only listed words: every text run the band gains with an
+ * attraction is an entry.
+ * Planted bug: "bot" in a line.
+ */
+void FestCopyUiLook()
+{
+	std::map<std::string, std::string> Vars = copylint::Samples();
+	const std::map<std::string, std::string> Extra = {{"Festival", "PENNANT 2027"}, {"SHORT", "PENNANT"}, {"Short", "PENNANT"}, {"No", "6"}, {"Year", "2027"},
+		{"Site", "Ignite"}};
+	for (const auto& Kv : Extra)
+	{
+		Vars[Kv.first] = Kv.second;
+	}
+	int Entries = 0;
+	int Problems = 0;
+	std::string First;
+	for (const std::string& Entry : ss::fest::FestArtInventory())
+	{
+		++Entries;
+		const size_t Tab = Entry.find('\t');
+		const std::string Kind = Tab == std::string::npos ? std::string() : Entry.substr(0, Tab);
+		const std::string Text = Tab == std::string::npos ? Entry : Entry.substr(Tab + 1);
+		const bool Known = Kind == "label" || Kind == "sentence" || Kind == "text" || Kind == "subject" || Kind == "letter" || Kind == "headtitle" || Kind == "headbody" ||
+			Kind == "journey";
+		const bool Stop = !(Kind == "label" || Kind == "subject" || Kind == "headtitle" || Kind == "text");
+		const size_t Cap = Kind == "label" || Kind == "subject" ? copylint::MailSubject : Kind == "headtitle" ? copylint::kHeadTitleMax : Kind == "text" ? copylint::TableTalk
+			: Kind == "headbody" ? copylint::kHeadBodyMax : Kind == "journey" ? copylint::kJourneyMax : copylint::LetterBody;
+		const std::string Filled = copylint::Fill(Text, Vars);
+		const bool Ends = copylint::EndsWith(Filled, ".") || copylint::EndsWith(Filled, "!") || copylint::EndsWith(Filled, "?");
+		std::string Why = Known ? std::string() : " an unknown kind \"" + Kind + "\"";
+		const std::string Lint = copylint::Check(Filled + (Stop || Ends ? "" : "."), Cap + (Stop || Ends ? 0 : 1), {});
+		Why += Lint.empty() ? std::string() : " " + Lint;
+		Why += !Stop && Ends && Kind != "text" ? std::string(" a label ends in a stop") : std::string();
+		for (const char* Hit : {trademarks::Find(Filled, trademarks::kSourceScan), trademarks::Find(Filled, trademarks::kCopyScan), trademarks::Find(Filled, trademarks::kDesignWords)})
+		{
+			Why += Hit ? std::string(" trademark or design word: ") + Hit : std::string();
+		}
+		const std::string Low = trademarks::Lower(Filled);
+		for (const char* W : {"ai", "bot", "bots", "autoplay", "autopilot", "players", "marquee", "pavilion"})
+		{
+			Why += trademarks::HasWord(Low, W) ? std::string(" U1/X1/art name: ") + W : std::string();
+		}
+		Why += Low.find("championship") != std::string::npos || ChampWordLook(Filled) ? " championship (FestChampWord)" : "";
+		Why += Low.find("reign cabinet") != std::string::npos ? " \"reign cabinet\" (FestReignCopy)" : "";
+		for (size_t K = 0; K < Filled.size(); ++K)
+		{
+			if (static_cast<unsigned char>(Filled[K]) < 0x80)
+			{
+				continue;
+			}
+			const std::string G2 = Filled.substr(K, 2);
+			const std::string G3 = Filled.substr(K, 3);
+			if (G2 == "\xC2\xB7" || G2 == "\xC3\xA9")
+			{
+				++K;
+			}
+			else if (G3 == "\xE2\x80\x94" || G3 == "\xE2\x80\x93" || G3 == "\xE2\x80\xA6" || G3 == "\xE2\x80\x99")
+			{
+				K += 2;
+			}
+			else
+			{
+				Why += " a glyph outside the rule";
+				break;
+			}
+		}
+		std::map<std::string, std::string> Again = Vars;
+		Again["Festival"] = "The Championship Online 2027";
+		Why += trademarks::Lower(copylint::Fill(Text, Again)).find("the the") != std::string::npos ? " \"the The\" with The Championship Online" : "";
+		if (!Why.empty())
+		{
+			++Problems;
+			First = First.empty() ? ": \"" + Filled + "\" [" + Kind + "]" + Why : First;
+			std::printf("COPY (u4_ui art) \"%s\" [%s]:%s\n", Filled.c_str(), Kind.c_str(), Why.c_str());
+		}
+	}
+	ExpectLook(Entries > 0 && Problems == 0,
+		"FestCopyUi: FestArtInventory's " + std::to_string(Entries) + " entries pass the copy lint by kind, both trademark tiers, the design words, U1, X1, the art names, "
+		"FestChampWord, FestReignCopy's phrase, the glyph rule and the article rule (" + std::to_string(Problems) + " problems)" + First);
+	// The art draws only listed words: what each attraction adds to the band's text is in FestArtInventory.
+	const std::vector<std::string> Listed = ArtTextsLook();
+	std::set<std::string> Today;
+	for (const ss::ui::TextItem& T : RunsLook(DrawBandLook(BandLook(Brand::None, 0, 0, ss::site::show::Mood::PrimeTime, 41.0, false), 1.0f, true, true)))
+	{
+		Today.insert(T.Text);
+	}
+	int Drawn = 0;
+	std::string Unlisted;
+	for (const Brand B : AttractionsLook)
+	{
+		for (const ss::ui::TextItem& T : RunsLook(DrawBandLook(BandLook(B, 3, B == Brand::Pennant ? 13 : 10, ss::site::show::Mood::PrimeTime, 41.0, false), 1.0f, true, true)))
+		{
+			if (Today.count(T.Text) == 0)
+			{
+				++Drawn;
+				Unlisted += std::find(Listed.begin(), Listed.end(), T.Text) == Listed.end() ? " \"" + T.Text + "\" (" + NameLook(B) + ")" : std::string();
+			}
+		}
+	}
+	ExpectLook(Drawn >= 2 && Unlisted.empty(), "FestCopyUi: every word the attractions paint on the band is a FestArtInventory entry (" + std::to_string(Drawn) + " runs)" + Unlisted);
+}
 } // namespace
 
 namespace u4_ui_test
@@ -1012,5 +1486,8 @@ void SegLook()
 	FestLeak();
 	FestCrestLowDetail();
 	FestTrophyCached();
+	FestBandBudget();
+	FestBandstand();
+	FestCopyUiLook();
 }
 } // namespace u4_ui_test
