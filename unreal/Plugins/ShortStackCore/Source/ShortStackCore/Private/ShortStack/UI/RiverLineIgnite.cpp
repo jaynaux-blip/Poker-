@@ -2298,6 +2298,8 @@ void IgniteLobby(IgniteCtx& X)
 		switch (Page)
 		{
 		case Pg::Lobby: IgnitePlay(X); break;
+		// Update 4 G1 (SPEC v1.7 §2.8.1, F-hubs FH-1c): the shared SeriesPage routes a festival (FEIGN, PUSH, PENNANT) to its hub in
+		// Ignite's content rect ({24, 84, 1552, 786}, above the dock: UI/RiverLineNet.cpp's NetHubRect); Wildfire keeps the page.
 		case Pg::Series: Access::SeriesPage(RL, X.Now); break;
 		case Pg::Fuse:
 			X.C.FillRect({0.0f, 72.0f, 1600.0f, 890.0f}, IgniteHx(X.K.Plum));

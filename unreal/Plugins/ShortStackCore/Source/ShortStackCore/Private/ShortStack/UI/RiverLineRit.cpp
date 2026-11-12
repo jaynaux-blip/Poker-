@@ -17,6 +17,7 @@
 #include "ShortStack/Evaluator.h"
 #include "ShortStack/Hand.h"
 #include "ShortStack/Structure.h"
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/SiteShow.h"
@@ -4259,6 +4260,13 @@ void RitSecondShow(RitCtx& X, const RitSecond& B, float Cx, float Top, double Ag
 }
 } // namespace rlrit_detail
 
+namespace rlnet_detail
+{
+// Update 4 G1 (SPEC v1.7 §2.8.1, F-hubs FH-1c): the festival hub's routing, defined in UI/RiverLineNet.cpp beside SeriesPage.
+Rect NetHubRect(net::SiteId Site);
+const fest::Festival* NetHubEdition(net::SiteId Site, const std::string& SeriesId, double World);
+} // namespace rlnet_detail
+
 // ------------------------------------------------------------------ the frame
 
 void RiverLine::RitFrame(double Now, bool Preview)
@@ -4416,7 +4424,19 @@ void RiverLine::RitFrame(double Now, bool Preview)
 			case Page::League: RitLeaguePage(X); break;
 			case Page::Leaderboards: RitRankingsPage(X); break;
 			case Page::Desk: RitDeskPage(X); break;
-			case Page::Series: RitSeriesPage(X); break;
+			case Page::Series:
+				// Update 4 G1 (SPEC v1.7 §2.8.1, FH-1c): a festival (WRIT, GRIT, REIGN) is its hub in RunItTwice's content rect, one
+				// panel as the programme is; a plain series keeps the programme.
+				if (const fest::Festival* HubFest = rlnet_detail::NetHubEdition(RitSite, SeriesId, World))
+				{
+					RitPanelBegin();
+					FestivalHub(rlnet_detail::NetHubRect(RitSite), *HubFest, Now);
+				}
+				else
+				{
+					RitSeriesPage(X);
+				}
+				break;
 			case Page::News: RitNewsPage(X); break;
 			case Page::Promotions: RitClubPage(X); break;
 			case Page::Cashier: RitCashierPage(X); break;
