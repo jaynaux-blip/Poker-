@@ -896,6 +896,39 @@ MarkRunLook RunMarkLook(const std::function<void(ss::ui::Canvas&)>& Paint, float
 	return R;
 }
 
+/** Whether B differs from A by more than float rounding: another vertex or run count, or a vertex or run moved by more than 0.02 units or
+ *  recoloured by more than 0.004 (a live drawing and the cached copy of the same frame differ only in their last bits, so a motion that
+ *  doesn't move reads unmoved). */
+bool MovedLook(const MarkRunLook& A, const MarkRunLook& B)
+{
+	if (A.Verts.size() != B.Verts.size() || A.Runs.size() != B.Runs.size())
+	{
+		return true;
+	}
+	const auto Recoloured = [](const ss::ui::Color& P, const ss::ui::Color& Q) {
+		return std::fabs(P.R - Q.R) > 0.004f || std::fabs(P.G - Q.G) > 0.004f || std::fabs(P.B - Q.B) > 0.004f || std::fabs(P.A - Q.A) > 0.004f;
+	};
+	for (size_t I = 0; I < A.Verts.size(); ++I)
+	{
+		const ss::ui::Vertex& P = A.Verts[I];
+		const ss::ui::Vertex& Q = B.Verts[I];
+		if (std::fabs(P.X - Q.X) > 0.02f || std::fabs(P.Y - Q.Y) > 0.02f || Recoloured(P.Col, Q.Col))
+		{
+			return true;
+		}
+	}
+	for (size_t I = 0; I < A.Runs.size(); ++I)
+	{
+		const ss::ui::TextItem& P = A.Runs[I];
+		const ss::ui::TextItem& Q = B.Runs[I];
+		if (P.Text != Q.Text || std::fabs(P.X - Q.X) > 0.02f || std::fabs(P.BaselineY - Q.BaselineY) > 0.02f || Recoloured(P.Col, Q.Col))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 /** A festival's name per look, as F-net prints them (the word-mark prints the festival's name). */
 std::string MarkNameLook(Brand B)
 {
@@ -1074,7 +1107,7 @@ void FestMotionsLook()
 			Far = std::max(Far, std::fabs(T.BaselineY - 196.0f));
 		}
 		std::printf("  motions: FEIGN's bob: baselines %.2f to %.2f at 1.2 s (at most %.2f off)\n", static_cast<double>(Lo), static_cast<double>(Hi), static_cast<double>(Far));
-		ExpectLook(MarkLook(Brand::Feign, 0.4, Day, false).Hash != Still.Hash && Hi - Lo > 1.0f && Far <= 0.08f * 46.0f + 0.01f,
+		ExpectLook(MovedLook(MarkLook(Brand::Feign, 0.4, Day, false), Still) && Hi - Lo > 1.0f && Far <= 0.08f * 46.0f + 0.01f,
 			"FestCrestLowDetail (motions): FEIGN's letters bob on a slow sine, within 8% of the size");
 	}
 	// PUSH's gauge: it fills on open to the day's progress, which moves once a world minute, each minute's mark one cached fragment.
@@ -1083,7 +1116,7 @@ void FestMotionsLook()
 		const std::string Name = MarkNameLook(Brand::Push);
 		const double End = fd::FestWordSettle(L, Name);
 		const MarkRunLook Full = MarkLook(Brand::Push, End, Day, false);
-		ExpectLook(MarkLook(Brand::Push, 0.3, Day, false).Hash != Full.Hash && MarkLook(Brand::Push, End + 4.0, Day, false).Hash == Full.Hash,
+		ExpectLook(MovedLook(MarkLook(Brand::Push, 0.3, Day, false), Full) && MarkLook(Brand::Push, End + 4.0, Day, false).Hash == Full.Hash,
 			"FestCrestLowDetail (motions): PUSH's gauge fills on hub open, then holds");
 		ExpectLook(MarkLook(Brand::Push, End, Day + 0.2f / 1440.0f, false).Hash == Full.Hash && MarkLook(Brand::Push, End, Day + 1.0f / 1440.0f, false).Hash != Full.Hash &&
 				CachedLook(fd::FestWordMarkKey(L, Name, 46.0f, 576)) && !CachedLook(fd::FestWordMarkKey(L, Name, 46.0f, 1439)),
@@ -1102,7 +1135,7 @@ void FestMotionsLook()
 	}
 	// The banner's motions.
 	{
-		ExpectLook(BannerLook(Brand::Grit, 0.3, Day, false, false).Hash != BannerLook(Brand::Grit, 1.4, Day, false, false).Hash &&
+		ExpectLook(MovedLook(BannerLook(Brand::Grit, 0.3, Day, false, false), BannerLook(Brand::Grit, 1.4, Day, false, false)) &&
 				BannerLook(Brand::Grit, 1.4, Day, false, false).Hash == BannerLook(Brand::Grit, 6.0, Day, false, false).Hash,
 			"FestCrestLowDetail (motions): GRIT's curtains part on hub open, then hold");
 		const festart::FestivalLook& Rcop = festart::LookOf(Brand::Rcop);
@@ -1110,28 +1143,30 @@ void FestMotionsLook()
 		const float Dawn = InkLook(BannerLook(Brand::Rcop, 1.6, 0.1f, false, false), Rcop.Accent2, 0.4f).Y;
 		const float Dusk = InkLook(BannerLook(Brand::Rcop, 1.6, 0.9f, false, false), Rcop.Accent2, 0.4f).Y;
 		std::printf("  motions: RCOP's top wave at y %.1f (day 0.1) and %.1f (day 0.9)\n", static_cast<double>(Dawn), static_cast<double>(Dusk));
-		ExpectLook(BannerLook(Brand::Rcop, 0.5, Day, false, false).Hash != Risen.Hash && BannerLook(Brand::Rcop, 9.0, Day, false, false).Hash == Risen.Hash && Dawn > Dusk + 20.0f,
+		ExpectLook(MovedLook(BannerLook(Brand::Rcop, 0.5, Day, false, false), Risen) && BannerLook(Brand::Rcop, 9.0, Day, false, false).Hash == Risen.Hash && Dawn > Dusk + 20.0f,
 			"FestCrestLowDetail (motions): RCOP's waves rise on hub open to the day's mark, which climbs through the day");
 		ExpectLook(BannerLook(Brand::Rcop, 1.6, Day + 0.2f / 1440.0f, false, false).Hash == Risen.Hash && BannerLook(Brand::Rcop, 1.6, Day + 1.0f / 1440.0f, false, false).Hash != Risen.Hash &&
 				CachedLook(fd::FestBannerKey(Rcop, BannerRectLook(Brand::Rcop), 1, 576)),
 			"FestCrestLowDetail (motions): RCOP's wave moves once a world minute, each minute's settled wave one cached fragment");
-		ExpectLook(BannerLook(Brand::Slam, 0.0, Day, false, false).Hash != BannerLook(Brand::Slam, 5.0, Day, false, false).Hash,
+		ExpectLook(MovedLook(BannerLook(Brand::Slam, 0.0, Day, false, false), BannerLook(Brand::Slam, 5.0, Day, false, false)),
 			"FestCrestLowDetail (motions): Summer Slam's rays turn for good (live)");
-		const uint64_t Lit = BannerLook(Brand::Reign, 0.8, Day, true, false).Hash;
+		const MarkRunLook LitRun = BannerLook(Brand::Reign, 0.8, Day, true, false);
+		const uint64_t Lit = LitRun.Hash;
 		bool MainOnly = true;
 		for (const Brand B : AllLook)
 		{
 			MainOnly = MainOnly && (B == Brand::Reign) == (BannerLook(B, 5.0, Day, true, false).Hash != BannerLook(B, 5.0, Day, false, false).Hash);
 		}
-		ExpectLook(BannerLook(Brand::Reign, 0.3, Day, true, false).Hash != Lit && BannerLook(Brand::Reign, 4.0, Day, true, false).Hash == Lit && MainOnly,
+		ExpectLook(MovedLook(BannerLook(Brand::Reign, 0.3, Day, true, false), LitRun) && BannerLook(Brand::Reign, 4.0, Day, true, false).Hash == Lit && MainOnly,
 			"FestCrestLowDetail (motions): REIGN's door-light comes up on Main day (and only REIGN's banner knows Main day)");
 	}
 	// The crests' motions: once round and back to the crest at rest (40 units: no glints twinkle on the clock).
 	for (const Brand B : {Brand::RingRush, Brand::Reign, Brand::Writ})
 	{
 		const double End = ead::FestCrestSeconds(B);
-		const uint64_t Rest = CrestAtLook(B, 40.0f, 0.0).Hash;
-		ExpectLook(CrestAtLook(B, 40.0f, End * 0.5).Hash != Rest && CrestAtLook(B, 40.0f, End * 0.2).Hash != Rest && CrestAtLook(B, 40.0f, End).Hash == Rest &&
+		const MarkRunLook RestRun = CrestAtLook(B, 40.0f, 0.0);
+		const uint64_t Rest = RestRun.Hash;
+		ExpectLook(MovedLook(CrestAtLook(B, 40.0f, End * 0.5), RestRun) && MovedLook(CrestAtLook(B, 40.0f, End * 0.2), RestRun) && CrestAtLook(B, 40.0f, End).Hash == Rest &&
 				CrestAtLook(B, 40.0f, End + 3.7).Hash == Rest && CrestAtLook(B, 40.0f, -2.0).Hash == Rest,
 			std::string("FestCrestLowDetail (motions): the crest's motion runs once and comes back to the crest at rest (") + NameLook(B) + ")");
 	}
@@ -1161,8 +1196,9 @@ void FestMotionsLook()
 			"FestCrestLowDetail (motions): PENNANT's dome bulbs chase once, bulb by bulb, and rest unlit by the chase");
 		// The Clasp: a glint over the cached bracelet while it runs; at rest, and on the silhouette, the cached fragment alone.
 		const double Clasp = ead::FestClaspSeconds(Brand::Tco, 0);
-		const uint64_t Rest = TrophyAtLook(Brand::Tco, 54.0f, 0.0, false).Hash;
-		ExpectLook(TrophyAtLook(Brand::Tco, 54.0f, Clasp * 0.5, false).Hash != Rest && TrophyAtLook(Brand::Tco, 54.0f, Clasp, false).Hash == Rest &&
+		const MarkRunLook RestRun = TrophyAtLook(Brand::Tco, 54.0f, 0.0, false);
+		const uint64_t Rest = RestRun.Hash;
+		ExpectLook(MovedLook(TrophyAtLook(Brand::Tco, 54.0f, Clasp * 0.5, false), RestRun) && TrophyAtLook(Brand::Tco, 54.0f, Clasp, false).Hash == Rest &&
 				TrophyAtLook(Brand::Tco, 54.0f, Clasp + 2.0, false).Hash == Rest && TrophyAtLook(Brand::Tco, 30.0f, Clasp * 0.5, true).Hash == TrophyAtLook(Brand::Tco, 30.0f, 0.0, true).Hash &&
 				TrophyAtLook(Brand::Rcop, 54.0f, Clasp * 0.5, false).Hash == TrophyAtLook(Brand::Rcop, 54.0f, 0.0, false).Hash,
 			"FestCrestLowDetail (motions): The Championship Online's Clasp glints once over the cached bracelet (never on the silhouette, on no other trophy)");
