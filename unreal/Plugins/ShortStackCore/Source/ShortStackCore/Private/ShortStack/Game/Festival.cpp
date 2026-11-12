@@ -24,6 +24,14 @@
 // "sentence\t", the G/VideoCopy.cpp precedent): every edition's name, Short, Title and tagline, and every event's printed name
 // (GRIT's shows as their two runs, through Network::NameOf), blurb and seats text, once each. It grows as rows land (PENNANT and
 // REIGN at FN-3, PUSH and WRIT at FN-2b; RiverLine's dress at FN-4a; the trophies, C1 and the room words at FN-4b).
+//
+// G1, FN-3 (F-net; SPEC v1.7 §2.1.1 rule 6, §2.1.2, §2.3.2, §2.6.2): PENNANT and REIGN, the rival championships. A championship's
+// TitleIds are its Main, Mini and Micro Main Event; a rival's Mini and Micro join only as its plan flags them Title
+// (G/NetworkFestival.cpp's NetSitesFestTitle), RCOP's as its templates exist (rcop-mini, rcop-micro). Festival::Satellites walks a
+// championship's ladder: the satellites seating the Main's ticket, and those seating a ticket one of the edition's own one-off
+// satellites takes (Step 1 seats a Step 2 ticket, Step 2 a Step 3 ticket), in template order, which is ladder order (Step 1's two
+// templates, Step 2's, Step 3's, the Mega, the Last Chance). RCOP's recurring steps are not an edition's own: its list stays its
+// step4 and mega-rcop.
 #include "ShortStack/Game/Festival.h"
 
 #include "ShortStack/Game/Life.h"
@@ -42,6 +50,15 @@
 
 namespace ss
 {
+namespace net
+{
+namespace netsites_detail
+{
+// G/NetworkFestival.cpp's (F-net's; no header): a rival festival plan row's Title flag (§2.3.1), by brand key and row stem.
+bool NetSitesFestTitle(const std::string& Brand, const std::string& Stem);
+} // namespace netsites_detail
+} // namespace net
+
 namespace fest
 {
 namespace fest_detail
@@ -66,9 +83,10 @@ double FestCalMinute(int Day)
 }
 
 /** One edition from its series on network N (Site): the Main, its day and start, the titles (a championship's Main, Mini and Micro
- *  Main, §2.6.2: "<stem>main", "<stem>mini", "<stem>micro", RCOP 2026's "rcop-main", "rcop-mini", "rcop-micro"), and the
- *  satellites seating its Main's ticket (Seats: the site's satellite templates by the ticket they seat; a recurring one always, a
- *  one-off only from the edition's Announced phase to its Main day). Edition is set by FestCalBuild, once every row is known. */
+ *  Main, §2.6.2: "<stem>main", "<stem>mini", "<stem>micro", RCOP 2026's "rcop-main", "rcop-mini", "rcop-micro"; a rival's Mini and
+ *  Micro as its plan flags them Title), and the satellites seating its Main's ticket, directly or up its ladder (Seats: the site's
+ *  satellite templates by the ticket they seat; a recurring one always, a one-off only from the edition's Announced phase to its
+ *  Main day). Edition is set by FestCalBuild, once every row is known. */
 Festival FestCalRow(const net::Network& N, net::SiteId Site, const net::SeriesInfo& Sr, const std::map<std::string, std::vector<int>>& Seats)
 {
 	Festival F;
@@ -94,23 +112,40 @@ Festival FestCalRow(const net::Network& N, net::SiteId Site, const net::SeriesIn
 		const std::string Stem = F.MainId.substr(0, F.MainId.size() - MainStem.size());
 		for (const char* Title : {"mini", "micro"})
 		{
-			if (N.FindTemplate(Stem + Title))
+			// RiverLine's titles are its templates (RCOP's rcop-mini, rcop-micro); a rival's are the rows its plan flags Title (§2.3.1).
+			if (N.FindTemplate(Stem + Title) && (Site == net::SiteId::RiverLine || net::netsites_detail::NetSitesFestTitle(Sr.Brand, Title)))
 			{
 				F.TitleIds.push_back(Stem + Title);
 			}
 		}
 	}
-	const auto Seated = Seats.find(N.TicketOf(F.MainId));
-	if (Seated != Seats.end())
+	// The satellites seating the Main's ticket, then (a championship's ladder) those seating a ticket one of the edition's own
+	// one-off satellites takes, until none joins; each once, in template order (ladder order).
+	std::vector<int> Mine;
+	std::vector<std::string> Open = {N.TicketOf(F.MainId)};
+	while (!Open.empty())
 	{
-		for (int K : Seated->second)
+		const auto Seated = Seats.find(Open.back());
+		Open.pop_back();
+		for (size_t J = 0; Seated != Seats.end() && J < Seated->second.size(); ++J)
 		{
+			const int K = Seated->second[J];
 			const net::EventTemplate& T = N.Templates()[static_cast<size_t>(K)];
-			if (T.OnlyDay == -9999 || (T.OnlyDay >= F.FirstDay - kAnnounceDays && T.OnlyDay <= F.MainDay))
+			const bool InWindow = T.OnlyDay == -9999 || (T.OnlyDay >= F.FirstDay - kAnnounceDays && T.OnlyDay <= F.MainDay);
+			if (InWindow && std::find(Mine.begin(), Mine.end(), K) == Mine.end())
 			{
-				F.Satellites.push_back(T.Id);
+				Mine.push_back(K);
+				if (T.OnlyDay != -9999)
+				{
+					Open.push_back(N.TicketOf(T.Id));
+				}
 			}
 		}
+	}
+	std::sort(Mine.begin(), Mine.end());
+	for (int K : Mine)
+	{
+		F.Satellites.push_back(N.Templates()[static_cast<size_t>(K)].Id);
 	}
 	F.Draw = Sr.Draw;
 	F.Flagship = Sr.Flagship;
