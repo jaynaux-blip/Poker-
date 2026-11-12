@@ -16,6 +16,8 @@
 // 34k / 400 is FL-final's, once F-hubs fills the band), FestBandstand's arch half (the arch in the Prize Counter's place only while FEIGN
 // is Live, the tower, the pavilion, the foot sign, the puck) and FestCopyUi's art half (FestArtInventory by kind through the copy rules;
 // every word the attractions paint is listed). Draws the band straight onto its own canvases, emits nothing.
+// G1 FL-5, fix round 1: FestCopyUi's art half screens §1.2 item 5's avoided words after the fill (FestArtInventory's only screen for
+// them), and FestBandstand finds no booth back wall under the arch. Test-only.
 #include "UiSeg.h"
 #include "CopyLint.h"
 #include "Trademarks.h"
@@ -1107,6 +1109,7 @@ constexpr ss::ui::Rect TowerLook{908.0f, 74.0f, 52.0f, 228.0f};
 constexpr ss::ui::Rect PavilionLook{166.0f, 70.0f, 480.0f, 232.0f};
 constexpr ss::ui::Rect PuckTrackLook{928.0f, 100.0f, 12.0f, 170.0f};
 constexpr uint32_t BoothAwningLook = 0x6b3fd1; // the Prize Counter's violet awning stripe (its body alone wears it on the band)
+constexpr uint32_t BoothWallLook[2] = {0x24123a, 0x1c1036}; // the booth's back wall {1252, 132, 304, 166}: Prime Time's, Afterburner's
 const Brand AttractionsLook[] = {Brand::Feign, Brand::Push, Brand::Pennant};
 
 /**
@@ -1204,12 +1207,12 @@ void FestBandBudget()
 
 /**
  * FestBandstand, the arch's half (§2.7.4, §2.15.2; F-hubs' FestBandstandPick holds the bandstand's pick): FEIGN's arch stands, and the
- * Prize Counter booth does not, only while FEIGN is Live (day 1 to its last); before its first day, after its last and for every other
- * brand the band is today's byte for byte, both layers. PUSH stands its tower and PENNANT its pavilion over the bandstand (in place of
- * the shell, its dome carrying the bulbs), each keeping the Prize Counter; the arch and the pavilion carry U32's foot sign once, inside
- * their own rects, and it fits; PUSH's puck rises with the festival's days (the top on the last); no attraction wears a RiverLine hex
- * (SitesNoLeak's rule). In the day's and Afterburner's tones.
- * Planted bug: the Prize Counter still drawn under the arch.
+ * Prize Counter booth does not (no awning, back wall or counter colour inside the booth's rect), only while FEIGN is Live (day 1 to its
+ * last); before its first day, after its last and for every other brand the band is today's byte for byte, both layers. PUSH stands
+ * its tower and PENNANT its pavilion over the bandstand (in place of the shell, its dome carrying the bulbs), each keeping the Prize
+ * Counter; the arch and the pavilion carry U32's foot sign once, inside their own rects, and it fits; PUSH's puck rises with the
+ * festival's days (the top on the last); no attraction wears a RiverLine hex (SitesNoLeak's rule). In the day's and Afterburner's tones.
+ * Planted bugs: the Prize Counter still drawn under the arch; its back wall alone drawn behind the arch.
  */
 void FestBandstand()
 {
@@ -1232,8 +1235,9 @@ void FestBandstand()
 			}
 			return std::make_pair(Inside, All);
 		};
-		// Today's band: the booth, the shell, no attraction, no sign.
-		ExpectLook(WearsLook(Today, BoothAwningLook, BoothLook) > 0 && WearsLook(Today, Shell, PavilionLook) > 0 && SignsIn(Today, PavilionLook).second == 0 &&
+		// Today's band: the booth (awning and back wall), the shell, no attraction, no sign.
+		ExpectLook(WearsLook(Today, BoothAwningLook, BoothLook) > 0 && WearsLook(Today, BoothWallLook[Mi], BoothLook) > 0 && WearsLook(Today, Shell, PavilionLook) > 0 &&
+				SignsIn(Today, PavilionLook).second == 0 &&
 				WearsLook(Today, festart::LookOf(Brand::Feign).Accent2, ArchLook) == 0 && WearsLook(Today, festart::LookOf(Brand::Push).Accent, TowerLook) == 0,
 			std::string("FestBandstand: today's band keeps the Prize Counter and the bandstand's shell and stands no attraction (") + Tone + ")");
 		// Only while Live: before day 1, after the last day and for any other brand the band is today's, byte for byte.
@@ -1260,8 +1264,9 @@ void FestBandstand()
 			std::snprintf(Where, sizeof(Where), " (day %d of 10, %s: %zu mint, %zu pink, signs %d/%d)", Day, Tone, Mint, Pink, Signs.first, Signs.second);
 			ExpectLook(Mint >= 40 && Pink >= 40 && Signs.first == 1 && Signs.second == 1,
 				std::string("FestBandstand: FEIGN's arch stands at the boardwalk's end with its foot sign while FEIGN is Live") + Where);
-			ExpectLook(WearsLook(L, BoothAwningLook, BoothLook) == 0 && WearsLook(L, ss::ui::igniteart::IgGrape, BoothLook) == 0,
-				std::string("FestBandstand: the arch replaces the Prize Counter booth (none of the booth drawn under it)") + Where);
+			ExpectLook(WearsLook(L, BoothAwningLook, BoothLook) == 0 && WearsLook(L, ss::ui::igniteart::IgGrape, BoothLook) == 0 &&
+					WearsLook(L, BoothWallLook[0], BoothLook) == 0 && WearsLook(L, BoothWallLook[1], BoothLook) == 0,
+				std::string("FestBandstand: the arch replaces the Prize Counter booth (none of the booth drawn under it: awning, back wall, counter)") + Where);
 		}
 		// PUSH: the tower, the booth kept, no sign; PENNANT: the pavilion in the shell's place, the booth kept, the sign once inside it.
 		const ss::ui::DrawList Push = DrawBandLook(BandLook(Brand::Push, 3, 10, Moods[Mi], 41.0, false), 1.0f, true, true);
@@ -1371,12 +1376,14 @@ bool ChampWordLook(const std::string& Text)
 /**
  * FestCopyUi, the art half (§1.2 items 1-5, 9, 12-13, §2.11, §2.15.2; F-hubs' half reads FestUiInventory): every FestArtInventory entry
  * carries a known kind and passes the copy lint by it (a label has no closing stop, 200; a sentence its stop), both trademark tiers, the
- * design words after the sample fill, U1 ("AI", "bot(s)", "autoplay", "autopilot"), X1 ("players" in a count), "marquee" and "pavilion"
- * (art names, never copy), "championship" (FestChampWord: the arch's and the pavilion's words are Ignite's, which never print it),
- * "reign cabinet" (FestReignCopy), the glyph rule (ASCII and · — – … é ’) and the article and year rules (each {Festival} filled again
- * with "The Championship Online 2027": no "the The"). And the art draws only listed words: every text run the band gains with an
- * attraction is an entry.
- * Planted bug: "bot" in a line.
+ * design words after the sample fill, the avoided words after the fill (§1.2 item 5's list, tests/festivals_main.cpp's FestCopy list:
+ * spark ... premier, whole words, any case; F-hubs' half screens FestUiInventory, so this is FestArtInventory's only avoided-word
+ * screen), U1 ("AI", "bot(s)", "autoplay", "autopilot"), X1 ("players" in a count), "marquee" and "pavilion" (art names, never copy),
+ * "championship" (FestChampWord: the arch's and the pavilion's words are Ignite's, which never print it), "reign cabinet"
+ * (FestReignCopy), the glyph rule (ASCII and · — – … é ’) and the article and year rules (each {Festival} filled again with "The
+ * Championship Online 2027": no "the The"). And the art draws only listed words: every text run the band gains with an attraction is
+ * an entry.
+ * Planted bugs: "bot" in a line; an avoided word in a line.
  */
 void FestCopyUiLook()
 {
@@ -1387,6 +1394,9 @@ void FestCopyUiLook()
 	{
 		Vars[Kv.first] = Kv.second;
 	}
+	// §1.2 item 5 (other features own them), as tests/festivals_main.cpp's FestCopy screens fest::Inventory().
+	const char* const AvoidedLook[] = {"spark", "flame", "blaze", "wildfire", "ember", "crest", "heat", "cold", "stamina", "momentum", "energy", "board", "watchlist",
+		"headliners", "beef", "hall", "class", "boom", "millions", "jackpot", "run good", "supernova", "premier"};
 	int Entries = 0;
 	int Problems = 0;
 	std::string First;
@@ -1415,6 +1425,10 @@ void FestCopyUiLook()
 		for (const char* W : {"ai", "bot", "bots", "autoplay", "autopilot", "players", "marquee", "pavilion"})
 		{
 			Why += trademarks::HasWord(Low, W) ? std::string(" U1/X1/art name: ") + W : std::string();
+		}
+		for (const char* W : AvoidedLook)
+		{
+			Why += trademarks::HasWord(Low, W) ? std::string(" avoided word: ") + W : std::string();
 		}
 		Why += Low.find("championship") != std::string::npos || ChampWordLook(Filled) ? " championship (FestChampWord)" : "";
 		Why += Low.find("reign cabinet") != std::string::npos ? " \"reign cabinet\" (FestReignCopy)" : "";
@@ -1451,8 +1465,9 @@ void FestCopyUiLook()
 		}
 	}
 	ExpectLook(Entries > 0 && Problems == 0,
-		"FestCopyUi: FestArtInventory's " + std::to_string(Entries) + " entries pass the copy lint by kind, both trademark tiers, the design words, U1, X1, the art names, "
-		"FestChampWord, FestReignCopy's phrase, the glyph rule and the article rule (" + std::to_string(Problems) + " problems)" + First);
+		"FestCopyUi: FestArtInventory's " + std::to_string(Entries) + " entries pass the copy lint by kind, both trademark tiers, the design words, the avoided words "
+		"(" + std::to_string(sizeof(AvoidedLook) / sizeof(AvoidedLook[0])) + ", after the fill), U1, X1, the art names, FestChampWord, FestReignCopy's phrase, the glyph rule and the "
+		"article rule (" + std::to_string(Problems) + " problems)" + First);
 	// The art draws only listed words: what each attraction adds to the band's text is in FestArtInventory.
 	const std::vector<std::string> Listed = ArtTextsLook();
 	std::set<std::string> Today;
