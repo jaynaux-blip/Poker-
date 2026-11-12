@@ -475,7 +475,9 @@ Pending Sim::OnlineEvent(World& W, const net::EventInstance& E)
 	const net::EventTemplate& T = Net.TemplateOf(E);
 	Pending P;
 	P.Id = E.Id;
-	P.Name = !T.Series.empty() ? T.Name : net::BuyIn(T.BuyInCents) + " " + T.Name;
+	// Update 4 G1 (SPEC v1.7 §6 PA-4; FW-3): a series event's instance name (GRIT's runs read "GRIT 07-E" and "GRIT 07-L"), so the
+	// memories, the Honor, the posts, Kast and Rerun name the run the person played.
+	P.Name = !T.Series.empty() ? Net.NameOf(E) : net::BuyIn(T.BuyInCents) + " " + T.Name;
 	P.Online = true;
 	P.Template = E.Template;
 	P.Start = E.Start;
@@ -1900,7 +1902,10 @@ void Sim::Resolve(World& W, Pending& P)
 	{
 		// The biggest titles always make a name; other big scores now and then (the rest stay unknowns).
 		const net::Placing& Wn = Res.FinalTable.front();
-		const bool Always = (P.Kind == static_cast<int>(LiveKind::ChampionshipMain) && !P.Online) || (P.Online && P.Major && !P.Series.empty() && Wn.Prize >= 100000000);
+		// Update 4 G1 (SPEC v1.7 §2.6.5; FW-3): every festival title too (FestivalTitle: a Main, a championship's Mini or Micro), so every
+		// name on a roll is a person the hub and the card can find.
+		const bool Always = (P.Kind == static_cast<int>(LiveKind::ChampionshipMain) && !P.Online) || (P.Online && P.Major && !P.Series.empty() && Wn.Prize >= 100000000) ||
+			FestivalTitle(P);
 		const bool Big = !P.Online && ((P.Bracelet && P.BuyIn >= 1000000) || (P.Ring && P.Major));
 		if (Always || (Big && W.DiscoveredThisWeek < 2))
 		{
@@ -1953,9 +1958,10 @@ void Sim::Resolve(World& W, Pending& P)
 			Flags |= N.Totals[P.Online ? 0 : 1].Wins == 1 ? FlagFirst : 0;
 			W.Log.back().Flags |= Flags | Flagged;
 		}
-		// Titles that stay in history.
+		// Titles that stay in history. Update 4 G1 (SPEC v1.7 §2.6.2; FW-3): a festival title that is not a major (PENNANT's Micro Main)
+		// is kept too (HallScore skips it, G/WorldHero.cpp).
 		const bool Lasting = P.Bracelet || (P.Kind == static_cast<int>(LiveKind::Summit) && !P.Online) || (P.Ring && P.Major) ||
-			(P.Online && P.Major && !P.Series.empty());
+			(P.Online && P.Major && !P.Series.empty()) || FestivalTitle(P);
 		if (Lasting)
 		{
 			world::Honor H;
@@ -1970,7 +1976,7 @@ void Sim::Resolve(World& W, Pending& P)
 			W.Titles.push_back(H);
 		}
 	}
-	else if (Winner == -2 && (P.Bracelet || Invitational || (P.Ring && P.Major) || (P.Online && P.Major && !P.Series.empty())))
+	else if (Winner == -2 && (P.Bracelet || Invitational || (P.Ring && P.Major) || (P.Online && P.Major && !P.Series.empty()) || FestivalTitle(P)))
 	{
 		// An unknown's title is still history.
 		world::Honor H;
@@ -1984,8 +1990,9 @@ void Sim::Resolve(World& W, Pending& P)
 		H.At = P.End;
 		W.Titles.push_back(H);
 	}
-	else if (Winner == -1 && P.Major)
+	else if (Winner == -1 && (P.Major || FestivalTitle(P)))
 	{
+		// (Update 4 G1, §2.6.4; FW-3: the hero's title object, a championship's Micro Main that is no major, is this Honor too.)
 		world::Honor H;
 		H.Year = world::YearOf(Day);
 		H.Title = P.Name;

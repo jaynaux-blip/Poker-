@@ -5,7 +5,9 @@
 // sponsor half; FW-2a: the race and its marks: FestRaceDeterministic, FestRaceTiesToPerson, FestMarksNested, FestLadderCutoff,
 // FestReloadMidRace, FestOldSaveMidFestival and FestSaveRoundTrip's race part, with the race's budget lines; FW-2b: the crown:
 // FestCrownSkipInvariant, FestCrownWaitsForHero, FestNoRecrown, FestHallScoreExcludesCrown, FestAwardRebuildIgnoresCrown,
-// FestSaveRoundTrip's final line and day-66 curve field, FestCalendarFacts' world half, with the crown's budget lines). Every helper here
+// FestSaveRoundTrip's final line and day-66 curve field, FestCalendarFacts' world half, with the crown's budget lines; FW-3: the titles:
+// FestRollFromHonors, FestBlankHonesty, FestDefending, FestDiscoverWidened, FestHeroPinsDerived (with HeroFestPins' budget line),
+// FestHeadline, FestTitleOrder, and FestChampTitles' and FestMajorFloor's world halves). Every helper here
 // is in an anonymous namespace (PLAN_G1 §1 item 8: festivals_main.cpp shares the executable); each check runs alone as "festivals_test
 // <Check>" (the kit's Only, FN-1). The race checks build one Blank world before RCOP 2026 opens and run it through the edition (about
 // 18 ms a world day), planting races through the world text; the crown's run it on through FEIGN 2026, the first rival festival, to
@@ -15,9 +17,11 @@
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/WorldSim.h"
 
 #include "ShortStack/Game/Festival.h"
+#include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Rep.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/World.h"
 #include "ShortStack/Game/WorldFest.h"
@@ -25,6 +29,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -1685,6 +1690,800 @@ void FestSaveRoundTripCrown()
 		"FestSaveRoundTrip: on the day-66 world the recent curve field is written only when it isn't Standard (" + std::to_string(Curved) + " Main-curve records of FEIGN 2026's Main, " +
 			std::to_string(Plain) + " with 8 fields, " + std::to_string(Bad) + " other) and the text reloads to the same bytes");
 }
+
+// ------------------------------------------------------------------ FW-3: the roll, the defender, the titles, Discover, the pins and
+// the headlines (§2.6.2-§2.6.5, §2.6.8, §2.9.2, §2.15.1). Later editions' Honors, results and wins are planted (through the world text,
+// or one event resolved as the world resolves it: Sim::OnlineEvent, Sim::Resolve), never simulated past FEIGN I (§8.1).
+
+/** Brand B's edition of Year (nullptr: none in fest::All()). */
+const ss::fest::Festival* FestEditionWorld(ss::fest::Brand B, int Year)
+{
+	for (const ss::fest::Festival& F : ss::fest::All())
+	{
+		if (F.Which == B && F.Year == Year)
+		{
+			return &F;
+		}
+	}
+	return nullptr;
+}
+
+/** The first instance of template Id in edition F's window (its days and the next, for a late finish). */
+bool FestInstanceWorld(const ss::fest::Festival& F, const std::string& Id, ss::net::EventInstance& Out)
+{
+	const ss::net::Network& N = ss::net::Site(F.Site);
+	for (const ss::net::EventInstance& E : N.Window(FestAtWorld(F.FirstDay), FestAtWorld(F.LastDay + 1)))
+	{
+		if (N.TemplateOf(E).Id == Id)
+		{
+			Out = E;
+			return true;
+		}
+	}
+	return false;
+}
+
+/** Instance E resolved on W as the world resolves its events (Sim::OnlineEvent, then Sim::Resolve), its winner planted: a person
+ *  (Winner >= 0, their place known), the hero (-1, HeroPlace 1) or an unknown (-2: nobody the world follows in the field). Major marks
+ *  the pending a major (a $1M pool's), for a run that is none. Returns the pending as resolved. */
+ss::world::Pending FestResolveWorld(ss::world::World& W, const ss::net::EventInstance& E, int Winner, bool Major = false)
+{
+	ss::world::Pending P = ss::world::Sim::OnlineEvent(W, E);
+	P.Who.clear();
+	P.HeroPlace = 0;
+	P.HeroPrize = 0;
+	if (Winner >= 0)
+	{
+		ss::world::Entry In;
+		In.Npc = Winner;
+		In.Known = 1;
+		P.Who.push_back(In);
+	}
+	else if (Winner == -1)
+	{
+		P.HeroPlace = 1;
+		P.HeroPrize = P.Pool / 5;
+	}
+	P.Major = P.Major || Major;
+	ss::world::Sim::Resolve(W, P);
+	return P;
+}
+
+/** A person the world follows: the first id from From up who is in the world and not faded (-1: none). */
+int FestPersonWorld(const ss::world::World& W, int From = 1)
+{
+	for (int K = From; K < static_cast<int>(W.People().size()); ++K)
+	{
+		const ss::world::Npc* N = W.Get(K);
+		if (N && !N->Faded)
+		{
+			return K;
+		}
+	}
+	return -1;
+}
+
+/** The world's first post of kind K at minute At by npc Npc (nullptr: none). */
+const ss::world::WorldEvent* FestPostWorld(const ss::world::World& W, ss::world::EventKind K, double At, int Npc)
+{
+	for (const ss::world::WorldEvent& E : W.Events())
+	{
+		if (E.Kind == K && E.At == At && E.Npc == Npc)
+		{
+			return &E;
+		}
+	}
+	return nullptr;
+}
+
+/** The world's newest Honor with EventId Id (nullptr: none; an event resolved again on a copy has two). */
+const ss::world::Honor* FestHonorWorld(const ss::world::World& W, const std::string& Id)
+{
+	const std::vector<ss::world::Honor>& Honors = W.Honors();
+	for (auto It = Honors.rbegin(); It != Honors.rend(); ++It)
+	{
+		if (It->EventId == Id)
+		{
+			return &*It;
+		}
+	}
+	return nullptr;
+}
+
+/** Whether S starts with Head. */
+bool FestStartsWorld(const std::string& S, const std::string& Head)
+{
+	return S.compare(0, Head.size(), Head) == 0;
+}
+
+/** A world\thonor line as the save writes it (year, title, event id, npc, name, prize, entries, minute). */
+std::string FestHonorLineWorld(int Year, const std::string& Title, const std::string& EventId, int Npc, const std::string& Name, long long Prize, int Entries, double At)
+{
+	return "world\thonor\t" + std::to_string(Year) + "\t" + Title + "\t" + EventId + "\t" + std::to_string(Npc) + "\t" + Name + "\t" + std::to_string(Prize) + "\t" +
+		   std::to_string(Entries) + "\t" + std::to_string(At) + "\n";
+}
+
+/** Text with Lines put before its first world\thonor line (first in history), or at its end when it has none. */
+std::string FestPlantFirstWorld(std::string Text, const std::string& Lines)
+{
+	const size_t First = Text.find("world\thonor\t");
+	Text.insert(First == std::string::npos ? Text.size() : First, Lines);
+	return Text;
+}
+
+/** A template's printed name on its edition's site ("" when it has none). */
+std::string FestTemplateNameWorld(const ss::fest::Festival& F, const std::string& Id)
+{
+	const ss::net::EventTemplate* T = ss::net::Site(F.Site).FindTemplate(Id);
+	return T ? T->Name : std::string();
+}
+
+/** An edition's Main event id at its start minute ("<MainId>@<minute>"). */
+std::string FestMainIdWorld(const ss::fest::Festival& F)
+{
+	return F.MainId + "@" + std::to_string(std::llround(F.MainStart));
+}
+
+/** An Honor's template id (before '@'). */
+std::string FestTemplateWorld(const ss::world::Honor& H)
+{
+	return H.EventId.substr(0, H.EventId.rfind('@'));
+}
+
+/** Whether every row of brand B's roll holds only its edition's titles and belt (the Main its MainId, the Mini and Micro other TitleIds,
+ *  the belt "<series>#pos"), none before Night One, newest edition first; Why names the first row that doesn't. */
+bool FestRollCleanWorld(const ss::world::World& W, ss::fest::Brand B, std::string& Why)
+{
+	int Year = 1 << 30;
+	const double NightOne = FestAtWorld(ss::net::NightOneDay);
+	for (const ss::world::FestRollRow& R : ss::world::FestRoll(W, B))
+	{
+		const ss::fest::Festival* F = ss::fest::FestivalOf(R.Key);
+		const std::vector<std::string> Titles = F ? F->TitleIds : std::vector<std::string>();
+		auto Other = [&](const ss::world::Honor* H) {
+			return !H || (!Titles.empty() && FestTemplateWorld(*H) != Titles[0] && std::find(Titles.begin(), Titles.end(), FestTemplateWorld(*H)) != Titles.end() && H->At >= NightOne);
+		};
+		const bool Main = !R.Main || (!Titles.empty() && FestTemplateWorld(*R.Main) == Titles[0] && R.Main->At >= NightOne);
+		const bool Crown = !R.Crown || (R.Crown->EventId == R.Key + "#pos" && R.Crown->At >= NightOne);
+		if (!F || F->Which != B || !Main || !Other(R.Mini) || !Other(R.Micro) || !Crown || R.Year > Year || (!R.Main && !R.Mini && !R.Micro && !R.Crown))
+		{
+			Why = R.Key + " " + std::to_string(R.Year);
+			return false;
+		}
+		Year = R.Year;
+	}
+	return true;
+}
+
+/**
+ * FestRollFromHonors (§2.15.1, §2.6.2): the roll holds only Honors whose template is in their edition's TitleIds, and crown Honors, by
+ * edition, newest first. RCOP 2026 run for real (the skip world, day 50) reads its four lines (Main, Mini, Micro, the belt). Planted
+ * through the world text: an unknown's PENNANT 2027 Main title (an old save's, Discover not yet widened) stands on PENNANT's roll, and an
+ * RCOP 2026 numbered event's Honor, first in history, stands on no roll. Every brand's rows hold their edition's titles and belt only,
+ * none before Night One. A Blank and an Established world run from day 12 to day 60 read the same RCOP roll (the same events, only
+ * what happened in each).
+ * Planted bugs: an unknown's Honor dropped; a numbered event's Honor on the roll.
+ */
+void FestRollFromHonors()
+{
+	namespace world = ss::world;
+	using ss::fest::Brand;
+	const ss::fest::Festival* Rcop = FestRcopWorld();
+	const ss::fest::Festival* Pen = FestEditionWorld(Brand::Pennant, 2027);
+	ss::net::EventInstance Numbered;
+	if (!Rcop || !Pen || Rcop->TitleIds.size() != 3 || !FestHeroEventWorld(Numbered))
+	{
+		Expect(false, "FestRollFromHonors: RCOP 2026 (three titles), PENNANT 2027 and an RCOP 2026 numbered event exist");
+		return;
+	}
+	const world::World& Skip = *FestSkipWorld().Skip;
+	const int Who = FestPersonWorld(Skip);
+	const std::string Planted =
+		FestHonorLineWorld(2026, ss::net::Shared().TemplateOf(Numbered).Name, Numbered.Id, Who, Skip.Get(Who)->Name, 120000000, Numbered.Entries, Numbered.Start + 600.0) +
+		FestHonorLineWorld(2027, FestTemplateNameWorld(*Pen, Pen->MainId), FestMainIdWorld(*Pen), -2, "Lee Marlow", 1950000, 420, Pen->MainStart + 600.0);
+	world::World W;
+	FestLoadWorld(W, FestPlantFirstWorld(FestTextWorld(Skip), Planted));
+	const std::vector<world::FestRollRow> Roll = world::FestRoll(W, Brand::Rcop);
+	const bool Four = Roll.size() == 1 && Roll[0].Key == "rcop" && Roll[0].Year == 2026 && Roll[0].Main && Roll[0].Mini && Roll[0].Micro && Roll[0].Crown &&
+					  FestTemplateWorld(*Roll[0].Main) == Rcop->TitleIds[0] && FestTemplateWorld(*Roll[0].Mini) == Rcop->TitleIds[1] &&
+					  FestTemplateWorld(*Roll[0].Micro) == Rcop->TitleIds[2] && Roll[0].Crown->EventId == "rcop#pos";
+	Expect(Four, "FestRollFromHonors: RCOP 2026's row holds its Main, Mini and Micro Main Event titles and its belt, and not the planted numbered event's Honor (" +
+					 std::to_string(Roll.size()) + " row(s)" + (Roll.empty() || !Roll[0].Main ? std::string() : ", Main " + Roll[0].Main->EventId) + ")");
+	const std::vector<world::FestRollRow> PenRoll = world::FestRoll(W, Brand::Pennant);
+	Expect(PenRoll.size() == 1 && PenRoll[0].Key == Pen->SeriesId && PenRoll[0].Main && PenRoll[0].Main->Npc == -2 && PenRoll[0].Main->Name == "Lee Marlow",
+		"FestRollFromHonors: an unknown's planted PENNANT 2027 Main title stands on PENNANT's roll (" + std::to_string(PenRoll.size()) + " row(s))");
+	bool Clean = true;
+	bool Placed = false;
+	std::string Why;
+	size_t Rows = 0;
+	for (int B = 1; B < static_cast<int>(Brand::Count); ++B)
+	{
+		Clean = Clean && FestRollCleanWorld(W, static_cast<Brand>(B), Why);
+		for (const world::FestRollRow& R : world::FestRoll(W, static_cast<Brand>(B)))
+		{
+			++Rows;
+			for (const world::Honor* H : {R.Main, R.Mini, R.Micro, R.Crown})
+			{
+				Placed = Placed || (H && H->EventId == Numbered.Id);
+			}
+		}
+	}
+	Expect(Clean && !Placed, "FestRollFromHonors: every brand's roll (" + std::to_string(Rows) + " rows) holds only its edition's titles and belt, newest first, none before Night One" +
+								 (Why.empty() ? std::string() : " (first bad row: " + Why + ")") + (Placed ? " (the numbered event's Honor is on a roll)" : ""));
+	// Blank and Established read the same: only what happened in this world (U5).
+	const auto T0 = std::chrono::steady_clock::now();
+	world::World Blank = Skip;
+	Blank.AdvanceTo(FestAtWorld(60));
+	world::World Est;
+	Est.Create(kFestSeedWorld, 12.0 * 1440.0 + 360.0, world::Start::Established);
+	Est.AdvanceTo(FestAtWorld(60));
+	const double Ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count();
+	const std::vector<world::FestRollRow> A = world::FestRoll(Blank, Brand::Rcop);
+	const std::vector<world::FestRollRow> E = world::FestRoll(Est, Brand::Rcop);
+	auto Id = [](const world::Honor* H) { return H ? H->EventId : std::string("-"); };
+	bool Same = A.size() == 1 && A.size() == E.size();
+	for (size_t K = 0; Same && K < A.size(); ++K)
+	{
+		Same = A[K].Key == E[K].Key && Id(A[K].Main) == Id(E[K].Main) && Id(A[K].Mini) == Id(E[K].Mini) && Id(A[K].Micro) == Id(E[K].Micro) && Id(A[K].Crown) == Id(E[K].Crown) &&
+			   A[K].Main && A[K].Mini && A[K].Micro && A[K].Crown;
+	}
+	std::printf("  FestRollFromHonors: day 60 Blank and Established (made and run in %.0f ms): RCOP rows %zu and %zu; Main winners %s / %s\n", Ms, A.size(), E.size(),
+		A.empty() || !A[0].Main ? "-" : A[0].Main->Name.c_str(), E.empty() || !E[0].Main ? "-" : E[0].Main->Name.c_str());
+	std::string WhyA, WhyE;
+	const bool CleanA = FestRollCleanWorld(Blank, Brand::Rcop, WhyA);
+	const bool CleanE = FestRollCleanWorld(Est, Brand::Rcop, WhyE);
+	Expect(Same && CleanA && CleanE, "FestRollFromHonors: a Blank and an Established world at day 60 show the same RCOP roll (the same four events, nothing before Night One: " +
+										 std::to_string(A.size()) + " and " + std::to_string(E.size()) + " rows)");
+}
+
+/**
+ * FestBlankHonesty (§2.15.1, item 8): before an RCOP Main Honor exists the hub's data has no "Last year" figure (no roll row, no defender
+ * of either kind on any day; RCOP 2026 mid-race, day 20); after it (day 50) RCOP 2027's "Last year" (FestDefending's Main) is that Honor,
+ * its prize the one the world paid (the Champion post's Amount).
+ * Planted bug: a constant prize (Lasting's Honor keeping a typed figure).
+ */
+void FestBlankHonesty()
+{
+	namespace world = ss::world;
+	using ss::fest::Brand;
+	const ss::fest::Festival* Rcop = FestRcopWorld();
+	if (!Rcop)
+	{
+		Expect(false, "FestBlankHonesty: RCOP 2026 is in fest::All()");
+		return;
+	}
+	const world::World& Mid = FestMidWorld();
+	bool None = world::FestRoll(Mid, Brand::Rcop).empty();
+	for (int Day = 20; Day <= 420; Day += 5)
+	{
+		None = None && !world::FestDefending(Mid, Brand::Rcop, false, Day) && !world::FestDefending(Mid, Brand::Rcop, true, Day);
+	}
+	Expect(None, "FestBlankHonesty: before RCOP 2026's Main has an Honor (day 20) the roll is empty and no day reads a defender (no \"Last year\")");
+	const world::World& Skip = *FestSkipWorld().Skip;
+	const world::Honor* Last = world::FestDefending(Skip, Brand::Rcop, false, 50);
+	const world::WorldEvent* Post = Last ? FestPostWorld(Skip, world::EventKind::Champion, Last->At, Last->Npc) : nullptr;
+	const std::vector<world::FestRollRow> Roll = world::FestRoll(Skip, Brand::Rcop);
+	Expect(Last && FestStartsWorld(Last->EventId, Rcop->MainId + "@") && !Roll.empty() && Roll[0].Main == Last && Post && Post->What == Last->Title && Last->Prize > 0 &&
+			   Last->Prize == Post->Amount,
+		"FestBlankHonesty: after it, RCOP 2027's \"Last year\" is RCOP 2026's Main Honor and its prize is the one the world paid (" +
+			(Last ? std::to_string(Last->Prize) : std::string("no Honor")) + " vs the post's " + (Post ? std::to_string(Post->Amount) : std::string("none")) + ")");
+}
+
+/**
+ * FestDefending (§2.15.1, §2.6.3): RCOP 2026 run for real (day 50) and RCOP 2027's Main title and belt planted (its Main's end; the
+ * first hour after its LastEnd): RCOP 2026's Main champion defends from their Honor through RCOP 2027's first day and its last, until
+ * RCOP 2027 crowns; then RCOP 2027's champion does. The belt the same. RCOP 2027 never crowned (no belt planted): RCOP 2026's belt holder
+ * defends through its last day and not two days past its last event (R-13). IsDefending asks the Main. The defender is not registered
+ * for RCOP 2027's Main in this world: the hub's card and WHO'S IN show them only when World::Registered says so (F-hubs, FW-4).
+ * Planted bug: the window closing at the next edition's first day.
+ */
+void FestDefending()
+{
+	namespace world = ss::world;
+	using ss::fest::Brand;
+	const ss::fest::Festival* Rcop = FestRcopWorld();
+	const ss::fest::Festival* R27 = FestEditionWorld(Brand::Rcop, 2027);
+	const world::World& Skip = *FestSkipWorld().Skip;
+	const std::vector<world::FestRollRow> Roll = world::FestRoll(Skip, Brand::Rcop);
+	if (!Rcop || !R27 || Roll.size() != 1 || !Roll[0].Main || !Roll[0].Crown || Roll[0].Main->Npc < 0)
+	{
+		Expect(false, "FestDefending: RCOP 2026 run with its Main champion (a person) and belt; RCOP 2027 in fest::All()");
+		return;
+	}
+	const int Champ = Roll[0].Main->Npc;
+	const int Belt = Roll[0].Crown->Npc;
+	const int Champ27 = FestPersonWorld(Skip, std::max(Champ, Belt) + 1);
+	const int Belt27 = FestPersonWorld(Skip, Champ27 + 1);
+	const double Crown27 = FestHourAfterWorld(ss::fest::LastEnd(*R27));
+	const int CrownDay = static_cast<int>(Crown27 / 1440.0);
+	const std::string Main27 = FestHonorLineWorld(2027, FestTemplateNameWorld(*R27, R27->MainId), FestMainIdWorld(*R27), Champ27, Skip.Get(Champ27)->Name, 300000000, 5100,
+		R27->MainStart + 600.0);
+	const std::string Belt27Line = FestHonorLineWorld(2027, R27->Name + " Player of the Series", R27->SeriesId + "#pos", Belt27, Skip.Get(Belt27)->Name, 0, 6100, Crown27);
+	world::World W;
+	FestLoadWorld(W, FestTextWorld(Skip) + Main27 + Belt27Line);
+	auto Npc = [&](bool Crown, int Day) {
+		const world::Honor* H = world::FestDefending(W, Brand::Rcop, Crown, Day);
+		return H ? H->Npc : -9;
+	};
+	const int Days[5] = {50, R27->FirstDay, R27->LastDay, CrownDay, CrownDay + 30};
+	const int WantMain[5] = {Champ, Champ, Champ, Champ27, Champ27};
+	const int WantBelt[5] = {Belt, Belt, Belt, Belt27, Belt27};
+	std::string Got;
+	bool Holds = true;
+	for (int K = 0; K < 5; ++K)
+	{
+		Holds = Holds && Npc(false, Days[K]) == WantMain[K] && Npc(true, Days[K]) == WantBelt[K] && world::IsDefending(W, WantMain[K], Days[K]) &&
+				world::IsDefending(W, Champ, Days[K]) == (WantMain[K] == Champ) && !world::IsDefending(W, -2, Days[K]);
+		Got += " day " + std::to_string(Days[K]) + ": " + std::to_string(Npc(false, Days[K])) + "/" + std::to_string(Npc(true, Days[K]));
+	}
+	Expect(Holds, "FestDefending: RCOP 2026's champion (npc " + std::to_string(Champ) + ") and belt holder (" + std::to_string(Belt) +
+					  ") defend from their Honors until RCOP 2027 crowns (day " + std::to_string(CrownDay) + "), then its champion and belt holder do; Main/belt by day:" + Got);
+	world::World Never;
+	FestLoadWorld(Never, FestTextWorld(Skip) + Main27);
+	const int Off = static_cast<int>((ss::fest::LastEnd(*R27) + 2.0 * 1440.0) / 1440.0) + 1;
+	const world::Honor* Held = world::FestDefending(Never, Brand::Rcop, true, R27->LastDay + 1);
+	const world::Honor* Gone = world::FestDefending(Never, Brand::Rcop, true, Off);
+	Expect(Held && Held->Npc == Belt && !Gone, "FestDefending: RCOP 2027 never crowned: RCOP 2026's belt holder defends through its last day and not two days past its last event");
+	world::World Reg = W;
+	const std::vector<int> In = Reg.Registered(FestMainIdWorld(*R27));
+	Expect(std::find(In.begin(), In.end(), Champ) == In.end(), "FestDefending: the defender is not registered for RCOP 2027's Main in this world (the card and WHO'S IN gate on it)");
+}
+
+/**
+ * FestDiscoverWidened (§2.15.1, §2.6.5): an unknown who wins a festival title becomes a world person that night with one result and a
+ * Discovered post: FEIGN 2026's Main (a rival festival Main, under $1M), PENNANT 2027's Mini and Micro Main Events and RCOP 2026's Mini
+ * (a championship's, RCOP's included; each resolved on a copy of the skip world as the world resolves an event); Summer Slam 2027's Mini
+ * (a major but no title) leaves its unknown winner unknown.
+ * Planted bugs: the term removed; FestivalMain kept in place of FestivalTitle.
+ */
+void FestDiscoverWidened()
+{
+	namespace world = ss::world;
+	using ss::fest::Brand;
+	const ss::fest::Festival* Feign = ss::fest::FestivalOf("ignite.feign26");
+	const ss::fest::Festival* Pen = FestEditionWorld(Brand::Pennant, 2027);
+	const ss::fest::Festival* Rcop = FestRcopWorld();
+	const ss::fest::Festival* Slam = FestEditionWorld(Brand::Slam, 2027);
+	if (!Feign || !Pen || !Rcop || !Slam || Pen->TitleIds.size() != 3 || Rcop->TitleIds.size() != 3)
+	{
+		Expect(false, "FestDiscoverWidened: FEIGN 2026, PENNANT 2027 (three titles), RCOP 2026 and Summer Slam 2027 are in fest::All()");
+		return;
+	}
+	const std::string SlamMini = Slam->MainId.substr(0, Slam->MainId.size() - 4) + "mini";
+	const std::pair<const ss::fest::Festival*, std::string> Cases[5] = {
+		{Feign, Feign->MainId}, {Pen, Pen->TitleIds[1]}, {Pen, Pen->TitleIds[2]}, {Rcop, Rcop->TitleIds[1]}, {Slam, SlamMini}};
+	for (int K = 0; K < 5; ++K)
+	{
+		const bool Want = K < 4;
+		ss::net::EventInstance E;
+		if (!FestInstanceWorld(*Cases[K].first, Cases[K].second, E))
+		{
+			Expect(false, "FestDiscoverWidened: an instance of " + Cases[K].second + " in " + Cases[K].first->Name);
+			continue;
+		}
+		world::World W = *FestSkipWorld().Skip;
+		const size_t Before = W.People().size();
+		const world::Pending P = FestResolveWorld(W, E, -2);
+		const int New = static_cast<int>(W.People().size()) - 1;
+		const world::Npc* N = W.People().size() == Before + 1 ? W.Get(New) : nullptr;
+		const world::WorldEvent* Found = N ? FestPostWorld(W, world::EventKind::Discovered, P.End, New) : nullptr;
+		const world::Honor* H = FestHonorWorld(W, P.Id);
+		const bool Made = N && Found && Found->What == P.Name && N->Totals[0].Events == 1 && N->Totals[0].Wins == 1 && H && H->Npc == New;
+		const bool Unknown = W.People().size() == Before && (!H || H->Npc == -2);
+		Expect(Want ? Made : Unknown, "FestDiscoverWidened: an unknown who wins " + P.Name + " (" + Cases[K].first->Name + ") " +
+										  (Want ? "becomes a world person with one result and a Discovered post" : "stays unknown (no title: no Discover)") + " (" +
+										  std::to_string(W.People().size() - Before) + " made, Honor npc " + (H ? std::to_string(H->Npc) : std::string("none")) + ")");
+	}
+}
+
+/** One planted hero result line (world\theroresult: event id, place, prize). */
+std::string FestHeroResultLineWorld(const std::string& Id, int Place, long long Prize)
+{
+	return "world\theroresult\t" + Id + "\t" + std::to_string(Place) + "\t" + std::to_string(Prize) + "\n";
+}
+
+/**
+ * FestHeroPinsDerived (§2.15.1, §2.6.4): planted hero results (world\theroresult lines on the day-20 world) give RCOP 2026 a gold pin (a
+ * win, a cash and a bust in its numbered events: 3 events, 2 cashes, best 1st of the won event's field) and FEIGN 2026 an outline pin
+ * (a bust; its satellite win and a weekly never count), in calendar order; HeroFestResults lists RCOP 2026's three newest first with
+ * their fields. The budget: HeroFestPins over 5,000 planted results (printed; <= 1 ms asserted under SS_PERF=1, median of five rebuilds).
+ * Planted bug: satellites counted.
+ */
+void FestHeroPinsDerived()
+{
+	namespace world = ss::world;
+	const ss::fest::Festival* Rcop = FestRcopWorld();
+	const ss::fest::Festival* Feign = ss::fest::FestivalOf("ignite.feign26");
+	if (!Rcop || !Feign)
+	{
+		Expect(false, "FestHeroPinsDerived: RCOP 2026 and FEIGN 2026 are in fest::All()");
+		return;
+	}
+	const ss::net::Network& Rl = ss::net::Shared();
+	const ss::net::Network& Ig = ss::net::Site(Feign->Site);
+	std::vector<ss::net::EventInstance> Numbered;
+	ss::net::EventInstance Weekly;
+	bool HaveWeekly = false;
+	for (const ss::net::EventInstance& E : Rl.Window(FestAtWorld(14), FestAtWorld(17)))
+	{
+		const ss::net::EventTemplate& T = Rl.TemplateOf(E);
+		if (T.Series == "rcop" && T.Fmt != ss::net::Format::Satellite && E.Entries >= 50 && Numbered.size() < 3)
+		{
+			Numbered.push_back(E);
+		}
+		if (T.Series.empty() && !HaveWeekly)
+		{
+			Weekly = E;
+			HaveWeekly = true;
+		}
+	}
+	ss::net::EventInstance Bust, Sat;
+	bool HaveBust = false, HaveSat = false;
+	for (const ss::net::EventInstance& E : Ig.Window(FestAtWorld(Feign->FirstDay), FestAtWorld(Feign->LastDay + 1)))
+	{
+		const ss::net::EventTemplate& T = Ig.TemplateOf(E);
+		if (T.Series == Feign->SeriesId && T.Fmt != ss::net::Format::Satellite && T.Id != Feign->MainId && !HaveBust)
+		{
+			Bust = E;
+			HaveBust = true;
+		}
+	}
+	// One of the edition's satellites (a satellite has no series, SPEC §2.3.4: Festival::Satellites lists them, as the Ignite floor reads
+	// its rows).
+	HaveSat = !Feign->Satellites.empty() && FestInstanceWorld(*Feign, Feign->Satellites.front(), Sat) && Ig.TemplateOf(Sat).Fmt == ss::net::Format::Satellite;
+	if (Numbered.size() < 3 || !HaveWeekly || !HaveBust || !HaveSat)
+	{
+		Expect(false, "FestHeroPinsDerived: three RCOP 2026 numbered events, a weekly, a FEIGN 2026 event and one of its satellites (" +
+						  std::to_string(Numbered.size()) + " numbered, weekly " + (HaveWeekly ? "yes" : "no") + ", event " + (HaveBust ? "yes" : "no") + ", satellite " +
+						  (HaveSat ? "yes" : "no") + ")");
+		return;
+	}
+	const std::string Lines = FestHeroResultLineWorld(Numbered[0].Id, 1, 150000) + FestHeroResultLineWorld(Numbered[1].Id, 30, 2400) +
+							  FestHeroResultLineWorld(Numbered[2].Id, 900, 0) + FestHeroResultLineWorld(Bust.Id, 700, 0) + FestHeroResultLineWorld(Sat.Id, 1, 11000) +
+							  FestHeroResultLineWorld(Weekly.Id, 1, 50000);
+	world::World W;
+	FestLoadWorld(W, FestTextWorld(FestMidWorld()) + Lines);
+	const std::vector<world::HeroFestPin> Pins = world::HeroFestPins(W);
+	const bool Two = Pins.size() == 2 && Pins[0].Key == "rcop" && Pins[1].Key == Feign->SeriesId;
+	const bool Gold = Two && Pins[0].Grade == 3 && Pins[0].Events == 3 && Pins[0].Cashes == 2 && Pins[0].Wins == 1 && Pins[0].BestPlace == 1 && Pins[0].BestEntries == Numbered[0].Entries;
+	const bool Outline = Two && Pins[1].Grade == 1 && Pins[1].Events == 1 && Pins[1].Cashes == 0 && Pins[1].Wins == 0 && Pins[1].BestPlace == 700 && Pins[1].BestEntries == Bust.Entries;
+	Expect(Gold && Outline, "FestHeroPinsDerived: RCOP 2026 gold (3 events, 2 cashes, 1 win, best 1st of " + std::to_string(Numbered[0].Entries) +
+								") and FEIGN 2026 outline (its satellite win and a weekly never count): " + std::to_string(Pins.size()) + " pin(s)" +
+								(Pins.empty() ? std::string() : ", the first " + Pins[0].Key + " grade " + std::to_string(Pins[0].Grade) + " events " + std::to_string(Pins[0].Events)) +
+								(Pins.size() < 2 ? std::string() : ", the second grade " + std::to_string(Pins[1].Grade) + " events " + std::to_string(Pins[1].Events)));
+	const std::vector<world::HeroFestResult> Rows = world::HeroFestResults(W, "rcop");
+	bool Newest = Rows.size() == 3 && Numbered[0].Start <= Numbered[1].Start && Numbered[1].Start <= Numbered[2].Start;
+	for (size_t K = 0; Newest && K < Rows.size(); ++K)
+	{
+		const size_t I = 2 - K; // Numbered is in start order
+		Newest = Rows[K].EventId == Numbered[I].Id && Rows[K].Entries == Numbered[I].Entries && Rows[K].Place == (I == 0 ? 1 : I == 1 ? 30 : 900);
+	}
+	Expect(Newest && world::HeroFestResults(W, "ring27").empty(), "FestHeroPinsDerived: HeroFestResults lists RCOP 2026's three results newest first with their fields (" +
+																	  std::to_string(Rows.size()) + " rows)");
+	// The budget: 5,000 planted results (RiverLine's from RCOP 2026's first day: its festival events and the weeklies), one rebuild timed on
+	// each world copy.
+	std::string Many;
+	int Count = 0;
+	for (const ss::net::EventInstance& E : Rl.Window(FestAtWorld(13), FestAtWorld(60)))
+	{
+		if (Count < 5000)
+		{
+			Many += FestHeroResultLineWorld(E.Id, 1 + Count % 400, Count % 3 == 0 ? 1000 : 0);
+			++Count;
+		}
+	}
+	world::World Big;
+	FestLoadWorld(Big, FestTextWorld(FestMidWorld()) + Many);
+	const std::vector<world::HeroFestPin> Warm = world::HeroFestPins(Big);
+	std::vector<double> Ms;
+	for (int Round = 0; Round < 5; ++Round)
+	{
+		const world::World Copy = Big;
+		const auto T0 = std::chrono::steady_clock::now();
+		const std::vector<world::HeroFestPin> Again = world::HeroFestPins(Copy);
+		Ms.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count());
+		(void)Again;
+	}
+	std::sort(Ms.begin(), Ms.end());
+	const auto T1 = std::chrono::steady_clock::now();
+	const std::vector<world::HeroFestPin> Cached = world::HeroFestPins(Big);
+	const double Hit = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T1).count();
+	std::printf("  FestHeroPinsDerived: HeroFestPins over %d planted results (%d of RCOP 2026's): a rebuild %.3f ms (median of 5; budget 1 ms), a cached read %.4f ms\n", Count,
+		Warm.empty() ? 0 : Warm[0].Events, Ms[2], Hit);
+	Expect(Count == 5000 && Warm.size() == 1 && Cached.size() == 1, "FestHeroPinsDerived: 5,000 planted results make RCOP 2026's one pin (" + std::to_string(Count) + " planted)");
+	if (std::getenv("SS_PERF"))
+	{
+		Expect(Ms[2] <= 1.0, "FestHeroPinsDerived (SS_PERF): HeroFestPins over 5,000 results <= 1 ms a world revision (" + std::to_string(Ms[2]) + " ms)");
+	}
+}
+
+/**
+ * FestHeadline (§2.15.1, §2.9.2; FestNews' F-world half): the crown and festival-Main headlines fill (RCOP 2026's, just after its crown:
+ * head:fest:crown with tag CROWN, head:fest:main naming The RCOP Cup with tag FESTIVAL; a Champion post that is no title keeps today's
+ * line); a rival's crown (FEIGN 2026's) carries Ignite's bits, shows on Ignite's News and stays off RiverLine's; a planted
+ * PENNANT 2027 Mini win posts head:fest:title (the Micro too); a GRIT run's Pending::Name, Honor and headline read its "-E" or "-L" (§8
+ * Q22: Network::NameOf).
+ * Planted bugs: site bits missing; the title branch falling to the default headline; Pending::Name reading TemplateOf(E).Name.
+ */
+void FestHeadline()
+{
+	namespace world = ss::world;
+	using ss::fest::Brand;
+	const ss::fest::Festival* Rcop = FestRcopWorld();
+	const ss::fest::Festival* Pen = FestEditionWorld(Brand::Pennant, 2027);
+	const ss::fest::Festival* Grit = nullptr;
+	for (const ss::fest::Festival& F : ss::fest::All())
+	{
+		Grit = !Grit && F.Which == Brand::Grit ? &F : Grit;
+	}
+	if (!Rcop || !Pen || !Grit || Pen->TitleIds.size() != 3)
+	{
+		Expect(false, "FestHeadline: RCOP 2026, PENNANT 2027 (three titles) and a GRIT edition are in fest::All()");
+		return;
+	}
+	std::string Title, Body, Tag;
+	// RCOP 2026's crown and Main, on the world just after the crown.
+	world::World After = FestAfterWorld();
+	After.HeroName = "Tess Halloran";
+	const std::vector<world::Honor> Crowns = FestCrownsOfWorld(After, "rcop");
+	const std::vector<world::WorldEvent> CrownPosts = FestCrownPostsWorld(After, Rcop->Name);
+	const world::Npc* Winner = Crowns.size() == 1 ? After.Get(Crowns[0].Npc) : nullptr;
+	const std::string WinnerName = Winner ? Winner->Name : Crowns.size() == 1 && Crowns[0].Npc == -1 ? After.HeroName : std::string();
+	const bool CrownHead = CrownPosts.size() == 1 && Crowns.size() == 1 && After.Headline(CrownPosts[0], Title, Body, Tag) &&
+						   Title == WinnerName + " is the RCOP 2026 Player of the Series" &&
+						   Body == WinnerName + " takes the RCOP 2026 belt: " + ss::Grouped(Crowns[0].Entries) + " points from " + ss::Grouped(CrownPosts[0].Amount) + " cashes." && Tag == "CROWN";
+	Expect(CrownHead, "FestHeadline: RCOP 2026's crown reads head:fest:crown filled, tag CROWN ('" + Title + "' / '" + Body + "' / " + Tag + ")");
+	const world::Honor* MainH = nullptr;
+	for (const world::Honor& H : After.Honors())
+	{
+		MainH = !MainH && FestStartsWorld(H.EventId, Rcop->MainId + "@") ? &H : MainH;
+	}
+	const world::WorldEvent* MainPost = MainH ? FestPostWorld(After, world::EventKind::Champion, MainH->At, MainH->Npc) : nullptr;
+	const world::Npc* MainWho = MainH ? After.Get(MainH->Npc) : nullptr;
+	Title = Body = Tag = std::string();
+	const bool MainHead = MainPost && MainWho && After.Headline(*MainPost, Title, Body, Tag) && Title == MainWho->Name + " wins the RCOP 2026 Main Event" && FestStartsWorld(Body, "$") &&
+						  Body.find(" and The RCOP Cup, from a field of " + ss::Grouped(MainH->Entries) + ".") != std::string::npos && Tag == "FESTIVAL" && Body.find('{') == std::string::npos;
+	Expect(MainHead, "FestHeadline: RCOP 2026's Main reads head:fest:main filled, tag FESTIVAL ('" + Title + "' / '" + Body + "' / " + Tag + ")");
+	const world::WorldEvent* Plain = nullptr;
+	for (const world::WorldEvent& E : After.Events())
+	{
+		world::FestSlot Slot = world::FestSlot::None;
+		Plain = !Plain && E.Kind == world::EventKind::Champion && (E.Flags & world::FlagLive) == 0 && After.Get(E.Npc) && !world::FestTitlePost(After, E, Slot) ? &E : Plain;
+	}
+	Title = Body = Tag = std::string();
+	Expect(Plain && After.Headline(*Plain, Title, Body, Tag) && Title == After.Get(Plain->Npc)->Name + " wins " + Plain->What && Tag == "CHAMPION",
+		"FestHeadline: a Champion post that is no festival title keeps today's headline ('" + Title + "')");
+	// FEIGN 2026's crown: Ignite's bits, Ignite's News, never RiverLine's.
+	world::World Fw = *FestFeignWorld().W;
+	Fw.HeroName = "Tess Halloran";
+	const std::vector<world::WorldEvent> FeignPosts = FestCrownPostsWorld(Fw, "FEIGN 2026");
+	const std::vector<world::Honor> FeignCrowns = FestCrownsOfWorld(Fw, "ignite.feign26");
+	const world::Npc* FeignWinner = FeignCrowns.size() == 1 ? Fw.Get(FeignCrowns[0].Npc) : nullptr;
+	const std::string FeignTitle =
+		(FeignWinner ? FeignWinner->Name : FeignCrowns.size() == 1 && FeignCrowns[0].Npc == -1 ? Fw.HeroName : std::string("?")) + " is the FEIGN 2026 Player of the Series";
+	Title = Body = Tag = std::string();
+	const bool Bits = FeignPosts.size() == 1 && world::FlagSiteOf(FeignPosts[0].Flags) == ss::net::SiteId::Ignite && Fw.Headline(FeignPosts[0], Title, Body, Tag) && Title == FeignTitle;
+	ss::net::AttachAll(&Fw);
+	const ss::net::HeroStats NoHero;
+	bool OnRl = false, OnIg = false;
+	for (const ss::net::NewsItem& It : ss::net::Shared().News(Fw.Clock(), NoHero, 200))
+	{
+		OnRl = OnRl || It.Title.find("FEIGN 2026 Player of the Series") != std::string::npos;
+	}
+	for (const ss::net::NewsItem& It : ss::net::Site(ss::net::SiteId::Ignite).News(Fw.Clock(), NoHero, 200))
+	{
+		OnIg = OnIg || It.Title == FeignTitle;
+	}
+	ss::net::AttachAll(nullptr);
+	Expect(Bits && OnIg && !OnRl, "FestHeadline: FEIGN 2026's crown carries Ignite's site bits, shows on Ignite's News and stays off RiverLine's (" + std::to_string(FeignPosts.size()) +
+									  " post(s), '" + Title + "', on Ignite " + (OnIg ? "yes" : "no") + ", on RiverLine " + (OnRl ? "yes" : "no") + ")");
+	// A championship's Mini and Micro Main Events: head:fest:title.
+	for (size_t K = 1; K <= 2; ++K)
+	{
+		ss::net::EventInstance E;
+		world::World W = *FestSkipWorld().Skip;
+		const int Who = FestPersonWorld(W, 40 + static_cast<int>(K));
+		if (!FestInstanceWorld(*Pen, Pen->TitleIds[K], E) || Who < 0)
+		{
+			Expect(false, "FestHeadline: an instance of " + Pen->TitleIds[K]);
+			continue;
+		}
+		const world::Pending P = FestResolveWorld(W, E, Who);
+		const world::WorldEvent* Post = FestPostWorld(W, P.Major ? world::EventKind::Champion : world::EventKind::Won, P.End, Who);
+		Title = Body = Tag = std::string();
+		const std::string Tier = K == 1 ? "Mini" : "Micro";
+		Expect(Post && W.Headline(*Post, Title, Body, Tag) && Title == W.Get(Who)->Name + " wins the PENNANT 2027 " + Tier + " Main Event" &&
+				   Body.find(" and a PENNANT 2027 title, from a field of " + ss::Grouped(P.Entries) + ".") != std::string::npos && Tag == "FESTIVAL",
+			"FestHeadline: a planted PENNANT 2027 " + Tier + " Main Event win posts head:fest:title ('" + Title + "' / '" + Body + "' / " + Tag + ")");
+	}
+	// GRIT's two runs of one show: "-E" at 19:00, "-L" at 22:00, in the pending, its Honor and its headline.
+	const ss::net::Network& Rit = ss::net::Site(Grit->Site);
+	ss::net::EventInstance Early, Late;
+	bool Pair = false;
+	const std::vector<ss::net::EventInstance> Night = Rit.Window(FestAtWorld(Grit->FirstDay), FestAtWorld(Grit->FirstDay + 1));
+	for (size_t A = 0; !Pair && A < Night.size(); ++A)
+	{
+		for (size_t B = 0; !Pair && B < Night.size(); ++B)
+		{
+			if (A != B && Night[A].Template == Night[B].Template && Night[A].Start < Night[B].Start && Rit.TemplateOf(Night[A]).Series == Grit->SeriesId)
+			{
+				Early = Night[A];
+				Late = Night[B];
+				Pair = true;
+			}
+		}
+	}
+	if (!Pair)
+	{
+		Expect(false, "FestHeadline: a GRIT show's two runs on " + Grit->Name + "'s first night");
+		return;
+	}
+	world::World W = *FestSkipWorld().Skip;
+	const int Who = FestPersonWorld(W, 60);
+	world::World Copy = W;
+	const world::Pending PE = ss::world::Sim::OnlineEvent(Copy, Early);
+	const world::Pending PL = FestResolveWorld(W, Late, Who, true);
+	const world::Honor* H = FestHonorWorld(W, PL.Id);
+	const world::WorldEvent* Post = FestPostWorld(W, world::EventKind::Champion, PL.End, Who);
+	Title = Body = Tag = std::string();
+	const bool Runs = PE.Name == Rit.NameOf(Early) && PL.Name == Rit.NameOf(Late) && PE.Name.find("-E") != std::string::npos && PL.Name.find("-L") != std::string::npos;
+	Expect(Runs && H && H->Title == PL.Name && Post && W.Headline(*Post, Title, Body, Tag) && Title == W.Get(Who)->Name + " wins " + PL.Name,
+		"FestHeadline: a GRIT run's Pending::Name, Honor and headline read its run ('" + PE.Name + "', '" + PL.Name + "'; Honor '" + (H ? H->Title : std::string("none")) +
+			"'; headline '" + Title + "')");
+}
+
+/**
+ * FestTitleOrder (§2.15.1, §2.6.3): world::TitleRank's classes (1 a championship Main, 2 another festival's Main, 3 a championship belt,
+ * 4 another belt, 5 a championship's Mini or Micro, 0 no title) and FestTitleBefore's order inside a class (prize, a belt's points, then
+ * date): an older RCOP 2027 Main title outranks a newer, smaller PENNANT 2028 Main title; a Summer Slam Main title outranks RCOP's belt;
+ * a championship belt outranks FEIGN's; the Mini and Micro rank last; an exact tie goes to the newer. FestTopTitle (the card's honorific,
+ * bigfield::Honorific) picks a planted person's top one.
+ * Planted bugs: ranking by date inside a class; a championship belt outranking a Summer Slam Main title.
+ */
+void FestTitleOrder()
+{
+	namespace world = ss::world;
+	using ss::fest::Brand;
+	const ss::fest::Festival* R27 = FestEditionWorld(Brand::Rcop, 2027);
+	const ss::fest::Festival* P28 = FestEditionWorld(Brand::Pennant, 2028);
+	const ss::fest::Festival* Slam = FestEditionWorld(Brand::Slam, 2027);
+	const ss::fest::Festival* Feign = ss::fest::FestivalOf("ignite.feign26");
+	const ss::fest::Festival* P27 = FestEditionWorld(Brand::Pennant, 2027);
+	const ss::fest::Festival* G27 = FestEditionWorld(Brand::Reign, 2027);
+	if (!R27 || !P28 || !Slam || !Feign || !P27 || !G27 || P27->TitleIds.size() != 3 || G27->TitleIds.size() != 3)
+	{
+		Expect(false, "FestTitleOrder: RCOP 2027, PENNANT 2027-2028, REIGN 2027, Summer Slam 2027 and FEIGN 2026 are in fest::All()");
+		return;
+	}
+	auto Make = [](const std::string& Id, long long Prize, int Entries, double At) {
+		world::Honor H;
+		H.EventId = Id;
+		H.Prize = Prize;
+		H.Entries = Entries;
+		H.At = At;
+		H.Npc = 7;
+		return H;
+	};
+	const world::Honor RcopMain = Make(FestMainIdWorld(*R27), 300000000, 5100, R27->MainStart + 600.0);
+	const world::Honor PenMain = Make(FestMainIdWorld(*P28), 1800000, 380, P28->MainStart + 600.0);
+	const world::Honor SlamMain = Make(FestMainIdWorld(*Slam), 1500000, 900, Slam->MainStart + 600.0);
+	const world::Honor RcopBelt = Make(R27->SeriesId + "#pos", 0, 9000, R27->MainStart + 1440.0);
+	const world::Honor FeignBelt = Make(Feign->SeriesId + "#pos", 0, 12000, Feign->MainStart + 1440.0);
+	const world::Honor PenMini = Make(P27->TitleIds[1] + "@" + std::to_string(std::llround(P27->MainStart)), 500000, 1100, P27->MainStart);
+	const world::Honor ReignMicro = Make(G27->TitleIds[2] + "@" + std::to_string(std::llround(G27->MainStart)), 400000, 1500, G27->MainStart);
+	world::Honor Year = Make("", 0, 3000, R27->MainStart);
+	Year.Title = "Player of the Year";
+	const world::Honor PenMain2 = Make(FestMainIdWorld(*P28), 1800000, 380, P28->MainStart + 1200.0); // the same prize, newer
+	const int Want[8] = {1, 1, 2, 3, 4, 5, 5, 0};
+	const world::Honor* Ranked[8] = {&RcopMain, &PenMain, &SlamMain, &RcopBelt, &FeignBelt, &PenMini, &ReignMicro, &Year};
+	std::string Ranks;
+	bool Classes = true;
+	for (int K = 0; K < 8; ++K)
+	{
+		Classes = Classes && world::TitleRank(*Ranked[K]) == Want[K];
+		Ranks += " " + std::to_string(world::TitleRank(*Ranked[K]));
+	}
+	Expect(Classes, "FestTitleOrder: TitleRank's classes read 1 1 2 3 4 5 5 0 for RCOP and PENNANT Mains, a Summer Slam Main, RCOP's and FEIGN's belts, PENNANT's Mini, REIGN's Micro "
+					"and the year's title (got" + Ranks + ")");
+	const bool Order = world::FestTitleBefore(RcopMain, PenMain) && !world::FestTitleBefore(PenMain, RcopMain) && world::FestTitleBefore(SlamMain, RcopBelt) &&
+					   !world::FestTitleBefore(RcopBelt, SlamMain) && world::FestTitleBefore(RcopBelt, FeignBelt) && world::FestTitleBefore(FeignBelt, PenMini) &&
+					   world::FestTitleBefore(PenMini, ReignMicro) && world::FestTitleBefore(ReignMicro, Year) && !world::FestTitleBefore(Year, ReignMicro) &&
+					   world::FestTitleBefore(PenMain2, PenMain) && !world::FestTitleBefore(PenMain, PenMain2);
+	Expect(Order, "FestTitleOrder: class, then prize (belts by points), then date: the older, bigger RCOP Main title over the newer PENNANT one, a Summer Slam Main title over RCOP's "
+				  "belt, RCOP's belt over FEIGN's, the Mini and Micro last, an exact tie to the newer");
+	// FestTopTitle on a world: a person holding four kinds is introduced by the RCOP Main title; another by the Summer Slam one.
+	const world::World& Mid = FestMidWorld();
+	const int A = FestPersonWorld(Mid, 30);
+	const int B = FestPersonWorld(Mid, A + 1);
+	std::string Lines;
+	for (const world::Honor* H : {&PenMain, &RcopBelt, &RcopMain, &PenMini})
+	{
+		Lines += FestHonorLineWorld(2027, "Planted", H->EventId, A, Mid.Get(A)->Name, H->Prize, H->Entries, H->At);
+	}
+	for (const world::Honor* H : {&RcopBelt, &SlamMain})
+	{
+		Lines += FestHonorLineWorld(2027, "Planted", H->EventId, B, Mid.Get(B)->Name, H->Prize, H->Entries, H->At);
+	}
+	world::World W;
+	FestLoadWorld(W, FestTextWorld(Mid) + Lines);
+	const world::Honor* TopA = world::FestTopTitle(W, A);
+	const world::Honor* TopB = world::FestTopTitle(W, B);
+	Expect(TopA && TopA->EventId == RcopMain.EventId && TopB && TopB->EventId == SlamMain.EventId && !world::FestTopTitle(W, -1),
+		"FestTitleOrder: FestTopTitle introduces a person by their top title (" + (TopA ? TopA->EventId : std::string("none")) + ", " +
+			(TopB ? TopB->EventId : std::string("none")) + ")");
+}
+
+/**
+ * FestChampTitles' world half (§2.15.1, §2.6.2, §2.6.8; F-net's half plants the data): a planted PENNANT 2027 Mini Main Event win by a
+ * person makes an Honor the roll shows on its MINI MAIN EVENT line; an unknown PENNANT 2027 Micro winner is discovered and stands on the
+ * MICRO line; RCOP 2026's row (the skip world, run for real) shows its rcop-mini and rcop-micro winners, people both.
+ * Planted bug: RCOP left at {MainId} (F-net's TitleIds, scratch only: F-world's half reads it).
+ */
+void FestChampTitlesWorld()
+{
+	namespace world = ss::world;
+	using ss::fest::Brand;
+	const ss::fest::Festival* Pen = FestEditionWorld(Brand::Pennant, 2027);
+	const ss::fest::Festival* Rcop = FestRcopWorld();
+	ss::net::EventInstance Mini, Micro;
+	if (!Pen || !Rcop || Pen->TitleIds.size() != 3 || !FestInstanceWorld(*Pen, Pen->TitleIds[1], Mini) || !FestInstanceWorld(*Pen, Pen->TitleIds[2], Micro))
+	{
+		Expect(false, "FestChampTitles: PENNANT 2027's three titles and their instances, RCOP 2026");
+		return;
+	}
+	world::World W = *FestSkipWorld().Skip;
+	const int Who = FestPersonWorld(W, 20);
+	const world::Pending P = FestResolveWorld(W, Mini, Who);
+	const size_t Before = W.People().size();
+	const world::Pending Q = FestResolveWorld(W, Micro, -2);
+	const std::vector<world::FestRollRow> Roll = world::FestRoll(W, Brand::Pennant);
+	const bool MiniLine = Roll.size() == 1 && Roll[0].Mini && Roll[0].Mini->EventId == P.Id && Roll[0].Mini->Npc == Who && !Roll[0].Main;
+	const bool MicroLine = Roll.size() == 1 && Roll[0].Micro && Roll[0].Micro->EventId == Q.Id && Roll[0].Micro->Npc == static_cast<int>(Before) && W.People().size() == Before + 1;
+	Expect(MiniLine, "FestChampTitles: a planted PENNANT 2027 Mini Main Event win by a person stands on the roll's MINI MAIN EVENT line");
+	Expect(MicroLine, "FestChampTitles: an unknown PENNANT 2027 Micro Main Event winner is discovered and stands on the MICRO MAIN EVENT line");
+	const std::vector<world::FestRollRow> Rr = world::FestRoll(*FestSkipWorld().Skip, Brand::Rcop);
+	const bool RcopRow = Rr.size() == 1 && Rr[0].Mini && Rr[0].Micro && Rr[0].Mini->Npc >= 0 && Rr[0].Micro->Npc >= 0 && !Rr[0].Mini->Name.empty() && !Rr[0].Micro->Name.empty() &&
+						 FestStartsWorld(Rr[0].Mini->EventId, "rcop-mini@") && FestStartsWorld(Rr[0].Micro->EventId, "rcop-micro@");
+	Expect(RcopRow, "FestChampTitles: RCOP 2026's row shows its rcop-mini and rcop-micro winners (" + (Rr.empty() || !Rr[0].Mini ? std::string("no Mini") : Rr[0].Mini->Name) + ", " +
+						(Rr.empty() || !Rr[0].Micro ? std::string("no Micro") : Rr[0].Micro->Name) + ")");
+}
+
+/**
+ * FestMajorFloor's world half (§2.15.1, §2.6.2; F-net's half holds T.Main by the floor): PENNANT 2027's Micro Main Event (a title, no
+ * major) won by a person makes an Honor (Lasting's FestivalTitle term) and leaves their majors where they were; won by the hero, its Honor
+ * leaves World::HallScore unchanged, while the hero's PENNANT 2027 Mini Main Event (a major) adds a major's 3.0.
+ * Planted bug: HallScore counting a non-major title Honor.
+ */
+void FestMajorFloorWorld()
+{
+	namespace world = ss::world;
+	using ss::fest::Brand;
+	const ss::fest::Festival* Pen = FestEditionWorld(Brand::Pennant, 2027);
+	ss::net::EventInstance Mini, Micro;
+	if (!Pen || Pen->TitleIds.size() != 3 || !FestInstanceWorld(*Pen, Pen->TitleIds[1], Mini) || !FestInstanceWorld(*Pen, Pen->TitleIds[2], Micro))
+	{
+		Expect(false, "FestMajorFloor: PENNANT 2027's Mini and Micro Main Events and their instances");
+		return;
+	}
+	world::World W = *FestSkipWorld().Skip;
+	const int Who = FestPersonWorld(W, 25);
+	const int Majors = W.Get(Who)->Majors;
+	const world::Pending P = FestResolveWorld(W, Micro, Who);
+	const world::Honor* H = FestHonorWorld(W, P.Id);
+	Expect(!P.Major && H && H->Npc == Who && W.Get(Who)->Majors == Majors,
+		"FestMajorFloor: a person's PENNANT 2027 Micro Main Event win (no major) keeps its Honor and adds no major (" + std::string(P.Major ? "a major" : "no major") + ", Honor " +
+			(H ? "kept" : "missing") + ", majors " + std::to_string(Majors) + " -> " + std::to_string(W.Get(Who)->Majors) + ")");
+	world::World Hero = *FestSkipWorld().Skip;
+	const double Before = Hero.HallScore(-1, 2027);
+	const world::Pending Q = FestResolveWorld(Hero, Micro, -1);
+	const world::Honor* HeroH = FestHonorWorld(Hero, Q.Id);
+	const double Minor = Hero.HallScore(-1, 2027);
+	const world::Pending M = FestResolveWorld(Hero, Mini, -1);
+	const double Major = Hero.HallScore(-1, 2027);
+	Expect(HeroH && HeroH->Npc == -1 && Before == Minor && M.Major && std::fabs(Major - Minor - 3.0) < 1e-9,
+		"FestMajorFloor: the hero's Micro Main Event title keeps its Honor and HallScore skips it (" + std::to_string(Before) + " -> " + std::to_string(Minor) +
+			"); the Mini Main Event, a major, adds 3.0 (-> " + std::to_string(Major) + ")");
+}
 } // namespace
 
 void SegWorld()
@@ -1748,6 +2547,43 @@ void SegWorld()
 	if (Only("FestCalendarFacts"))
 	{
 		FestCalendarFactsWorld(); // F-world's world half (F-net's in festivals_main.cpp)
+	}
+	// FW-3: the roll, the defender, the titles, Discover, the pins and the headlines
+	if (Only("FestRollFromHonors"))
+	{
+		FestRollFromHonors();
+	}
+	if (Only("FestBlankHonesty"))
+	{
+		FestBlankHonesty();
+	}
+	if (Only("FestDefending"))
+	{
+		FestDefending();
+	}
+	if (Only("FestDiscoverWidened"))
+	{
+		FestDiscoverWidened();
+	}
+	if (Only("FestHeroPinsDerived"))
+	{
+		FestHeroPinsDerived();
+	}
+	if (Only("FestHeadline"))
+	{
+		FestHeadline();
+	}
+	if (Only("FestTitleOrder"))
+	{
+		FestTitleOrder();
+	}
+	if (Only("FestChampTitles"))
+	{
+		FestChampTitlesWorld(); // F-world's world half (F-net's in festivals_main.cpp)
+	}
+	if (Only("FestMajorFloor"))
+	{
+		FestMajorFloorWorld(); // F-world's world half (F-net's in festivals_main.cpp)
 	}
 }
 } // namespace festivals_test
