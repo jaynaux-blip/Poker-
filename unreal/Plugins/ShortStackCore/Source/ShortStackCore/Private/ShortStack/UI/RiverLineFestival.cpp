@@ -44,8 +44,26 @@
 //   session, the RunItTwice Board's rule); a satellite into a Main that isn't joinable adds the Main's lock line and U31.
 // - The overlay ticker (§2.4.4; none on Ignite's hub, L7): U26's forms for each of the edition's guaranteed headliners and the
 //   Main's registrations so far, rebuilt once a world minute, one clipped run.
+//
+// G1 FH-2 (stream A, after F-net's FN-3 and FN-2b: the real calendar, all ten brands; SPEC v1.7 §2.1.3, §2.1.4, §2.8.1-§2.8.3,
+// §2.8.6, §2.10 items 1 and 6, §2.2.3, §2.11; PLAN_G1 §2.1, PLAN_FHUBS §4 FH-2 and its Corrections): the hub in all three frames.
+// - Ignite's rows (L7): {24, 408, 1000, 462}, six whole and the seventh's top under a fade from y 826 to the frame's foot, with
+//   screen 12's scroll bar at x 1014 while the day holds more rows than show; no ticker; the body {1044, 392, 532, 478}.
+// - GRIT (RunItTwice, "nights"): the day strip's cells read NIGHT {N}, the banner's state NIGHT {N} OF {Nights} (U2), and each show's
+//   two runs that night share one row: its two buttons, "7 PM" and "10 PM" (the runs' own starts), beside the runs' codes from
+//   Network::NameOf ("GRIT 07-E", "GRIT 07-L"), pick the run the row's RegisterBlock registers (the strike gate unchanged); the
+//   ticker leads with U15's GRIT line while the edition is on stage.
+// - The Summons (WRIT's satellite, no seat guarantee): U33, "{N} SEATS AT THE POOL SO FAR" while it runs (max(1, Pool / SeatValue),
+//   the world's own seat rule, G/WorldSim.cpp:513) and "{N} SEATS WON" once finished (WRIT's one satellite, so fest::SeatsWon's sum).
+// - THE FESTIVAL YEAR's Pass (§2.10 items 1 and 6): a rival cell without an account reads "PASS {N}/{Need}" while the Festival Pass
+//   counts and "BY INVITATION" otherwise, from GateMet's own inputs (G/SiteMoney.cpp:512-538: the site's Gate.FestivalEvents, its
+//   launch, Gate.MinRentsPaid, fest::PassFestival, fest::PassNeeds and max(P.OnlineEvents, P.Paid100)); the popover says it in words
+//   (U30). Every site's FestivalEvents is -1 until F-world's FW-7, so every such cell reads BY INVITATION in this tree.
+// - The locked Main (§2.2.3): the Main card's lock line, the ladder rows' lock line and U31 beside their buttons, THE RACE first while
+//   on stage (FestLockedMain).
 #include "ShortStack/UI/RiverLine.h"
 
+#include "../Game/SitesDetail.h"
 #include "RiverLineShared.h"
 #include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Network.h"
@@ -147,6 +165,20 @@ std::vector<std::string> FestUiInventory()
 		"sentence\tYour account is open.",
 		"label\tOPEN THE HUB",
 		"label\tGO TO {SITE}",
+		// FH-2. U2's NIGHT form (GRIT's banner) and GRIT's day strip; U15's GRIT line (the ticker's lead on GRIT's hub, its Short in
+		// {FESTIVAL}: "GRIT · NIGHT 2 OF 12 · SHOWS AT 7 PM AND 10 PM").
+		"label\tNIGHT {N} OF {Nights}",
+		"label\tNIGHT {N}",
+		"label\t{FESTIVAL} \xC2\xB7 NIGHT {N} OF {Nights} \xC2\xB7 SHOWS AT {Show1} AND {Show2}",
+		// U30: the strip cell's count and the popover's words for the Festival Pass.
+		"label\tPASS {N}/{Need}",
+		"sentence\tFestival Pass: {N} of {Need} online events.",
+		"sentence\tOpens to you after your second rent.",
+		// U33: The Summons' seats (§2.8.3), singular at one.
+		"label\t{N} SEATS AT THE POOL SO FAR",
+		"label\t1 SEAT AT THE POOL SO FAR",
+		"label\t{N} SEATS WON",
+		"label\t1 SEAT WON",
 	};
 	for (std::string& Line : ui::rlfest_detail::HostUiStrings())
 	{
@@ -195,7 +227,42 @@ struct HubYearCell
 	bool Underline = false;                  // the edition on stage (else the next to open): the 2-unit Accent underline
 	bool Account = true;                     // the player holds an account on the host (RiverLine always)
 	double CrownedAt = -1.0;                 // the crown minute (world::FestCrownedAt), -1 before it
+	// FH-2: the Festival Pass on a cell without an account (HubPassForm): 0 by invitation, 1 after the second rent, 2 counting.
+	int PassForm = 0;
+	int PassN = 0, PassNeed = 0;
 };
+
+/** The Festival Pass's progress on a rival edition without an account (§2.10 items 1 and 6, §2.8.6, U30; FH-2), from GateMet's own
+ *  inputs in its order (G/SiteMoney.cpp:512-538): 0 "BY INVITATION" (the site has no Pass, isn't open yet, or the path is closed:
+ *  the edition isn't the site's festival in its Announced, Buildup or Live phase, or its first edition, which needs the two rents
+ *  alone, so the letter comes at the next daily check); 1 before the second rent ("Opens to you after your second rent."); 2 while
+ *  it counts, "PASS {N}/{Need}" with N the paid online events (max(P.OnlineEvents, P.Paid100)), shown at most Need. Events is read
+ *  only for 2 (HubYear asks the session's record only then). Pure; u4_ui's FestStripTen calls it. */
+int HubPassForm(const net::InviteGate& Gate, bool Open, int RentsPaid, const fest::Festival* PassFest, const fest::Festival& F, int Events, int& N, int& Need)
+{
+	N = 0;
+	Need = 0;
+	if (Gate.FestivalEvents < 0 || !Open)
+	{
+		return 0;
+	}
+	if (RentsPaid < Gate.MinRentsPaid)
+	{
+		return 1;
+	}
+	if (PassFest != &F)
+	{
+		return 0;
+	}
+	Need = fest::PassNeeds(F, Gate);
+	if (Need <= 0)
+	{
+		Need = 0;
+		return 0;
+	}
+	N = std::max(0, std::min(Events, Need));
+	return 2;
+}
 
 /** Every fact the hub prints (§2.8.3), read once a frame by Gather. */
 struct HubFacts
@@ -239,6 +306,7 @@ void HubYear(const Session& S, double World, const world::World* W, HubFacts& H)
 	constexpr int TailDays = 14;
 	const std::vector<const fest::Festival*> Near = fest::Festivals(Today - TailDays, Today + 400);
 	bool AnyOnStage = false;
+	int Events = -1; // FH-2: the paid online events GateMet counts, asked of the session's record once, only when a Pass counts
 	for (int I = 0; I < 10; ++I)
 	{
 		HubYearCell& YC = H.Year[I];
@@ -274,6 +342,19 @@ void HubYear(const Session& S, double World, const world::World* W, HubFacts& H)
 		YC.Series = net::Site(YC.F->Site).FindSeries(YC.F->SeriesId);
 		YC.Lit = YC.Ph != fest::Phase::Off;
 		YC.Account = YC.F->Site == net::SiteId::RiverLine || rlsites_detail::SitesAccount(S, YC.F->Site) != nullptr;
+		if (!YC.Account)
+		{
+			// FH-2 (§2.10): the Pass's progress, from GateMet's own inputs.
+			const net::InviteGate& Gate = net::Def(YC.F->Site).Gate;
+			const bool Open = World >= net::netsites_detail::NetSitesLaunch(net::Site(YC.F->Site));
+			const fest::Festival* PassFest = Gate.FestivalEvents >= 0 && Open ? fest::PassFestival(YC.F->Site, World) : nullptr;
+			if (PassFest == YC.F && S.Life.RentsPaid >= Gate.MinRentsPaid && Events < 0)
+			{
+				const rep::Public P = S.Record();
+				Events = std::max(P.OnlineEvents, P.Paid100);
+			}
+			YC.PassForm = HubPassForm(Gate, Open, S.Life.RentsPaid, PassFest, *YC.F, std::max(0, Events), YC.PassN, YC.PassNeed);
+		}
 		if (YC.Ph == fest::Phase::Afterglow && W)
 		{
 			YC.CrownedAt = world::FestCrownedAt(*W, YC.F->SeriesId);
@@ -368,6 +449,10 @@ struct HubFrame
 	float YearX = 260.0f;               // THE FESTIVAL YEAR's first cell (v1.6: ten cells of 128 from x 260; RunItTwice 116 from x 368)
 	float YearPitch = 128.0f;
 	float YearText = 92.0f;             // a cell's text column: a Short gets 92 units (80 on RunItTwice)
+	// FH-2, Ignite (L7, screen 12): the rows' foot fades from FadeY to the rows' end, and a scroll bar stands at BarX while the day
+	// holds more rows than show whole; 0 for none.
+	float FadeY = 0.0f;
+	float BarX = 0.0f;
 };
 
 const HubFrame& HubFrameOf(net::SiteId Site)
@@ -394,6 +479,8 @@ const HubFrame& HubFrameOf(net::SiteId Site)
 		Fr.Ticker = {24.0f, 920.0f, 0.0f, 0.0f};
 		Fr.Body = {1044.0f, 392.0f, 532.0f, 478.0f};
 		Fr.HasTicker = false;
+		Fr.FadeY = 826.0f;
+		Fr.BarX = 1014.0f;
 		return Fr;
 	}();
 	// RunItTwice: §2.8.2's bracketed rects, right of the rail; the stats a little closer, so the fourth clears the Main card at x 1170.
@@ -453,6 +540,8 @@ struct HubUi
 	long long RowsMinute = -1;
 	int RowsDay = -9999;
 	std::vector<net::EventInstance> Rows;
+	std::vector<net::EventInstance> Late; // FH-2: beside each row, a GRIT show's second run that night (Id "" for none)
+	std::map<std::string, int> RunPick;   // FH-2: the run the player picked on a GRIT row (its first run's id -> 0 or 1)
 	// The overlay ticker's run, rebuilt once a world minute.
 	long long TickerMinute = -1;
 	std::string Ticker;
@@ -502,8 +591,8 @@ std::string HubCountdown(double Minutes)
 	return std::to_string(M / 1440) + "D " + rlnet_detail::NetPad2((M / 60) % 24) + "H " + rlnet_detail::NetPad2(M % 60) + "M";
 }
 
-/** The banner's fourth stat (§2.8.2, U2): the countdown over OPENS IN before the window, then DAY {N} OF {Days}, MAIN EVENT TODAY
- *  and COMPLETE over PROGRESS. */
+/** The banner's fourth stat (§2.8.2, U2): the countdown over OPENS IN before the window, then DAY {N} OF {Days} (NIGHT {N} OF
+ *  {Nights} on GRIT, FH-2), MAIN EVENT TODAY and COMPLETE over PROGRESS. */
 std::pair<std::string, std::string> HubStateStat(const HubFacts& H)
 {
 	if (H.OpensIn > 0.0)
@@ -518,7 +607,8 @@ std::pair<std::string, std::string> HubStateStat(const HubFacts& H)
 	{
 		return {"COMPLETE", "PROGRESS"};
 	}
-	return {"DAY " + std::to_string(H.Today - H.F->FirstDay + 1) + " OF " + std::to_string(H.DayCount), "PROGRESS"};
+	// FH-2: GRIT counts nights (U2's NIGHT form).
+	return {std::string(H.F->Which == fest::Brand::Grit ? "NIGHT " : "DAY ") + std::to_string(H.Today - H.F->FirstDay + 1) + " OF " + std::to_string(H.DayCount), "PROGRESS"};
 }
 
 /** One frame of the hub: the client, its canvas, the facts and the host's frame. */
@@ -630,7 +720,8 @@ void HubMainCard(HubCtx& X)
 
 /** THE FESTIVAL YEAR (§2.8.2, U1; FH-1b): the label in one NetSpaced line, then the ten cells in calendar order (`fsy0..9`), each its
  *  brand's on-stage or next edition: the low-detail crest at 26, the Short (13/800 in its 92-unit column, 80 on RunItTwice), the
- *  opening date (11/600 Muted), "BY INVITATION" (9.5/800) on a rival cell without an account; a crest outside its window rests at
+ *  opening date (11/600 Muted), "BY INVITATION" (9.5/800) on a rival cell without an account, "PASS {N}/{Need}" there while the
+ *  Festival Pass counts (U30, FH-2); a crest outside its window rests at
  *  0.45; the underlined one carries a 2-unit Accent line. A click opens the cell's popover, clamped inside the content rect R. */
 void HubYearStrip(HubCtx& X, HubUi& U, const Rect& R)
 {
@@ -675,12 +766,14 @@ void HubYearStrip(HubCtx& X, HubUi& U, const Rect& R)
 		X.C.SetAlpha(A0 * (Cl.Lit ? 1.0f : 0.45f));
 		eventart::SeriesCrest(X.C, *Cl.Series, Cell.X + 19.0f, Cell.Y + 20.0f, 26.0f, X.Still ? 0.0 : X.Now);
 		const float Tx = Cell.X + 36.0f;
-		const bool IsInvite = !Cl.Account;
+		const bool IsInvite = !Cl.Account; // a third line: BY INVITATION, or the Pass's count (U30, FH-2)
 		X.UI.Text(NetUpper(Cl.Series->Short), Tx, Cell.Y + (IsInvite ? 14.0f : 17.0f), Ts(13.0f, 800, Cl.Lit ? pal::Ink : pal::Muted, Align::Left, Baseline::Alphabetic, false, Fr.YearText));
 		X.UI.Text(net::DateLabel(Cl.F->FirstDay), Tx, Cell.Y + (IsInvite ? 26.0f : 31.0f), Ts(11.0f, 600, pal::Muted, Align::Left, Baseline::Alphabetic, false, Fr.YearText));
 		if (IsInvite)
 		{
-			X.UI.Text("BY INVITATION", Tx, Cell.Y + 37.0f, Ts(9.5f, 800, pal::Orange, Align::Left, Baseline::Alphabetic, false, Fr.YearText));
+			const bool Counting = Cl.PassForm == 2;
+			X.UI.Text(Counting ? "PASS " + std::to_string(Cl.PassN) + "/" + std::to_string(Cl.PassNeed) : std::string("BY INVITATION"), Tx, Cell.Y + 37.0f,
+				Ts(9.5f, 800, Counting ? pal::Accent : pal::Orange, Align::Left, Baseline::Alphabetic, false, Fr.YearText));
 		}
 		X.C.SetAlpha(A0);
 		if (Cl.Underline)
@@ -703,8 +796,8 @@ void HubStarOutline(Canvas& C, float Cx, float Cy, float R, const Color& Col)
 	C.StrokePolyline(P, true, Col, 1.2f);
 }
 
-/** The day strip (§2.8.2; FH-1b): one cell a day of the window (`fsd<day>`), today lit, the day shown outlined, a star on Main day and
- *  an outline star on the edition's other title days. Returns the day shown: the player's pick, else today held inside the window. */
+/** The day strip (§2.8.2; FH-1b): one cell a day of the window (`fsd<day>`; a night on GRIT, FH-2), today lit, the day shown
+ *  outlined, a star on Main day and an outline star on the edition's other title days. Returns the day shown: the player's pick, else today held inside the window. */
 int HubDays(HubCtx& X, HubUi& U)
 {
 	const HubFacts& H = X.H;
@@ -715,6 +808,7 @@ int HubDays(HubCtx& X, HubUi& U)
 	const float Gap = 4.0f;
 	const float Cw = (D.W - Gap * static_cast<float>(Count - 1)) / static_cast<float>(Count);
 	const int MainDay = H.HasMain ? net::DayOf(H.Main.Start) : F.MainDay;
+	const bool Nights = F.Which == fest::Brand::Grit;
 	for (int Day = F.FirstDay; Day <= F.LastDay; ++Day)
 	{
 		const Rect R{D.X + static_cast<float>(Day - F.FirstDay) * (Cw + Gap), D.Y, Cw, D.H};
@@ -730,7 +824,9 @@ int HubDays(HubCtx& X, HubUi& U)
 		X.UI.RRect(R, 8.0f, IsToday ? NetA(pal::Accent, 0.22f) : St.Hover ? rlsites_detail::SitesTone(0x172a42) : rlsites_detail::SitesTone(0x101a2b),
 			On ? pal::Accent : IsToday ? NetA(pal::Accent, 0.6f) : NetA(pal::Line, 0.6f), On ? 1.5f : 1.0f);
 		const float Mx = R.X + R.W / 2.0f;
-		X.UI.Text(std::string(net::WeekdayName(Day)).substr(0, 1), Mx, R.Y + 17.0f, Ts(10.0f, 800, IsToday ? pal::Accent : pal::Muted, Align::Center));
+		// FH-2: GRIT's strip reads nights ("NIGHT 4"), every other edition's the weekday's initial.
+		const std::string Top = Nights ? "NIGHT " + std::to_string(Day - F.FirstDay + 1) : std::string(net::WeekdayName(Day)).substr(0, 1);
+		X.UI.Text(Top, Mx, R.Y + 17.0f, Ts(Nights ? 9.0f : 10.0f, 800, IsToday ? pal::Accent : pal::Muted, Align::Center, Baseline::Alphabetic, false, R.W - 6.0f));
 		const std::string Date = net::DateLabel(Day);
 		X.UI.Text(Date.substr(Date.find(' ') + 1), Mx, R.Y + 40.0f, Ts(17.0f, 900, Day < H.Today && !On ? pal::Dim : pal::Ink, Align::Center));
 		if (Day == MainDay)
@@ -784,8 +880,9 @@ std::vector<std::string> HubLadder(const net::Network& Net, const fest::Festival
 	return Out;
 }
 
-/** The day's rows (§2.8.2): the edition's events that day in start order, then one row for each satellite into its Main running that
- *  day (its first instance not yet finished, else the day's last), rebuilt once a world minute or on a new day. */
+/** The day's rows (§2.8.2): the edition's events that day in start order (a GRIT show's two runs in one row, FH-2), then one row for
+ *  each satellite into its Main running that day (its first instance not yet finished, else the day's last), rebuilt once a world
+ *  minute or on a new day. */
 void HubDayRows(const net::Network& Net, const fest::Festival& F, HubUi& U, int Day, double World)
 {
 	const long long Minute = static_cast<long long>(std::floor(World));
@@ -801,13 +898,26 @@ void HubDayRows(const net::Network& Net, const fest::Festival& F, HubUi& U, int 
 	U.RowsDay = Day;
 	U.RowsMinute = Minute;
 	U.Rows.clear();
+	U.Late.clear();
 	std::vector<net::EventInstance> Sats;
+	const bool Nights = F.Which == fest::Brand::Grit;
 	for (net::EventInstance& E : Net.Window(HubMinute(Day), HubMinute(Day + 1)))
 	{
 		const net::EventTemplate& T = Net.TemplateOf(E);
 		if (T.Series == F.SeriesId)
 		{
+			if (Nights)
+			{
+				// FH-2: a GRIT show's second run that night (one template, run at 7 PM and 10 PM) joins its first run's row.
+				const auto First = std::find_if(U.Rows.begin(), U.Rows.end(), [&E](const net::EventInstance& O) { return O.Template == E.Template; });
+				if (First != U.Rows.end())
+				{
+					U.Late[static_cast<size_t>(First - U.Rows.begin())] = std::move(E);
+					continue;
+				}
+			}
 			U.Rows.push_back(std::move(E));
+			U.Late.emplace_back();
 			continue;
 		}
 		if (T.Fmt != net::Format::Satellite || std::find(U.Ladder.begin(), U.Ladder.end(), T.Id) == U.Ladder.end())
@@ -827,6 +937,7 @@ void HubDayRows(const net::Network& Net, const fest::Festival& F, HubUi& U, int 
 	for (net::EventInstance& E : Sats)
 	{
 		U.Rows.push_back(std::move(E));
+		U.Late.emplace_back();
 	}
 }
 
@@ -852,13 +963,26 @@ std::string HubSeatLock(const net::Network& Net, const net::EventTemplate& T, do
 	return SeatLock;
 }
 
+/** A show's start as GRIT's buttons print it (§2.8.2: "7 PM", "10 PM"; "7:30 PM" off the hour). */
+std::string HubShowTime(double Start)
+{
+	const long long M = (static_cast<long long>(std::llround(Start - std::floor(Start / net::MinutesPerDay) * net::MinutesPerDay)) % 1440 + 1440) % 1440;
+	const long long H = M / 60;
+	const long long H12 = H % 12 == 0 ? 12 : H % 12;
+	return std::to_string(H12) + (M % 60 != 0 ? ":" + rlnet_detail::NetPad2(M % 60) : std::string()) + (H < 12 ? " AM" : " PM");
+}
+
 /** The day's rows (§2.8.2; FH-1b): seven at 72 in view (the wheel scrolls the rest; Ignite's seventh peeks under its frame), each
  *  `ev:<id>` (a click opens the lobby's event panel on it), written to Listed: the start, the low-detail emblem at 30, the number and
  *  the name, GTD or pool and the buy-in, the pills (MAIN EVENT, a title's MINI or MICRO MAIN EVENT, SATELLITE), the status and the
  *  entries; a satellite into a Main that isn't joinable shows the Main's lock line and U31 instead of its money line. The button is
  *  RegisterBlock's (SitesTwoPress, the clause's second press, core's strike gate: FestStrikeGate): on every unfinished row until one
  *  is armed, then on that row alone, which a press on its button selects first (Session::ConfirmRegister is one per session); a
- *  finished row shows its winner in the button's place. */
+ *  finished row shows its winner in the button's place.
+ *  FH-2: a GRIT row holds its show's two runs: two buttons, "7 PM" and "10 PM", beside the runs' codes (Network::NameOf) in the start's
+ *  column, pick the run its narrower RegisterBlock (300) registers (the run the player is in, else the one selected, else the player's pick, else the first
+ *  still taking entries); while the confirm step is armed the pick holds. The Summons' money line is U33's seats. On Ignite (L7) the
+ *  rows' foot fades from y 826 and screen 12's bar shows where the view sits while the day holds more rows than show whole. */
 void HubRows(HubCtx& X, HubUi& U, int Day)
 {
 	const HubFacts& H = X.H;
@@ -879,25 +1003,53 @@ void HubRows(HubCtx& X, HubUi& U, int Day)
 	if (!X.Still)
 	{
 		std::vector<std::string> Ids;
-		for (const net::EventInstance& E : U.Rows)
+		for (size_t I = 0; I < U.Rows.size(); ++I)
 		{
-			Ids.push_back(E.Id);
+			Ids.push_back(U.Rows[I].Id);
+			if (!U.Late[I].Id.empty())
+			{
+				Ids.push_back(U.Late[I].Id);
+			}
 		}
 		Access::SetListed(X.RL, std::move(Ids));
 	}
 	const bool Armed = S.ConfirmRegister;
+	const std::string Selected = X.RL.SelectedEvent();
 	const Color SoftCol = rlsites_detail::SitesTone(0xc3cedf);
 	const Color EdgeCol = Hex(H.Series->Color);
 	X.C.PushClip(Rr);
 	for (int I = U.RowFirst; I < Count && Pitch * static_cast<float>(I - U.RowFirst) < Rr.H; ++I)
 	{
-		const net::EventInstance& E = U.Rows[static_cast<size_t>(I)];
+		const net::EventInstance& E0 = U.Rows[static_cast<size_t>(I)];
+		const net::EventInstance* E1 = U.Late[static_cast<size_t>(I)].Id.empty() ? nullptr : &U.Late[static_cast<size_t>(I)];
+		const bool Pair = E1 != nullptr;
+		// FH-2: the run this row shows and registers.
+		int Pick = 0;
+		if (Pair)
+		{
+			const auto Picked = U.RunPick.find(E0.Id);
+			const net::Status St0 = Net.Live(E0, H.World).St;
+			const bool FirstShut = St0 == net::Status::Running || St0 == net::Status::FinalTable || St0 == net::Status::Finished;
+			Pick = S.IsPlaying(E0.Id)       ? 0
+				: S.IsPlaying(E1->Id)       ? 1
+				: Selected == E1->Id        ? 1
+				: Selected == E0.Id         ? 0
+				: Picked != U.RunPick.end() ? Picked->second
+				: FirstShut                 ? 1
+											: 0;
+		}
+		const net::EventInstance& E = Pick == 1 ? *E1 : E0;
 		const net::EventTemplate& T = Net.TemplateOf(E);
 		const net::LiveState L = Net.Live(E, H.World);
 		const Rect R{Rr.X, Rr.Y + Pitch * static_cast<float>(I - U.RowFirst), Rr.W, RowH};
-		const Rect Rb{R.X + R.W - 372.0f, R.Y + 10.0f, 360.0f, 46.0f};
-		const bool IsMine = X.RL.SelectedEvent() == E.Id;
-		const bool OverButton = X.UI.Hover(Rb);
+		const Rect Rb = Pair ? Rect{R.X + R.W - 312.0f, R.Y + 10.0f, 300.0f, 46.0f} : Rect{R.X + R.W - 372.0f, R.Y + 10.0f, 360.0f, 46.0f};
+		// GRIT's runs take the start's column: the codes right-aligned to x + 66, the buttons from x + 72; the emblem and the name move
+		// right by 54.
+		const float Shift = Pair ? 54.0f : 0.0f;
+		const Rect RunsR{R.X + 8.0f, R.Y + 6.0f, 132.0f, 56.0f};
+		const bool IsMine = Selected == E0.Id || (Pair && Selected == E1->Id);
+		const bool OverReg = X.UI.Hover(Rb);
+		const bool OverButton = OverReg || (Pair && X.UI.Hover(RunsR));
 		const Ui::ClickState St = X.UI.Clickable("ev:" + E.Id, R, !OverButton);
 		if (St.Clicked && !X.Still)
 		{
@@ -911,17 +1063,20 @@ void HubRows(HubCtx& X, HubUi& U, int Day)
 		X.UI.RRect(R, 10.0f, St.Hover ? rlsites_detail::SitesTone(0x15253d) : rlsites_detail::SitesTone(0x101a2b),
 			IsMain ? NetA(pal::Gold, 0.55f) : IsMine ? NetA(pal::Accent, 0.6f) : NetA(pal::Line, 0.6f));
 		X.C.FillRoundRect({R.X + 1.0f, R.Y + 10.0f, 4.0f, R.H - 20.0f}, 2.0f, IsMain || TitleEvent ? pal::Gold : EdgeCol);
-		X.UI.Text(net::TimeLabel(E.Start), R.X + 18.0f, R.Y + 28.0f, Ts(14.0f, 700, pal::Muted));
-		eventart::Emblem(X.C, T, R.X + 104.0f, R.Y + 33.0f, 30.0f, X.Still ? 0.0 : X.Now);
+		if (!Pair)
+		{
+			X.UI.Text(net::TimeLabel(E.Start), R.X + 18.0f, R.Y + 28.0f, Ts(14.0f, 700, pal::Muted));
+		}
+		eventart::Emblem(X.C, T, R.X + 104.0f + Shift, R.Y + 33.0f, 30.0f, X.Still ? 0.0 : X.Now);
 		const float StatusX = Rb.X - 138.0f;
-		float Nx = R.X + 128.0f;
+		float Nx = R.X + 128.0f + Shift;
 		if (T.EventNo > 0)
 		{
 			Nx += rlnet_detail::NetPill(X.C, "#" + std::to_string(T.EventNo), Nx, R.Y + 14.0f, IsMain || TitleEvent ? pal::Gold : EdgeCol, true, 10.0f) + 8.0f;
 		}
 		X.UI.Text(rlnet_detail::NetShortName(T.Name), Nx, R.Y + 28.0f, Ts(15.0f, 700, pal::Ink, Align::Left, Baseline::Alphabetic, false, std::max(40.0f, StatusX - 12.0f - Nx)));
 		const std::string SeatLock = IsSat ? HubSeatLock(Net, T, E.Start, S.Unlocks()) : std::string();
-		float Lx = R.X + 128.0f;
+		float Lx = R.X + 128.0f + Shift;
 		if (!SeatLock.empty())
 		{
 			// §2.2.3: the button stays, and the row says the truth beside it.
@@ -932,9 +1087,20 @@ void HubRows(HubCtx& X, HubUi& U, int Day)
 		else
 		{
 			std::string PotLine;
-			if (T.GtdCents > 0)
+			// FH-2, U33: The Summons (WRIT's satellite, no seat guarantee) prints its seats, max(1, Pool / SeatValue) at the pool so far,
+			// then the seats it won (§2.8.3; the world's seat rule, G/WorldSim.cpp:492).
+			const bool Summons = IsSat && F.Which == fest::Brand::Writ && T.SeatValueCents > 0 &&
+				std::find(F.Satellites.begin(), F.Satellites.end(), T.Id) != F.Satellites.end();
+			const bool Done = L.St == net::Status::Finished;
+			const Chips SeatPool = Done ? E.Pool : L.Pool;
+			if (Summons && SeatPool > 0)
 			{
-				PotLine = NetMoney(std::max(L.Pool, T.GtdCents)) + (L.St == net::Status::Finished ? "" : " GTD");
+				const long long Seats = std::max<long long>(1, SeatPool / T.SeatValueCents);
+				PotLine = Seats == 1 ? std::string(Done ? "1 SEAT WON" : "1 SEAT AT THE POOL SO FAR") : std::to_string(Seats) + (Done ? " SEATS WON" : " SEATS AT THE POOL SO FAR");
+			}
+			else if (T.GtdCents > 0)
+			{
+				PotLine = NetMoney(std::max(L.Pool, T.GtdCents)) + (Done ? "" : " GTD");
 			}
 			else if (L.Pool > 0)
 			{
@@ -968,6 +1134,26 @@ void HubRows(HubCtx& X, HubUi& U, int Day)
 		{
 			X.UI.Text(Entries == 1 ? std::string("1 entry") : Grouped(Entries) + " entries", StatusX, R.Y + 51.0f, Ts(12.0f, 600, pal::Muted, Align::Left, Baseline::Alphabetic, false, 128.0f));
 		}
+		if (Pair)
+		{
+			// FH-2: GRIT's two runs, each its code and its button; a press picks the run (held while the confirm step is armed).
+			for (int K = 0; K < 2; ++K)
+			{
+				const net::EventInstance& Run = K == 1 ? *E1 : E0;
+				const Rect Bk{R.X + 72.0f, R.Y + 8.0f + 28.0f * static_cast<float>(K), 64.0f, 24.0f};
+				const std::string RunName = Net.NameOf(Run);
+				X.UI.Text(RunName.substr(0, RunName.find(": ")), R.X + 66.0f, Bk.Y + 16.0f,
+					Ts(10.5f, 700, K == Pick ? pal::Ink : pal::Muted, Align::Right, Baseline::Alphabetic, false, 56.0f));
+				ButtonOpts O;
+				O.Size = 12.0f;
+				O.Kind = K == Pick ? ButtonKind::Primary : ButtonKind::Secondary;
+				if (rlsites_detail::SitesButton(X.UI, X.C, "fsrun" + std::to_string(K) + ":" + E0.Id, Bk, HubShowTime(Run.Start), O) && !X.Still && !Armed)
+				{
+					U.RunPick[E0.Id] = K;
+					Access::SelectEvent(X.RL, Run.Id);
+				}
+			}
+		}
 		if (L.St == net::Status::Finished)
 		{
 			const net::EventResult& Res = Net.Result(E);
@@ -982,17 +1168,33 @@ void HubRows(HubCtx& X, HubUi& U, int Day)
 		else if (!Armed || IsMine)
 		{
 			// The press that arms the step first selects this row, so the one confirm step is this row's (a two-frame click too).
-			if (!Armed && !IsMine && !X.Still && OverButton && (X.UI.Ptr.Pressed || X.UI.Ptr.Released))
+			if (!Armed && Selected != E.Id && !X.Still && OverReg && (X.UI.Ptr.Pressed || X.UI.Ptr.Released))
 			{
 				Access::SelectEvent(X.RL, E.Id);
 			}
 			Access::RegisterBlock(X.RL, E, L, Rb, X.Now);
 		}
 	}
+	if (X.Fr.FadeY > 0.0f && X.Fr.FadeY < Rr.Y + Rr.H)
+	{
+		// FH-2, Ignite (L7): the seventh row's top shows under a fade to the frame's ground.
+		const Rect Fade{Rr.X, X.Fr.FadeY, Rr.W, Rr.Y + Rr.H - X.Fr.FadeY};
+		X.C.FillRect(Fade, Paint::Linear({0.0f, Fade.Y}, {0.0f, Fade.Y + Fade.H}, NetA(pal::Bg, 0.0f), NetA(pal::Bg, 0.92f)));
+	}
 	X.C.PopClip();
+	if (X.Fr.BarX > 0.0f && Count > Visible)
+	{
+		// Screen 12's scroll bar (x 1014, the rows' height less 4): the thumb's share and place are the view's.
+		const float TrackH = Rr.H - 4.0f;
+		const float ThumbH = std::max(24.0f, TrackH * static_cast<float>(Visible) / static_cast<float>(Count));
+		const float ThumbY = Rr.Y + (TrackH - ThumbH) * static_cast<float>(U.RowFirst) / static_cast<float>(std::max(1, Count - Visible));
+		X.C.FillRoundRect({X.Fr.BarX, Rr.Y, 4.0f, TrackH}, 2.0f, NetA(pal::Line, 0.6f));
+		X.C.FillRoundRect({X.Fr.BarX, ThumbY, 4.0f, ThumbH}, 2.0f, NetA(pal::Accent, 0.8f));
+	}
 }
 
-/** The overlay ticker's run (§2.4.4, U26; FH-1b): for each of the edition's guaranteed headliners (its featured events with a
+/** The overlay ticker's run (§2.4.4, U26; FH-1b; on GRIT's hub U15's GRIT line leads while it runs, FH-2): for each of the edition's
+ *  guaranteed headliners (its featured events with a
  *  guarantee, the Main among them) from yesterday to tomorrow, and for the Main while its registration runs: the overlay its site added
  *  once registration closed, else the projection short or over while registering with someone in (site::show::OverlayOf: the
  *  guarantee against the pool, so added money is never an overlay); then the Main's registrations so far. "" when there's nothing. */
@@ -1001,6 +1203,27 @@ std::string HubTickerRun(const net::Network& Net, const HubFacts& H)
 	const fest::Festival& F = *H.F;
 	std::vector<std::string> TickItems;
 	std::vector<std::string> TickSeen;
+	if (F.Which == fest::Brand::Grit && (H.Ph == fest::Phase::Live || H.Ph == fest::Phase::MainDay) && H.Today >= F.FirstDay && H.Today <= F.LastDay)
+	{
+		// FH-2, U15's GRIT line: tonight's show and its two runs' starts (the first show running twice tonight).
+		const std::vector<net::EventInstance> Tonight = Net.Window(HubMinute(H.Today), HubMinute(H.Today + 1));
+		for (size_t A = 0; A < Tonight.size() && TickItems.empty(); ++A)
+		{
+			if (Net.TemplateOf(Tonight[A]).Series != F.SeriesId)
+			{
+				continue;
+			}
+			for (size_t B = A + 1; B < Tonight.size(); ++B)
+			{
+				if (Tonight[B].Template == Tonight[A].Template)
+				{
+					TickItems.push_back(NetUpper(H.Series->Short) + " \xC2\xB7 NIGHT " + std::to_string(H.Today - F.FirstDay + 1) + " OF " + std::to_string(H.DayCount) +
+						" \xC2\xB7 SHOWS AT " + HubShowTime(Tonight[A].Start) + " AND " + HubShowTime(Tonight[B].Start));
+					break;
+				}
+			}
+		}
+	}
 	const auto TickAdd = [&](const net::EventInstance& E) {
 		const net::EventTemplate& T = Net.TemplateOf(E);
 		if (T.GtdCents <= 0 || std::find(TickSeen.begin(), TickSeen.end(), E.Id) != TickSeen.end())
@@ -1203,7 +1426,8 @@ std::string HubPhaseLine(const HubYearCell& Cl, int Today)
 
 /** The strip's popover (§2.8.6; FH-1b), drawn by FestivalOverlays over the hub that opened it, in the client's skin: the crest at 46,
  *  the name and its full title (12/600 Muted, N17-N19), the host and the window, the phase line, "Your account is open." or "By
- *  invitation." (U16; FH-2 adds the Pass's count, U30), and one button (U17): OPEN THE HUB when the edition's host is the site in front
+ *  invitation." (U16), or the Pass's words (U30, FH-2: "Festival Pass: {N} of {Need} online events.", "Opens to you after your
+ *  second rent."), and one button (U17): OPEN THE HUB when the edition's host is the site in front
  *  (the edition's hub), GO TO {SITE} for another site's edition with an account open (the site tabs' path: RiverLine::SiteShown, then
  *  that site's SERIES page on the edition); none for a rival festival without an account. The hub held the pointer under it
  *  (FestivalHub); the frame it opens in takes no input. */
@@ -1236,7 +1460,13 @@ void HubPopover(RiverLine& RL, Canvas& C, Ui& UI, HubUi& U, double Now)
 	UI.Text(rlsites_detail::SitesShortName(Cl.F->Site) + " \xC2\xB7 " + net::DateLabel(Cl.F->FirstDay) + " \xE2\x80\x93 " + net::DateLabel(Cl.F->LastDay), Tx, Ly,
 		Ts(12.0f, 600, rlsites_detail::SitesTone(0xc3cedf), Align::Left, Baseline::Alphabetic, false, Tw));
 	UI.Text(HubPhaseLine(Cl, P.Today), R.X + 18.0f, R.Y + 102.0f, Ts(14.0f, 700, pal::Ink, Align::Left, Baseline::Alphabetic, false, R.W - 36.0f));
-	UI.Text(Cl.Account ? "Your account is open." : "By invitation.", R.X + 18.0f, R.Y + 122.0f, Ts(13.0f, 500, Cl.Account ? pal::Green : pal::Muted, Align::Left, Baseline::Alphabetic, false, 160.0f));
+	// FH-2, U30: the Pass's progress in words on a rival edition without an account (no button there, so the line takes the width).
+	const std::string AccountLine = Cl.Account ? std::string("Your account is open.")
+		: Cl.PassForm == 2                     ? "Festival Pass: " + std::to_string(Cl.PassN) + " of " + std::to_string(Cl.PassNeed) + " online events."
+		: Cl.PassForm == 1                     ? std::string("Opens to you after your second rent.")
+											   : std::string("By invitation.");
+	UI.Text(AccountLine, R.X + 18.0f, R.Y + 122.0f, Ts(13.0f, 500, Cl.Account ? pal::Green : Cl.PassForm == 2 ? pal::Accent : pal::Muted, Align::Left, Baseline::Alphabetic, false,
+		Cl.Account ? 160.0f : R.W - 36.0f));
 	if (!Cl.Account)
 	{
 		return;

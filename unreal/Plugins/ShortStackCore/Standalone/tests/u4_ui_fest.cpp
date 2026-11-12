@@ -9,12 +9,19 @@
 // G1 FH-1b (PLAN_G1 §2.1, §3.2): the strip, the day's rows and the popover: the page fest_popover (RCOP's cell on Night One), and
 // FestStrikeGate, FestOneFrameClicks' popover half and FestCopyUi's A half (with FestBlurbsFilled' U2 half, PLAN_G1 §1 item 9). The
 // popover's budget row (<= 3k, <= 20 runs) is printed, asserted at FH-7 with the hub's.
+// G1 FH-2 (PLAN_G1 §2.1, §3.2; PLAN_FHUBS §4 FH-2 and its Corrections): the real calendar in all three frames, after F-net's FN-3 and
+// FN-2b. Two careers walked forward in day order (the plan's A and B): A opens Ignite and draws FEIGN 2026's hub (fest_hub_ig_live);
+// B never opens Ignite and draws Night One's strip (fest_strip_night_one), RCOP 2026's first day (fest_hub_rl_live) and its ladder
+// (fest_hub_rl_locked), GRIT 2027's second night (fest_hub_rit_twice) and FEIGN II's popover on day 395 (fest_popover_pass, its BY
+// INVITATION form: every site's Pass is -1 until F-world's FW-7; FH-7 emits the counting form). Checks: FestStripTen, FestLockedMain,
+// FestCopyUi extended (U30, U33, U2's NIGHT form, U15's GRIT line and its drawn figures).
 #include "UiSeg.h"
 
 #include "CopyLint.h"
 #include "Trademarks.h"
 #include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/World.h"
 #include "ShortStack/UI/RiverLine.h"
@@ -31,6 +38,18 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+namespace ss
+{
+namespace ui
+{
+namespace rlfest_detail
+{
+// UI/RiverLineFestival.cpp (FH-2): the Festival Pass's form on a rival cell without an account, pure (FestStripTen calls it).
+int HubPassForm(const net::InviteGate& Gate, bool Open, int RentsPaid, const fest::Festival* PassFest, const fest::Festival& F, int Events, int& N, int& Need);
+} // namespace rlfest_detail
+} // namespace ui
+} // namespace ss
 
 namespace
 {
@@ -555,7 +574,8 @@ void FestCopyUiHubs()
 	const std::pair<const char*, const char*> Extra[] = {{"D", "12"}, {"H", "07"}, {"M", "41"}, {"N", "4"}, {"Days", "22"}, {"FirstDate", "Oct 18"},
 		{"LastDate", "Nov 8"}, {"Weekday", "SUN"}, {"Date", "Nov 8"}, {"Time", "3:00 PM"}, {"Gtd", "$78,203,400"}, {"BuyIn", "$5,250"}, {"Stack", "100,000"},
 		{"Added", "$2,500"}, {"FESTIVAL", "RCOP"}, {"Festival", "RCOP 2026"}, {"Year", "2026"}, {"Site", "RiverLine"}, {"SITE", "IGNITE"}, {"Event", "$5,250 Main Event"},
-		{"Overlay", "$412,600"}, {"Amount", "$1,280,000"}, {"Entries", "2,345"}, {"Countdown", "2H 10M"}, {"Clock", "0:41:12"}};
+		{"Overlay", "$412,600"}, {"Amount", "$1,280,000"}, {"Entries", "2,345"}, {"Countdown", "2H 10M"}, {"Clock", "0:41:12"},
+		{"Nights", "12"}, {"Show1", "7 PM"}, {"Show2", "10 PM"}, {"Need", "20"}};
 	for (const auto& Kv : Extra)
 	{
 		Vars[Kv.first] = Kv.second;
@@ -616,13 +636,499 @@ void FestCopyUiHubs()
 	{
 		std::printf("  FestCopyUi: fest::DateInSentence is H0's stub (F-net's body lands in FN-2a, merged in FH-2): the next-year date check waits\n");
 	}
-	// U2's formats (FestBlurbsFilled' U2 half): in the inventory, and no digit typed in any.
-	for (const char* U2 : {"OPENS IN", "{D}D {H}H {M}M", "PROGRESS", "DAY {N} OF {Days}", "MAIN EVENT TODAY", "COMPLETE"})
+	// U2's formats and U15's GRIT line (FestBlurbsFilled' U2/U15 half; FH-2 adds the NIGHT forms): in the inventory, no digit typed.
+	for (const char* U2 : {"OPENS IN", "{D}D {H}H {M}M", "PROGRESS", "DAY {N} OF {Days}", "MAIN EVENT TODAY", "COMPLETE", "NIGHT {N} OF {Nights}", "NIGHT {N}",
+			 "{FESTIVAL} \xC2\xB7 NIGHT {N} OF {Nights} \xC2\xB7 SHOWS AT {Show1} AND {Show2}"})
 	{
 		const bool Listed = std::find(Inv.begin(), Inv.end(), std::string("label\t") + U2) != Inv.end();
-		const bool Typed = std::string(U2).find_first_of("0123456789") != std::string::npos;
+		std::string Bare; // the format without its placeholders' names ({Show1} is a variable, not a typed digit)
+		for (const char* Ch = U2; *Ch; ++Ch)
+		{
+			if (*Ch == '{')
+			{
+				while (*Ch && *Ch != '}')
+				{
+					++Ch;
+				}
+				if (!*Ch)
+				{
+					break;
+				}
+				continue;
+			}
+			Bare += *Ch;
+		}
+		const bool Typed = Bare.find_first_of("0123456789") != std::string::npos;
 		ui_test::Expect(Listed && !Typed, (std::string("FestCopyUi: U2's \"") + U2 + "\" is in FestUiInventory with no digit typed").c_str());
 	}
+	// FH-2: U30 and U33 are in the inventory with their kinds (so the lint above ran over them).
+	for (const char* Line : {"label\tPASS {N}/{Need}", "sentence\tFestival Pass: {N} of {Need} online events.", "sentence\tOpens to you after your second rent.",
+			 "label\t{N} SEATS AT THE POOL SO FAR", "label\t{N} SEATS WON"})
+	{
+		ui_test::Expect(std::find(Inv.begin(), Inv.end(), std::string(Line)) != Inv.end(), (std::string("FestCopyUi: FestUiInventory lists ") + Line).c_str());
+	}
+}
+// ------------------------------------------------------------------ FH-2: the real calendar in three frames
+
+/** The text runs inside {X0, Y0}-{X1, Y1} (box left and baseline). */
+int HubsRunsIn(const DrawList& L, float X0, float Y0, float X1, float Y1)
+{
+	int N = 0;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		N += Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.X >= X0 && Cmd.Text.X < X1 && Cmd.Text.BaselineY >= Y0 && Cmd.Text.BaselineY < Y1 ? 1 : 0;
+	}
+	return N;
+}
+
+/** The run exactly Text with its baseline in [Y0, Y1): its box's left and baseline ({-1, -1} when none). */
+std::pair<float, float> HubsRunBetween(const DrawList& L, const std::string& Text, float Y0, float Y1)
+{
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == Text && Cmd.Text.BaselineY >= Y0 && Cmd.Text.BaselineY < Y1)
+		{
+			return {Cmd.Text.X, Cmd.Text.BaselineY};
+		}
+	}
+	return {-1.0f, -1.0f};
+}
+
+/** An instance by its id (an empty one when the site has none). */
+ss::net::EventInstance HubsInstance(const ss::net::Network& Net, const std::string& Id)
+{
+	ss::net::EventInstance E;
+	if (!Net.FindInstance(Id, E))
+	{
+		E = ss::net::EventInstance();
+	}
+	return E;
+}
+
+/** The brands of THE FESTIVAL YEAR in calendar order (§2.8.2's fsy0..9) and the Short each edition's series prints. */
+const ss::fest::Brand HubsYearBrands[10] = {ss::fest::Brand::Writ, ss::fest::Brand::RingRush, ss::fest::Brand::Pennant, ss::fest::Brand::Grit, ss::fest::Brand::Tco,
+	ss::fest::Brand::Reign, ss::fest::Brand::Slam, ss::fest::Brand::Push, ss::fest::Brand::Rcop, ss::fest::Brand::Feign};
+
+std::string HubsShortOf(const ss::fest::Festival& F)
+{
+	const ss::net::SeriesInfo* Sr = ss::net::Site(F.Site).FindSeries(F.SeriesId);
+	std::string Out = Sr ? Sr->Short : std::string();
+	for (char& Ch : Out)
+	{
+		Ch = static_cast<char>(std::toupper(static_cast<unsigned char>(Ch)));
+	}
+	return Out;
+}
+
+/** A frame's strip (§2.8.2): the first cell's x, the pitch, the text column and the strip's top. */
+struct HubsStrip
+{
+	const char* Host;
+	float X0, Pitch, Text, Top;
+};
+constexpr HubsStrip HubsStripRiverLine{"RiverLine", 260.0f, 128.0f, 92.0f, 84.0f};
+constexpr HubsStrip HubsStripRunItTwice{"RunItTwice", 368.0f, 116.0f, 80.0f, 96.0f};
+
+/** FestStripTen's page half (§2.15.2, v1.6; FH-2) on one frame's hub: every brand of the ten that has an edition in reach draws its
+ *  Short in its calendar slot (the run's box at X0 + Pitch * i + 36, i the brand's place in WRIT ... FEIGN), every cell (Pitch - 6
+ *  wide) inside the content rect's right edge (1576 on all three hosts), a rival cell without an account drawing BY INVITATION in its
+ *  text column. Returns the cells found. */
+int FestStripTenPage(const DrawList& L, const HubsStrip& Sp, double World)
+{
+	const int Today = ss::net::DayOf(World);
+	int Found = 0;
+	for (int I = 0; I < 10; ++I)
+	{
+		// The brand's on-stage or next edition (PLAN_FHUBS Q24): the first edition of the brand whose window ends on or after today.
+		const ss::fest::Festival* Ed = nullptr;
+		for (const ss::fest::Festival* F : ss::fest::Festivals(Today - 14, Today + 400))
+		{
+			if (!Ed && F->Which == HubsYearBrands[I] && F->LastDay + 9 >= Today)
+			{
+				Ed = F;
+			}
+		}
+		if (!Ed)
+		{
+			continue;
+		}
+		const std::string Short = HubsShortOf(*Ed);
+		const std::pair<float, float> At = HubsRunBetween(L, Short, Sp.Top, Sp.Top + 40.0f);
+		const float Want = Sp.X0 + Sp.Pitch * static_cast<float>(I) + 36.0f;
+		ui_test::Expect(At.first >= 0.0f && std::fabs(At.first - Want) < 0.5f,
+			(std::string("FestStripTen: ") + Sp.Host + "'s cell fsy" + std::to_string(I) + " holds " + Short + " (" + Ed->Name + ") at x " + std::to_string(static_cast<int>(Want))).c_str());
+		const float Right = Sp.X0 + Sp.Pitch * static_cast<float>(I) + Sp.Pitch - 6.0f;
+		ui_test::Expect(Right <= 1576.0f, (std::string("FestStripTen: ") + Sp.Host + "'s cell fsy" + std::to_string(I) + " ends inside the content rect").c_str());
+		Found += At.first >= 0.0f ? 1 : 0;
+	}
+	return Found;
+}
+
+/** FestStripTen (§2.15.2, v1.6; FH-2): the ten cells fit both frames (128 from x 260 on RiverLine and Ignite, 116 from x 368 on
+ *  RunItTwice: FestStripTenPage on each frame's page); every Short any edition prints fits its cell's text column (92 units at 13/800,
+ *  80 on RunItTwice); "BY INVITATION" fits 80 at 9.5/800; the ids fsy0..9 are in calendar order (each cell's click opens its own
+ *  brand's popover: HubsStripClicks). Also the Pass's three forms (§2.10 items 1 and 6, HubPassForm) on constructed gates. Plant: a
+ *  ten-letter Short (it overflows the 80-unit column). */
+void FestStripTenMeasures()
+{
+	ui_test::TableMeasurer M;
+	DrawList Scratch;
+	ss::ui::Canvas C(Scratch, M, RiverLine::Width, RiverLine::Height, 1.0f);
+	int Shorts = 0;
+	float Widest = 0.0f;
+	std::string WidestShort;
+	for (const ss::fest::Festival& F : ss::fest::All())
+	{
+		const std::string Short = HubsShortOf(F);
+		const float W = C.Measure(Short, 13.0f, 800);
+		++Shorts;
+		if (W > Widest)
+		{
+			Widest = W;
+			WidestShort = Short;
+		}
+		if (W > 80.0f)
+		{
+			ui_test::Expect(false, ("FestStripTen: " + F.Name + "'s Short " + Short + " measures " + std::to_string(W) + " at 13/800, past RunItTwice's 80-unit column").c_str());
+		}
+	}
+	ui_test::Expect(Shorts > 0, "FestStripTen: F-net's calendar lists editions");
+	std::printf("  FestStripTen: %d editions' Shorts measured, the widest %s at %.1f (columns 92 and 80)\n", Shorts, WidestShort.c_str(), Widest);
+	const float Invite = C.Measure("BY INVITATION", 9.5f, 800);
+	ui_test::Expect(Invite <= 80.0f, ("FestStripTen: BY INVITATION fits the 80-unit column at 9.5/800 (" + std::to_string(Invite) + ")").c_str());
+	const float Pass = C.Measure("PASS 20/20", 9.5f, 800);
+	ui_test::Expect(Pass <= 80.0f, ("FestStripTen: PASS 20/20 fits the 80-unit column at 9.5/800 (" + std::to_string(Pass) + ")").c_str());
+	// The Pass's forms (GateMet's inputs, in its order): no Pass, a closed site, before the second rent, outside the festival weeks,
+	// the first edition (two rents alone), and counting (N held at Need).
+	const ss::fest::Festival* Feign2 = nullptr;
+	const ss::fest::Festival* Feign1 = nullptr;
+	for (const ss::fest::Festival& F : ss::fest::All())
+	{
+		Feign1 = !Feign1 && F.Which == ss::fest::Brand::Feign && F.Edition == 1 ? &F : Feign1;
+		Feign2 = !Feign2 && F.Which == ss::fest::Brand::Feign && F.Edition == 2 ? &F : Feign2;
+	}
+	ui_test::Expect(Feign1 && Feign2, "FestStripTen: FEIGN's first and second editions are on the calendar");
+	if (Feign1 && Feign2)
+	{
+		namespace rf = ss::ui::rlfest_detail;
+		ss::net::InviteGate G;
+		G.MinRentsPaid = 2;
+		int N = 0;
+		int Need = 0;
+		ui_test::Expect(rf::HubPassForm(G, true, 2, Feign2, *Feign2, 30, N, Need) == 0, "FestStripTen: no Pass on the site (FestivalEvents -1) reads BY INVITATION");
+		G.FestivalEvents = ss::fest::kPassEvents;
+		ui_test::Expect(rf::HubPassForm(G, false, 2, Feign2, *Feign2, 30, N, Need) == 0, "FestStripTen: a site not open yet reads BY INVITATION");
+		ui_test::Expect(rf::HubPassForm(G, true, 1, Feign2, *Feign2, 30, N, Need) == 1, "FestStripTen: before the second rent the popover says so (U30)");
+		ui_test::Expect(rf::HubPassForm(G, true, 2, nullptr, *Feign2, 30, N, Need) == 0, "FestStripTen: outside the festival weeks the path is closed (BY INVITATION)");
+		ui_test::Expect(rf::HubPassForm(G, true, 2, Feign1, *Feign1, 3, N, Need) == 0 && Need == 0, "FestStripTen: a first edition needs the two rents alone (no count shown)");
+		ui_test::Expect(rf::HubPassForm(G, true, 2, Feign2, *Feign2, 7, N, Need) == 2 && N == 7 && Need == ss::fest::kPassEvents, "FestStripTen: the second edition counts, PASS 7/20");
+		ui_test::Expect(rf::HubPassForm(G, true, 2, Feign2, *Feign2, 31, N, Need) == 2 && N == Need, "FestStripTen: the count holds at its Need once met");
+	}
+}
+
+/** FestStripTen's ids (FH-2): a one-frame click on each drawn cell opens the popover of that cell's brand (its edition's name drawn as
+ *  the popover's title), then a click on the scrim closes it. */
+void HubsStripClicks(HubsLaptop& P, const HubsStrip& Sp)
+{
+	const int Today = ss::net::DayOf(P.S.WorldMinutes());
+	for (int I = 0; I < 10; ++I)
+	{
+		const ss::fest::Festival* Ed = nullptr;
+		for (const ss::fest::Festival* F : ss::fest::Festivals(Today - 14, Today + 400))
+		{
+			Ed = !Ed && F->Which == HubsYearBrands[I] && F->LastDay + 9 >= Today ? F : Ed;
+		}
+		if (!Ed)
+		{
+			continue;
+		}
+		const DrawList Open = P.Click(Sp.X0 + Sp.Pitch * static_cast<float>(I) + 50.0f, Sp.Top + 20.0f, true);
+		const std::pair<float, float> Title = HubsRunBetween(Open, Ed->Name, Sp.Top + 40.0f, Sp.Top + 220.0f);
+		ui_test::Expect(Title.first >= 0.0f, (std::string("FestStripTen: fsy") + std::to_string(I) + " on " + Sp.Host + " opens " + Ed->Name + "'s popover (calendar order)").c_str());
+		P.Click(800.0f, 700.0f); // off it: the scrim closes it
+	}
+}
+
+/** The Main's lock line on the hub's edition (Network::Joinable's own words), "" when it is joinable. */
+std::string HubsMainLock(const ss::Session& S, const ss::fest::Festival& F)
+{
+	const ss::net::Network& Net = ss::net::Site(F.Site);
+	ss::net::EventInstance Main;
+	std::string Lock;
+	if (!Net.Next(F.MainId, static_cast<double>(F.FirstDay) * ss::net::MinutesPerDay, Main) || Net.Joinable(Main, &Lock, S.Unlocks()))
+	{
+		return std::string();
+	}
+	return Lock;
+}
+
+/** FestLockedMain (§2.15.2, §2.2.3; FH-2), the ladder half on RCOP 2026's day 19 (a Saturday: step1-4 and mega-rcop all run): the day's
+ *  rows scrolled to their end with the hub's wheel, each ladder row keeps its button (RegisterBlock's, in the row's button rect) and
+ *  shows the Main's lock line and U31 beside it. Plant: the lock line dropped for mega-rcop. */
+void FestLockedMainRows(HubsLaptop& P, const ss::fest::Festival& Rcop, const DrawList& L)
+{
+	const std::string Lock = HubsMainLock(P.S, Rcop);
+	const std::string U31 = "A seat won here waits in your wallet until big fields open.";
+	const std::vector<std::string> Rows = P.RL.ListedEvents();
+	const ss::net::Network& Net = ss::net::Site(Rcop.Site);
+	int Ladder = 0;
+	for (const char* Id : {"step1", "step2", "step3", "step4", "mega-rcop"})
+	{
+		int Index = -1;
+		for (size_t I = 0; I < Rows.size(); ++I)
+		{
+			Index = Index < 0 && Net.TemplateOf(HubsInstance(Net, Rows[I])).Id == Id ? static_cast<int>(I) : Index;
+		}
+		ui_test::Expect(Index >= 0, (std::string("FestLockedMain: ") + Id + " is one of day 19's rows").c_str());
+		const int First = std::max(0, static_cast<int>(Rows.size()) - 7);
+		if (Index < First)
+		{
+			continue;
+		}
+		const float RowY = 408.0f + 72.0f * static_cast<float>(Index - First);
+		const bool HasLock = HubsRunBetween(L, Lock, RowY, RowY + 66.0f).first >= 0.0f;
+		const bool HasU31 = HubsRunBetween(L, U31, RowY, RowY + 66.0f).first >= 0.0f;
+		const bool HasButton = HubsRunsIn(L, 24.0f + 1000.0f - 372.0f, RowY, 24.0f + 1000.0f, RowY + 66.0f) > 0;
+		ui_test::Expect(HasLock && HasU31 && HasButton, (std::string("FestLockedMain: ") + Id + "'s row keeps its button with the Main's lock line and U31 beside it").c_str());
+		++Ladder;
+	}
+	ui_test::Expect(Ladder == 5, "FestLockedMain: the five ladder rows are in view once the rows are scrolled to their end");
+}
+
+/** FestLockedMain's wallet half: a won seat into the locked Main (a rcop-main ticket in the hero's wallet) survives a save and a
+ *  reload (§2.2.3: the seat waits until big fields open). */
+void FestLockedMainWallet()
+{
+	struct HubsSaveHooks : ui_test::QuietHooks
+	{
+		std::string Last;
+		void Save(const ss::SaveData& Data) override { Last = Data.Serialize(); }
+	};
+	const std::string Ticket = ss::net::Shared().TicketOf("rcop-main");
+	HubsSaveHooks H;
+	std::string Saved;
+	{
+		ss::Session S(H, "u4-fest-locked-wallet");
+		S.Life.Tickets[Ticket] += 1;
+		S.Save();
+		Saved = H.Last;
+	}
+	ss::SaveData Data;
+	const bool Parsed = !Saved.empty() && ss::SaveData::Parse(Saved, Data);
+	ui_test::Expect(Parsed, "FestLockedMain: the session with a rcop-main ticket saves and parses");
+	if (Parsed)
+	{
+		HubsSaveHooks H2;
+		ss::Session Back(H2, "u4-fest-locked-wallet", &Data);
+		ui_test::Expect(Back.Life.TicketsFor(Ticket) == 1, ("FestLockedMain: the rcop-main ticket (" + Ticket + ") is in the wallet after the reload").c_str());
+	}
+}
+
+/** The clock forward to Day at Hour (world time), the hub's laptop fed and rested. */
+void HubsTo(HubsLaptop& P, int Day, double Hour)
+{
+	P.At(static_cast<double>(Day) * ss::net::MinutesPerDay + Hour * 60.0);
+}
+
+/** A host's SERIES page with no series picked: its current or next festival (§2.8.1), the pointer away. */
+void HubsOpenHost(HubsLaptop& P, ss::net::SiteId Site)
+{
+	P.RL.SiteShown = Site;
+	P.RL.ShowSeries(std::string(), P.Now);
+	P.RL.OpenPage(RiverLine::Page::Series, P.Now);
+	P.Now = ui_test::Step(P.S, P.Now, 1.5);
+	P.Away();
+}
+
+/** A rival account through its letter (the invitation, then Accept). */
+bool HubsAccept(HubsLaptop& P, ss::net::SiteId Site)
+{
+	const std::string Key = ss::net::KeyOf(Site);
+	P.S.DebugSite("invite " + Key);
+	const std::string Why = P.S.AnswerInvite(Site, true);
+	const bool Ok = ss::ui::rlsites_detail::SitesAccount(P.S, Site) != nullptr;
+	if (!Ok)
+	{
+		std::printf("  %s: no account (%s)\n", Key.c_str(), Why.c_str());
+	}
+	return Ok;
+}
+
+/** Career A (FH-2; PLAN_FHUBS FH-2's two careers): FEIGN 2026 on Ignite, day 56, an Ignite account accepted: fest_hub_ig_live. The
+ *  hub in Ignite's frame (L7): the strip and banner in RiverLine's rects, the rows cut at y 870 (no row text below it; six whole and a
+ *  seventh under the fade), no overlay ticker, THE RACE preselected while Live. */
+void FestCareerIgnite()
+{
+	HubsLaptop P("u4-fest-career-a");
+	const ss::fest::Festival* Feign = ss::fest::FestivalOf("ignite.feign26");
+	ui_test::Expect(Feign != nullptr && Feign->FirstDay == 56, "fest_hub_ig_live: FEIGN 2026 opens on day 56 (F-net's FN-2a row)");
+	if (!Feign)
+	{
+		return;
+	}
+	HubsTo(P, 40, 12.0);
+	ui_test::Expect(HubsAccept(P, ss::net::SiteId::Ignite), "fest_hub_ig_live: Ignite's invitation accepted");
+	HubsTo(P, 56, 18.0);
+	HubsOpenHost(P, ss::net::SiteId::Ignite);
+	const DrawList L = HubsPage("fest_hub_ig_live", P);
+	ui_test::Expect(ui_test::DrewRun(L, "FEIGN") && ui_test::DrewRun(L, "DAY 1 OF 10"), "fest_hub_ig_live: Ignite's SERIES page is FEIGN 2026's hub on its first day (DAY 1 OF 10)");
+	ui_test::Expect(ui_test::DrewRun(L, "PLAYER OF THE SERIES"), "fest_hub_ig_live: THE RACE is preselected while Live");
+	ui_test::Expect(HubsRunsIn(L, 24.0f, 870.0f, 1024.0f, 884.0f) == 0, "fest_hub_ig_live: no row text below y 870 (the rows end above Ignite's dock)");
+	ui_test::Expect(HubsRunsIn(L, 1044.0f, 870.0f, 1576.0f, 884.0f) == 0, "fest_hub_ig_live: the right column's body ends at y 870");
+	FestStripTenPage(L, HubsStripRiverLine, P.S.WorldMinutes());
+	const std::vector<std::string> Rows = P.RL.ListedEvents();
+	std::printf("  fest_hub_ig_live: %zu rows on FEIGN 2026's first day (six whole, the seventh under the fade)\n", Rows.size());
+}
+
+/** Career B (FH-2): RiverLine's and RunItTwice's hubs walked forward in day order, never opening Ignite: fest_strip_night_one (Night
+ *  One, the pointer resting on FEIGN's cell), fest_hub_rl_live (RCOP 2026's first day), fest_hub_rl_locked (day 19, the rows
+ *  scrolled to the ladder), The Summons' seats on WRIT 2027 (U33, no page), fest_hub_rit_twice (GRIT 2027, day 220: two runs a
+ *  night), Summer Slam 2027's locked Main (no page), and fest_popover_pass (FEIGN II's cell on day 395, BY INVITATION until F-world's
+ *  FW-7 sets the Pass; FH-7 emits the counting form). */
+void FestCareerRiverLine()
+{
+	HubsLaptop P("u4-fest-career-b");
+	const ss::fest::Festival* Rcop = ss::fest::FestivalOf("rcop");
+	const ss::fest::Festival* Writ = ss::fest::FestivalOf("runittwice.writ27");
+	const ss::fest::Festival* Grit = ss::fest::FestivalOf("runittwice.grit27");
+	const ss::fest::Festival* Slam = ss::fest::FestivalOf("slam27");
+	ui_test::Expect(Rcop && Writ && Grit && Slam, "FH-2: RCOP 2026, WRIT 2027, GRIT 2027 and Summer Slam 2027 are F-net's rows");
+	if (!Rcop || !Writ || !Grit || !Slam)
+	{
+		return;
+	}
+	// Night One: the ten-cell strip.
+	P.OpenHub();
+	P.RL.UI.Ptr.Active = true;
+	P.RL.UI.Ptr.X = 260.0f + 9.0f * 128.0f + 50.0f; // resting on FEIGN's cell (fsy9: BY INVITATION)
+	P.RL.UI.Ptr.Y = 104.0f;
+	const DrawList NightOne = HubsPage("fest_strip_night_one", P);
+	P.Away();
+	const int Cells = FestStripTenPage(NightOne, HubsStripRiverLine, P.S.WorldMinutes());
+	ui_test::Expect(Cells == 10, ("FestStripTen: Night One's strip holds all ten brands (" + std::to_string(Cells) + ")").c_str());
+	ui_test::Expect(HubsRunsIn(NightOne, 260.0f + 9.0f * 128.0f, 120.0f, 260.0f + 10.0f * 128.0f, 124.0f) == 1 && ui_test::DrewRun(NightOne, "BY INVITATION"),
+		"FestStripTen: FEIGN's cell without an Ignite account reads BY INVITATION (no Pass before F-world's FW-7)");
+	HubsStripClicks(P, HubsStripRiverLine);
+	// RCOP 2026's first day: the Main card's lock line, THE RACE first.
+	HubsTo(P, Rcop->FirstDay, 12.0);
+	P.OpenHub();
+	const DrawList Live = HubsPage("fest_hub_rl_live", P);
+	const std::string Lock = HubsMainLock(P.S, *Rcop);
+	ui_test::Expect(!Lock.empty() && ui_test::DrewRun(Live, Lock), ("FestLockedMain: RCOP 2026's Main card shows the lock line (\"" + Lock + "\")").c_str());
+	ui_test::Expect(ui_test::DrewRun(Live, "PLAYER OF THE SERIES") && !ui_test::Drew(Live, "No champion yet."), "FestLockedMain: the hub opens on THE RACE while Live, never past it");
+	ui_test::Expect(ui_test::DrewRun(Live, "DAY 1 OF 22"), "fest_hub_rl_live: RCOP 2026's first day reads DAY 1 OF 22");
+	// Day 19 (a Saturday): the ladder in view.
+	HubsTo(P, 19, 12.0);
+	P.OpenHub();
+	for (int K = 0; K < 12; ++K)
+	{
+		P.RL.UI.Ptr.Active = true;
+		P.RL.UI.Ptr.X = 300.0f;
+		P.RL.UI.Ptr.Y = 600.0f;
+		P.RL.UI.Ptr.Wheel = 1.0f;
+		P.Frame(1.0f);
+	}
+	P.Away();
+	const DrawList Locked = HubsPage("fest_hub_rl_locked", P);
+	FestLockedMainRows(P, *Rcop, Locked);
+	ui_test::Expect(ui_test::DrewRun(Locked, Lock), "FestLockedMain: the Main card keeps its lock line on day 19");
+	// WRIT 2027: a RunItTwice account, then The Summons' seats (U33) on its day.
+	HubsTo(P, Writ->FirstDay, 12.0);
+	ui_test::Expect(HubsAccept(P, ss::net::SiteId::RunItTwice), "FH-2: RunItTwice's invitation accepted");
+	{
+		const ss::net::Network& Rit = ss::net::Site(ss::net::SiteId::RunItTwice);
+		ss::net::EventInstance Sum;
+		const bool Has = !Writ->Satellites.empty() && Rit.Next(Writ->Satellites.front(), static_cast<double>(Writ->FirstDay) * ss::net::MinutesPerDay, Sum);
+		ui_test::Expect(Has, "U33: The Summons runs inside WRIT 2027");
+		if (Has)
+		{
+			P.At(Sum.Start - 20.0);
+			HubsOpenHost(P, ss::net::SiteId::RunItTwice);
+			P.RL.UI.Ptr.Active = false;
+			const ss::net::LiveState Ls = Rit.Live(Sum, P.S.WorldMinutes());
+			const ss::net::EventTemplate& T = Rit.TemplateOf(Sum);
+			const long long Seats = std::max<long long>(1, Ls.Pool / std::max<ss::Chips>(1, T.SeatValueCents));
+			const DrawList W = P.Frame(1.0f);
+			const std::string Want = Seats == 1 ? std::string("1 SEAT AT THE POOL SO FAR") : std::to_string(Seats) + " SEATS AT THE POOL SO FAR";
+			ui_test::Expect(Ls.Pool > 0 && ui_test::DrewRun(W, Want), ("U33: The Summons' row reads \"" + Want + "\" (max(1, Pool / SeatValue) while it registers)").c_str());
+			P.At(Sum.Start + Sum.Duration + 30.0);
+			// Past midnight the hub shows the next day: its day strip's cell for The Summons' day brings it back (fsd<day>).
+			const int SumDay = ss::net::DayOf(Sum.Start);
+			const float Cw = (860.0f - 4.0f * static_cast<float>(Writ->LastDay - Writ->FirstDay)) / static_cast<float>(Writ->LastDay - Writ->FirstDay + 1);
+			P.Click(232.0f + static_cast<float>(SumDay - Writ->FirstDay) * (Cw + 4.0f) + Cw / 2.0f, 378.0f);
+			const DrawList Done = P.Frame(1.0f);
+			const ss::net::EventInstance Fin = HubsInstance(Rit, Sum.Id);
+			const long long Won = std::max<long long>(1, Fin.Pool / std::max<ss::Chips>(1, T.SeatValueCents));
+			const std::string WonText = Won == 1 ? std::string("1 SEAT WON") : std::to_string(Won) + " SEATS WON";
+			ui_test::Expect(Rit.Live(Sum, P.S.WorldMinutes()).St != ss::net::Status::Finished || ui_test::DrewRun(Done, WonText),
+				("U33: once finished The Summons' row reads \"" + WonText + "\"").c_str());
+		}
+	}
+	// GRIT 2027's second night: two runs a night.
+	HubsTo(P, Grit->FirstDay + 1, 18.0);
+	HubsOpenHost(P, ss::net::SiteId::RunItTwice);
+	const DrawList Twice = HubsPage("fest_hub_rit_twice", P);
+	FestStripTenPage(Twice, HubsStripRunItTwice, P.S.WorldMinutes());
+	ui_test::Expect(ui_test::DrewRun(Twice, "NIGHT 2 OF 12"), "fest_hub_rit_twice: GRIT's banner counts nights (U2: NIGHT 2 OF 12)");
+	ui_test::Expect(ui_test::DrewRun(Twice, "NIGHT 1") && ui_test::DrewRun(Twice, "NIGHT 12"), "fest_hub_rit_twice: GRIT's day strip reads nights");
+	ui_test::Expect(ui_test::DrewRun(Twice, "7 PM") && ui_test::DrewRun(Twice, "10 PM"), "fest_hub_rit_twice: a show's row carries its two buttons, 7 PM and 10 PM");
+	const std::vector<std::string> Listed = P.RL.ListedEvents();
+	const ss::net::Network& Rit = ss::net::Site(ss::net::SiteId::RunItTwice);
+	std::string EarlyId;
+	std::string LateId;
+	for (size_t I = 0; I + 1 < Listed.size() && EarlyId.empty(); ++I)
+	{
+		const ss::net::EventInstance A = HubsInstance(Rit, Listed[I]);
+		const ss::net::EventInstance B = HubsInstance(Rit, Listed[I + 1]);
+		if (A.Template == B.Template && Rit.TemplateOf(A).Series == Grit->SeriesId)
+		{
+			EarlyId = A.Id;
+			LateId = B.Id;
+		}
+	}
+	ui_test::Expect(!EarlyId.empty(), "fest_hub_rit_twice: the night's show lists its two runs");
+	if (!EarlyId.empty())
+	{
+		const std::string CodeE = Rit.NameOf(HubsInstance(Rit, EarlyId)).substr(0, Rit.NameOf(HubsInstance(Rit, EarlyId)).find(": "));
+		const std::string CodeL = Rit.NameOf(HubsInstance(Rit, LateId)).substr(0, Rit.NameOf(HubsInstance(Rit, LateId)).find(": "));
+		ui_test::Expect(CodeE.size() > 2 && CodeE.compare(CodeE.size() - 2, 2, "-E") == 0 && CodeL.compare(CodeL.size() - 2, 2, "-L") == 0 && ui_test::DrewRun(Twice, CodeE) &&
+				ui_test::DrewRun(Twice, CodeL),
+			("fest_hub_rit_twice: the buttons stand beside the runs' codes (" + CodeE + ", " + CodeL + ")").c_str());
+		const std::pair<float, float> Ten = HubsRunAt(Twice, "10 PM");
+		P.Click(Ten.first + 8.0f, Ten.second - 4.0f);
+		ui_test::Expect(P.RL.SelectedEvent() == LateId, "fest_hub_rit_twice: 10 PM picks the late run (its register button the late run's)");
+		ui_test::Expect(!P.S.IsPlaying(LateId) && !P.S.ConfirmRegister, "fest_hub_rit_twice: picking a run registers nothing");
+		// FestCopyUi's U15 half (FestBlurbsFilled): the ticker's GRIT line is the edition's own night, nights and show times.
+		const ss::net::EventInstance E = HubsInstance(Rit, EarlyId);
+		const ss::net::EventInstance Lt = HubsInstance(Rit, LateId);
+		auto ShowOf = [](double Start) {
+			const long long M = static_cast<long long>(std::llround(Start)) % 1440;
+			const long long H = M / 60;
+			return std::to_string(H % 12 == 0 ? 12 : H % 12) + (H < 12 ? " AM" : " PM");
+		};
+		const std::string Line = "GRIT \xC2\xB7 NIGHT 2 OF " + std::to_string(Grit->LastDay - Grit->FirstDay + 1) + " \xC2\xB7 SHOWS AT " + ShowOf(E.Start) + " AND " + ShowOf(Lt.Start);
+		const DrawList Again = P.Frame(1.0f);
+		ui_test::Expect(ui_test::Drew(Again, Line), ("FestCopyUi: GRIT's ticker line is the edition's own (\"" + Line + "\", U15)").c_str());
+	}
+	// Summer Slam 2027 (its Main locked until G3, §2.2.3): the Main card's lock line.
+	HubsTo(P, Slam->FirstDay + 1, 12.0);
+	P.OpenHub();
+	const DrawList SlamL = P.Frame(1.0f);
+	const std::string SlamLock = HubsMainLock(P.S, *Slam);
+	ui_test::Expect(!SlamLock.empty() && ui_test::DrewRun(SlamL, SlamLock) && ui_test::DrewRun(SlamL, "YOUR " + HubsShortOf(*Slam)),
+		("FestLockedMain: Summer Slam 2027's Main card shows the lock line (\"" + SlamLock + "\")").c_str());
+	// Day 395: FEIGN II's cell (Announced from day 391), never an Ignite account in this career.
+	HubsTo(P, 395, 12.0);
+	P.OpenHub();
+	const DrawList Before = P.Frame(1.0f);
+	const ss::fest::Festival* Feign2 = ss::fest::FestivalOf("ignite.feign27");
+	ui_test::Expect(Feign2 && Feign2->Edition == 2 && ss::fest::PhaseOf(*Feign2, P.S.WorldMinutes(), nullptr) == ss::fest::Phase::Announced,
+		"fest_popover_pass: FEIGN 2027 (edition II) is Announced on day 395");
+	ui_test::Expect(HubsRunsIn(Before, 260.0f + 9.0f * 128.0f, 120.0f, 260.0f + 10.0f * 128.0f, 124.0f) == 1, "fest_popover_pass: FEIGN II's cell carries its third line");
+	P.Click(260.0f + 9.0f * 128.0f + 50.0f, 104.0f, true);
+	const DrawList Pop = HubsPage("fest_popover_pass", P);
+	ui_test::Expect(ui_test::DrewRun(Pop, "FEIGN 2027") && ui_test::DrewRun(Pop, "By invitation.") && !ui_test::DrewRun(Pop, "OPEN THE HUB"),
+		"fest_popover_pass: FEIGN II's popover reads By invitation. with no button (BY INVITATION until F-world's Pass, FW-7)");
 }
 } // namespace
 
@@ -635,6 +1141,11 @@ void SegFest()
 	FestPopoverHubs();
 	FestStrikeGateHubs();
 	FestCopyUiHubs();
+	// FH-2: the real calendar in three frames.
+	FestStripTenMeasures();
+	FestLockedMainWallet();
+	FestCareerIgnite();
+	FestCareerRiverLine();
 	std::printf("u4_ui SegFest (F-hubs A): %.1fs\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
 }
 } // namespace u4_ui_test
