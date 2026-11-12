@@ -1227,7 +1227,10 @@ void RealSchedules()
 		int Sundays;
 		size_t TemplatesLo, TemplatesHi;
 	};
-	const Want Wants[] = {{net::SiteId::Ignite, 18, 110, 2200, 1, 650, 900}, {net::SiteId::RunItTwice, 22, 330, 21500, 3, 1400, 1650}};
+	// Update 4 G1 (SPEC v1.7 §2.3.4, §8.4; F-net): the template bands grow with the festivals BuildFestivals appends. FN-3's interim
+	// bands, around its measured counts: Ignite 1,876 (783 + FEIGN's 435 + PENNANT's 658), RunItTwice 2,291 (1,521 + GRIT's 238 +
+	// REIGN's 532); FN-2b moves them to the final 2,100-2,300 (Ignite 2,198) and 2,400-2,600 (RunItTwice 2,487).
+	const Want Wants[] = {{net::SiteId::Ignite, 18, 110, 2200, 1, 1800, 1950}, {net::SiteId::RunItTwice, 22, 330, 21500, 3, 2200, 2350}};
 	std::set<std::string> Every;
 	for (const net::EventTemplate& T : net::Shared().Templates())
 	{
@@ -1335,8 +1338,9 @@ void RealSchedules()
 			ss::world::DayOn(2027, 8, 1) <= Aug->FirstDay && Aug->FirstDay < ss::world::DayOn(2027, 9, 1) && !Ig.FindSeries("ignite.wildaug26"),
 		"Wildfire in February and August from 2027 (after Ignite opens), 24 events each");
 	// (Review.) A rival series event costs a standard buy-in, as RiverLine's series do ($5.50, $11, $22, $55, $109...), never
-	// a $67.90 or a $118.20.
-	static const Chips Standard[] = {110, 220, 330, 440, 550, 770, 1100, 1650, 2200, 2750, 3300, 4400, 5500, 8250, 10900, 16200, 21500, 32000, 53000};
+	// a $67.90 or a $118.20. Update 4 G1 (SPEC v1.7 §2.3.2, §8.4; F-net, FN-3): REIGN's Main ($2,100) and High Roller ($5,250), prices
+	// RunItTwice already runs; FN-2b adds WRIT's $1,050.
+	static const Chips Standard[] = {110, 220, 330, 440, 550, 770, 1100, 1650, 2200, 2750, 3300, 4400, 5500, 8250, 10900, 16200, 21500, 32000, 53000, 210000, 525000};
 	bool Priced = true;
 	std::set<Chips> Seen;
 	for (const net::Network* Nw : {&Ig, &Rt})
@@ -2625,6 +2629,11 @@ void SitesCopy()
 	Vars.insert({{"Site", "Ignite"}, {"Month", "November"}, {"Tier", "Gold"}, {"Rate", "14%"}, {"Rake", "$212.40"}, {"Released", "$35.00"},
 		{"Left", "$65.00"}, {"Min", "$10.00"}, {"Fee", "$1.50"}, {"Why", "A series title gets noticed around here."}, {"Money", "$197.00 is on its way from Ignite (Mon to Wed)."},
 		{"Gtd", "$25K"}, {"Entries", "410"}, {"Events", "40"}, {"Days", "17"}, {"Series", "RunItTwice Open 2026"}, {"Buyin", "$530"}, {"Window", "Mon to Wed"}, {"Method", "card"}});
+	// Update 4 G1 (SPEC v1.7 §2.11; F-world's fworld_to_fnet_1): the variables of the festival rows in the copy table (News and
+	// headlines, the Pass's letters, the crown letter, the step refund's ledger line), at realistic lengths (PENNANT I's announcement).
+	Vars.insert({{"Festival", "PENNANT"}, {"Date", "Mar 30"}, {"MainBuyIn", "$215"}, {"Added", "$10,000"}, {"MicroBuyIn", "$2.20"}, {"MiniBuyIn", "$22"},
+		{"Step1", "$1.10"}, {"MainDate", "Apr 11"}, {"Nights", "14"}, {"Show1", "7 PM"}, {"Show2", "10 PM"}, {"Prize", "$41,280"}, {"Trophy", "The Gold Pennant"},
+		{"Points", "1,284"}, {"Cashes", "9"}, {"Year", "2027"}, {"K", "2"}});
 	std::vector<std::pair<std::string, std::string>> Sentences;
 	for (const std::string& S : site::Inventory())
 	{
