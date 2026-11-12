@@ -24,16 +24,19 @@ three belts). A case or a trophy stands at a slot + (0, 0, PLINTH_H).
 Materials: every mesh bakes to ONE texture set (one draw), however many finishes it has: its parts carry a face attribute
 fs_part that picks the part's finish inside a single shader (fs_material). The cases add FS_Glass, an unbaked, blended
 slot (split off before the bake and joined back after it, as wash_fold does). The finishes are the kit's shared set:
-walnut (grain along X or Z), ebonized walnut, brass, gold, a neutral metal, velvet, leather, cork, enamel, garnet.
+walnut (grain along X or Z), ebonized walnut, brass, gold, a neutral metal, velvet, leather, cork, enamel, garnet; FL-8b
+adds chrome (silver, chrome and platinum: polished, never textured, SPEC §9.2's "no texture"), onyx and the gold felt
+(v1.6's one new material, §9.4: Velour Velvet tinted gold in the CC0 build).
 
 Two builds of the same meshes:
   default: procedural finishes only. Committed: unreal/Art/Meshes/SM_FS_*.glb and art/review/fest_*.jpg (our own art with
     no download inside: SPEC §9.1 rule 4, the lead's R-20). This is the committed fallback (rule 7).
   SHORTSTACK_FS_CC0=<the G1 textures dir> [SHORTSTACK_FS_OUT=<dir>]: the CC0 maps (ambientCG Metal 042 A, Leather
-    026 / 027, Cork 003; Poly Haven Velour Velvet, American Walnut Veneer) baked in instead. Written to SHORTSTACK_FS_OUT
+    026 / 027, Cork 003, Onyx 013; Poly Haven Velour Velvet, American Walnut Veneer) baked in instead. Written to SHORTSTACK_FS_OUT
     (Meshes/, review/, build/; default art/build/fest_cc0, git-ignored), never into unreal/Art or art/review: R-20 lands a
     CC0 bake only as its imported .uasset (LFS). The colours stay the kit's (each map gives its luminance as detail, its
-    roughness and its height); the colour maps' own hue is used only for cork. Only the maps/ images are read: never a .blend.
+    roughness and its height); the colour maps' own hue is used only for cork and onyx. Only the maps/ images are read: never
+    a .blend.
 
 Checks (each asserts; a failure stops the build before anything is baked or exported, and Blender run with
 --python-exit-code 1 exits 1):
@@ -81,6 +84,7 @@ FS_CC0_MAPS = {
     'leather27': ('Leather 027', 'Leather027/maps/Leather027_2K-JPG_{}.jpg', {'col': 'Color', 'rough': 'Roughness', 'disp': 'Displacement'}),
     'velvet': ('Velour Velvet', 'velour_velvet/velour_velvet_{}_2k.jpg', {'col': 'diff', 'rough': 'rough', 'disp': 'disp'}),
     'cork': ('Cork 003', 'Cork003/maps/Cork003_2K-JPG_{}.jpg', {'col': 'Color', 'rough': 'Roughness', 'disp': 'Displacement'}),
+    'onyx': ('Onyx 013', 'Onyx013/maps/Onyx013_2K-JPG_{}.jpg', {'col': 'Color', 'rough': 'Roughness', 'disp': 'Displacement'}),
 }
 FS_CC0_USED = {}   # mesh material name -> set of ledger names (printed after each build)
 _FS_RANGE = {}     # image path -> (low, high) luminance percentiles (linear)
@@ -472,6 +476,55 @@ def fs_flat(hex_color, rough=0.1, metal=0.0):
     """A plain finish: enamel, a cut stone, a backing board."""
     def surface(m, sep, tag):
         return {'color': core.hex_linear(hex_color), 'rough': rough, 'metal': metal, 'height': 0.0}
+    return surface
+
+
+def fs_chrome(rough=0.07, hex_color=0xdcdee3):
+    """Chrome, silver or platinum (FL-8b): one polished metal, never textured, in either build (SPEC §9.2: "metallic 1,
+    roughness 0.05-0.15, no texture")."""
+    return fs_flat(hex_color, rough, 1.0)
+
+
+def fs_onyx():
+    """Polished black onyx with pale banded veins (FL-8b: The Seal's block, The Grindstone's trestle, The Sceptre's shaft
+    and block). The CC0 build keeps ambientCG Onyx 013's own colour, a shade deeper (its veins are the point, as cork keeps
+    its colour)."""
+    def surface(m, sep, tag):
+        if FS_CC0:
+            mp = _FsMaps(m, 'onyx', _fs_obj_vec(m, sep, 0.18), tag=tag)
+            color = m.mix(0.35, mp.color, (0.0, 0.0, 0.0, 1.0))   # a shade deeper: black onyx on the shelf
+            return {'color': color, 'rough': m.math('ADD', 0.06, m.math('MULTIPLY', mp.rough, 0.14)), 'metal': 0.0,
+                    'height': m.math('MULTIPLY', mp.disp, 0.00004)}
+        tc = m.node('ShaderNodeTexCoord')
+        wave = m.node('ShaderNodeTexWave', Scale=20.0, Distortion=14.0, Detail=6.0)
+        wave.wave_type = 'BANDS'
+        wave.bands_direction = 'Z'
+        m.link(tc.outputs['Object'], wave.inputs['Vector'])
+        veins = ramp(m, wave.outputs['Fac'], 0.94, 0.995)
+        vein = m.math('MULTIPLY', veins, ramp(m, noise(m, tc.outputs['Object'], scale=25.0, detail=2.0), 0.35, 0.6))   # broken up
+        cloud = noise(m, tc.outputs['Object'], scale=40.0, detail=3.0)
+        tone = m.mix(m.math('MULTIPLY', cloud, 0.6), core.hex_linear(0x060607), core.hex_linear(0x18161b))
+        color = m.mix(m.math('MULTIPLY', vein, 0.6), tone, core.hex_linear(0x6e665b))
+        return {'color': color, 'rough': m.math('ADD', 0.07, m.math('MULTIPLY', cloud, 0.06)), 'metal': 0.0, 'height': 0.0}
+    return surface
+
+
+def fs_gold_felt():
+    """The gold felt (FL-8b; v1.6's one new material, SPEC §9.4): a dense matte nap in gold for The Gold Pennant. The CC0
+    build shades it with Poly Haven's Velour Velvet tinted gold (PLAN_FLOOK Corrections item 10: no new download)."""
+    lo, hi = 0x9a6c18, 0xe6b84a
+
+    def surface(m, sep, tag):
+        if FS_CC0:
+            mp = _FsMaps(m, 'velvet', _fs_obj_vec(m, sep, 0.2), tag=tag)
+            return {'color': m.mix(mp.lum, core.hex_linear(lo), core.hex_linear(hi)),
+                    'rough': m.math('ADD', 0.78, m.math('MULTIPLY', mp.rough, 0.18)), 'metal': 0.0,
+                    'height': m.math('MULTIPLY', mp.disp, 0.00008)}
+        tc = m.node('ShaderNodeTexCoord')
+        fibre = noise(m, tc.outputs['Object'], scale=4200.0, detail=2.0)
+        mott = noise(m, tc.outputs['Object'], scale=90.0, detail=3.0)
+        color = m.mix(m.math('ADD', m.math('MULTIPLY', fibre, 0.35), m.math('MULTIPLY', mott, 0.55)), core.hex_linear(lo), core.hex_linear(hi))
+        return {'color': color, 'rough': 0.9, 'metal': 0.0, 'height': m.math('MULTIPLY', fibre, 0.00004)}
     return surface
 
 
