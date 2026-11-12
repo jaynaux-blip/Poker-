@@ -237,6 +237,40 @@ std::string RitFestShort(const std::string& SeriesId)
 	return Sr ? Sr->Short : std::string();
 }
 
+/** Update 4 G1 (SPEC v1.7 §2.3.2, the lead's N-2; F-hubs FH-5a): a festival event's code as RunItTwice keeps it on its own surfaces,
+ *  the instance's name up to and including its ": " (Network::NameOf, so GRIT's two runs keep "-E" and "-L"), when the template's
+ *  series is a festival edition (fest::FestivalOf, the felt's test); "" for every other event, which keeps today's text. THE BOARD,
+ *  the Prospectus and the table header put it in front of what they print today; NetShortName and RitEventName are unchanged. */
+std::string RitFestCode(const net::Network& Net, const net::EventInstance& E)
+{
+	const net::EventTemplate& T = Net.TemplateOf(E);
+	if (T.Series.empty() || !fest::FestivalOf(T.Series))
+	{
+		return std::string();
+	}
+	const std::string Name = Net.NameOf(E);
+	const size_t Colon = Name.find(": ");
+	return Colon == std::string::npos ? std::string() : Name.substr(0, Colon + 2);
+}
+
+/** The table header's code (N-2): the seated table's instance (its spec's id) when it is a festival event's, else "". The id names one
+ *  instance and its name is a pure function of it, so the last table's code is kept: a festival table pays the instance lookup once,
+ *  not every frame. */
+std::string RitTableCode(const std::string& EventId)
+{
+	static std::pair<std::string, std::string> RitLastTableCode;
+	if (RitLastTableCode.first == EventId)
+	{
+		return RitLastTableCode.second;
+	}
+	const net::Network& Net = net::Site(RitSite);
+	const net::EventTemplate* T = Net.FindTemplate(RitTemplateOf(EventId));
+	net::EventInstance E;
+	const bool Fest = T && !T->Series.empty() && fest::FestivalOf(T->Series) && Net.FindInstance(EventId, E);
+	RitLastTableCode = {EventId, Fest ? RitFestCode(Net, E) : std::string()};
+	return RitLastTableCode.second;
+}
+
 /** The tags after an event's name: what kind of night it is. A festival's events read its Short, never "SERIES" (§2.7.4). */
 std::string RitTagOf(const net::EventTemplate& T)
 {
@@ -979,15 +1013,16 @@ void RitTapeBar(RitCtx& X, float X0)
 
 // ------------------------------------------------------------------ the header (§3.4 Header) and the section slab
 
-void RitSectionSlab(RitCtx& X, float X0, const std::string& Name)
+void RitSectionSlab(RitCtx& X, float X0, const std::string& Name, float Least = 22.0f)
 {
 	X.C.FillPolygon({{X0, 32.0f}, {X0 + 300.0f, 32.0f}, {X0 + 283.0f, 84.0f}, {X0, 84.0f}}, RitC(RitRed));
 	X.C.FillPolygon({{X0, 32.0f}, {X0 + 300.0f, 32.0f}, {X0 + 291.5f, 58.0f}, {X0, 58.0f}}, RitC(RitWhite, 0.05f));
 	RitLedEdge(X.C, X0, 32.0f, 300.0f);
 	// The page's name in BoldCondensed 30 caps, Hot White, twice-printed in Deep Red; a long name (a table's event) fits down
-	// to 22, below 28 prints once, then ends with an ellipsis (the text box is x0+16 to x0+275).
+	// to 22 (a festival table's, its code in front, to 18: update 4 G1 N-2), below 28 prints once, then ends with an ellipsis (the
+	// text box is x0+16 to x0+275).
 	const std::string Words = RitUpper(Name);
-	const float Size = RitFit(X.C, Words, 30.0f, 22.0f, 259.0f);
+	const float Size = RitFit(X.C, Words, 30.0f, Least, 259.0f);
 	const float Base = 58.0f + Size * 0.36f;
 	if (Size >= RitTwiceFrom)
 	{
@@ -1000,12 +1035,12 @@ void RitSectionSlab(RitCtx& X, float X0, const std::string& Name)
 	RitTwinSlash(X.C, X0 + 304.0f, 32.0f, 52.0f);
 }
 
-void RitHeaderBar(RitCtx& X, float X0, const std::string& Name, bool AtTable)
+void RitHeaderBar(RitCtx& X, float X0, const std::string& Name, bool AtTable, float Least = 22.0f)
 {
 	RitPanelBegin();
 	X.C.FillRect({X0, 32.0f, 1600.0f - X0, 52.0f}, RitC(RitOnyx));
 	X.C.FillRect({X0, 83.0f, 1600.0f - X0, 1.0f}, RitC(RitHair));
-	RitSectionSlab(X, X0, Name);
+	RitSectionSlab(X, X0, Name, Least);
 	const net::Network& Net = net::Site(RitSite);
 	if (!AtTable)
 	{
@@ -1440,9 +1475,13 @@ void RitBoardRow(RitCtx& X, const RitRow& Row, const Rect& R, int Visible, int I
 	}
 	// TIME, a flap tile (24-hour).
 	RitFlap(X.C, RitColTime, R.Y + 6.0f, RitClock(Row.E.Start), 14.0f, 22.0f, 5, RitTile::Gloss, Words);
-	// EVENT and its tag.
-	const std::string Name = rlnet_detail::NetShortName(T.Name);
-	const float Nw = RitText(X.C, Name, RitColEvent, R.Y + 22.0f, 14.0f, Words, RitFace::Body, Align::Left, Baseline::Alphabetic, 196.0f);
+	// EVENT and its tag. A festival event keeps its code in front (N-2): "WRIT 13: $1,050 NLHE [Main Event]", its name running on to
+	// the buy-in figure as screens 02 and 11 print it (every other row keeps its 196 units); the tag only beside a name under 186.
+	const std::string Code = RitFestCode(Net, Row.E);
+	const std::string Name = Code + rlnet_detail::NetShortName(T.Name);
+	const std::string Buy = RitBuyIn(T.BuyInCents);
+	const float Room = Code.empty() ? 196.0f : RitColBuy - RitMeasure(X.C, Buy, 15.0f, RitFace::Cond) - 12.0f - RitColEvent;
+	const float Nw = RitText(X.C, Name, RitColEvent, R.Y + 22.0f, 14.0f, Words, RitFace::Body, Align::Left, Baseline::Alphabetic, Room);
 	const std::string Tag = RitTagOf(T);
 	if (!Tag.empty() && Nw < 186.0f)
 	{
@@ -1450,7 +1489,7 @@ void RitBoardRow(RitCtx& X, const RitRow& Row, const Rect& R, int Visible, int I
 		RitText(X.C, Tag, RitColEvent + Nw + 8.0f, R.Y + 21.5f, 11.0f, RitC(Lit ? RitChrome : RitMuted), RitFace::Cond, Align::Left, Baseline::Alphabetic, RitColBuy - 74.0f - (RitColEvent + Nw + 8.0f));
 	}
 	// BUY-IN, GTD, FIELD with its chrome bar (the count so far against the template's usual field).
-	RitText(X.C, RitBuyIn(T.BuyInCents), RitColBuy, Fig, 15.0f, Words, RitFace::Cond, Align::Right);
+	RitText(X.C, Buy, RitColBuy, Fig, 15.0f, Words, RitFace::Cond, Align::Right);
 	RitText(X.C, T.GtdCents > 0 ? rlnet_detail::NetMoney(T.GtdCents) : std::string("\xE2\x80\x94"), RitColGtd, Fig, 15.0f, RitC(T.GtdCents > 0 && !St.Dim ? RitWhite : RitMuted), RitFace::Cond,
 		Align::Right);
 	const bool Counted = L.St != net::Status::Announced;
@@ -1692,8 +1731,9 @@ void RitProspectus(RitCtx& X, const std::vector<RitRow>& Rows, float LeadY)
 	}
 	const int StartMin = static_cast<int>(std::fmod(E.Start, net::MinutesPerDay));
 	RitText(X.C, "RIT-" + std::to_string(StartMin / 60 * 100 + StartMin % 60), Rx, 126.0f, 12.0f, RitC(RitChrome), RitFace::Mono, Align::Right);
-	// The name, twice-printed (fit down to 22), the twin stripe under it (the panel's one), FEATURED.
-	const std::string Name = RitUpper(rlnet_detail::NetShortName(T.Name));
+	// The name, twice-printed (fit down to 22), the twin stripe under it (the panel's one), FEATURED. A festival event keeps its code
+	// (N-2): "WRIT 13: $1,050 NLHE [MAIN EVENT]".
+	const std::string Name = RitUpper(RitFestCode(Net, E) + rlnet_detail::NetShortName(T.Name));
 	const float Ns = RitFit(X.C, Name, 30.0f, 22.0f, Rx - L - (T.Featured ? 76.0f : 0.0f));
 	RitTwice(X.C, Name, L, 164.0f, Ns, RitC(RitInk));
 	RitTwinH(X.C, L, 174.0f, 72.0f, 0.5f);
@@ -2003,6 +2043,79 @@ void RitProspectus(RitCtx& X, const std::vector<RitRow>& Rows, float LeadY)
 	RitText(X.C, RitSettles, Rx, 940.0f, 11.0f, RitC(RitMuted), RitFace::Body, Align::Right);
 }
 
+/** Update 4 G1 (SPEC v1.7 §2.8.2, the lead's N-3; F-hubs FH-5a): a selection held on RunItTwice, by laptop: the instance a festival
+ *  hub's Main card opened and the Board's filter, toggles and sort when it did. */
+struct RitHeldEvent
+{
+	std::string EventId;
+	RiverLine::Filter Filter = RiverLine::Filter::All;
+	bool GtdOnly = false;
+	bool LateOnly = false;
+	bool Mine = false;
+	int Sort = 0;
+};
+
+std::map<const RiverLine*, RitHeldEvent>& RitHeldEvents()
+{
+	static std::map<const RiverLine*, RitHeldEvent> ByLaptop;
+	return ByLaptop;
+}
+
+/** The Main card's Details on RunItTwice (§2.8.2, N-3): selects the instance (the Main's, Network::Next(MainId)) and holds it, so the
+ *  Prospectus opens on it, drawn as a Board row would draw it, even while THE BOARD's 24-hour window doesn't list it, and the Board's
+ *  fallback leaves it there until the player picks a row, a filter or a sort. The festival hub calls it (stream A's fsmain). */
+void RitHoldSelection(RiverLine& RL, const std::string& InstanceId)
+{
+	RL.SelectEvent(InstanceId);
+	const RitUi& U = RitOf(&RL);
+	RitHeldEvent& H = RitHeldEvents()[&RL];
+	H.EventId = InstanceId;
+	H.Filter = Access::FilterShown(RL);
+	H.GtdOnly = U.GtdOnly;
+	H.LateOnly = U.LateOnly;
+	H.Mine = U.Mine;
+	H.Sort = U.Sort;
+}
+
+/** A laptop going (RiverLineCard.cpp's ForgetNet, from ~RiverLine): its held selection with it. */
+void RitForgetHeld(const RiverLine* RL)
+{
+	RitHeldEvents().erase(RL);
+}
+
+/** The held selection's row when it still holds (N-3): the selection is still the held instance, the filter, toggles and sort are
+ *  as they were, and the instance is one the Board would list (announced, registering or in late registration). Else the hold goes. */
+bool RitHeldRow(RitCtx& X, RitRow& Out)
+{
+	auto& Held = RitHeldEvents();
+	const auto It = Held.find(&X.RL);
+	if (It == Held.end())
+	{
+		return false;
+	}
+	const RitHeldEvent& H = It->second;
+	const net::Network& Net = net::Site(RitSite);
+	net::EventInstance E;
+	bool Holds = H.EventId == X.RL.SelectedEvent() && H.Filter == Access::FilterShown(X.RL) && H.GtdOnly == X.U.GtdOnly && H.LateOnly == X.U.LateOnly &&
+		H.Mine == X.U.Mine && H.Sort == X.U.Sort && Net.FindInstance(H.EventId, E);
+	net::LiveState L;
+	if (Holds)
+	{
+		L = Net.Live(E, X.World);
+		Holds = L.St == net::Status::Announced || L.St == net::Status::Registering || L.St == net::Status::LateReg;
+	}
+	if (!Holds)
+	{
+		Held.erase(It);
+		return false;
+	}
+	Out.E = E;
+	Out.L = L;
+	Out.Lock.clear();
+	Out.Joinable = Net.Joinable(E, &Out.Lock, X.S.Unlocks());
+	return true;
+}
+
 void RitBoardPage(RitCtx& X)
 {
 	// The wave: on every open the visible statuses flip into place row by row.
@@ -2019,7 +2132,11 @@ void RitBoardPage(RitCtx& X)
 	{
 		Has = Has || R.E.Id == X.RL.SelectedEvent();
 	}
-	if (!Has && !Rows.empty())
+	// A held selection (N-3: a festival hub's Main card) isn't swapped out: the Prospectus draws it off the Board's window. The hold is
+	// checked every frame, so a row pick (on or off the Board), a filter or a sort ends it at once.
+	RitRow Held;
+	const bool Holding = RitHeldRow(X, Held) && !Has;
+	if (!Has && !Holding && !Rows.empty())
 	{
 		const RitRow* Pick = &Rows.front();
 		for (const RitRow& R : Rows)
@@ -2036,6 +2153,13 @@ void RitBoardPage(RitCtx& X)
 	float LeadY = -1.0f;
 	RitPanelBegin();
 	RitBoardGrid(X, Rows, RitArrivals(X), LeadY);
+	if (Holding)
+	{
+		std::vector<RitRow> Shown = Rows;
+		Shown.push_back(Held);
+		RitProspectus(X, Shown, LeadY);
+		return;
+	}
 	RitProspectus(X, Rows, LeadY);
 }
 
@@ -4466,7 +4590,10 @@ void RiverLine::RitFrame(double Now, bool Preview)
 		// The tape and the header before any overlay: the card's backdrop (from y 64) and the autoplay panel draw over them and
 		// take the clicks where they overlap, as over RiverLine's top bar (a click on the scrim never reaches a header chip).
 		RitTapeBar(X, RitRailMini);
-		RitHeaderBar(X, RitRailMini, S.T ? RitEventName(S.T->Spec.Name) : std::string("THE TABLE"), true);
+		// A festival table's header keeps the event's code (N-2): "GRIT 02-E: Box Office PKO", fit down to 18 so the code and the
+		// event's name both print.
+		const std::string TableCode = S.T ? RitTableCode(S.T->Spec.Id) : std::string();
+		RitHeaderBar(X, RitRailMini, S.T ? TableCode + RitEventName(S.T->Spec.Name) : std::string("THE TABLE"), true, TableCode.empty() ? 22.0f : 18.0f);
 		if (!Preview)
 		{
 			U.SeenPage = Page::Embercrest; // not on a page: the Board waves again when it's opened

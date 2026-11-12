@@ -181,6 +181,11 @@ void CardBadgeTiles(Canvas& Cv, Ui& UI, const Session& S, int Npc, const badge::
 }
 } // namespace rlcard_detail
 
+namespace rlrit_detail
+{
+void RitForgetHeld(const RiverLine* RL); // UI/RiverLineRit.cpp (update 4 G1, FH-5a): a festival hub's held RunItTwice selection, by laptop
+} // namespace rlrit_detail
+
 namespace rlnet_detail
 {
 std::map<const RiverLine*, NetTip>& TipMap()
@@ -209,6 +214,7 @@ void ForgetNet(const RiverLine* RL)
 {
 	TipMap().erase(RL);
 	ChoiceMap().erase(RL);
+	rlrit_detail::RitForgetHeld(RL); // RunItTwice's held selection (update 4 G1 N-3, FH-5a)
 }
 } // namespace rlnet_detail
 

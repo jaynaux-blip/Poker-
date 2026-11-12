@@ -11,6 +11,9 @@
 // hand-over) and FestCopyUi's B half (stream B's strings, rlfest_detail::HostUiStrings: their kinds, the hub's lint after a sample fill,
 // U15's figures from the edition with no digit typed, U22's words through SecondScreen's Word()); the chip and label's cost printed
 // (asserted at FH-7).
+// G1 FH-5a: FestCopyUi's N-2 half (RunItTwice keeps a festival event's code on THE BOARD, the Prospectus and the table header, §2.3.2:
+// WRIT 2027's day 2 and Main day, GRIT 2027's 02-E and 02-L, a REIGN 04 table), FestYourStrip's N-3 half (the Main card's Details holds the Prospectus on
+// REIGN 2027's Main from its day 2, §2.8.2) and FestReignCopy's THE BOARD's tag half (no sponsor mark by the REIGN tag, §2.15.1).
 #include "UiSeg.h"
 
 #include "CopyLint.h"
@@ -19,10 +22,13 @@
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Sites.h"
+#include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/UI/EventArt.h"
 #include "ShortStack/UI/RiverLine.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
+#include "../../Source/ShortStackCore/Private/ShortStack/UI/RitArt.h"
 
+#include <algorithm>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -56,6 +62,11 @@ namespace rlrit_detail
 // UI/RiverLineRit.cpp (FH-3b): the tag after an event's name and the tape's festival countdown.
 std::string RitTagOf(const net::EventTemplate& T);
 std::string RitTapeCountdown(const fest::Festival& F, fest::Phase P, double World);
+// UI/RiverLineRit.cpp (FH-5a): a festival event's code on RunItTwice's own surfaces (N-2) and the Main card's held selection (N-3).
+std::string RitFestCode(const net::Network& Net, const net::EventInstance& E);
+std::string RitTableCode(const std::string& EventId);
+std::string RitEventName(const std::string& Name);
+void RitHoldSelection(RiverLine& RL, const std::string& InstanceId);
 } // namespace rlrit_detail
 namespace agenda_detail
 {
@@ -200,6 +211,41 @@ struct HostsLaptop
 		S.ShowLobby();
 		RL.OpenPage(ss::ui::RiverLine::Page::Lobby, Now);
 		Now = ui_test::Step(S, Now, 1.5);
+	}
+	/** RunItTwice joined (FH-5a) and one of its pages open: THE BOARD is Page::Lobby, a festival's hub Page::Series. */
+	void OpenRit(ss::ui::RiverLine::Page Pg)
+	{
+		if (!ss::site::AccountOf(S.Life.Sites, ss::net::SiteId::RunItTwice))
+		{
+			ss::site::Join(S.Life.Sites, ss::net::SiteId::RunItTwice, S.WorldMinutes());
+		}
+		if (ss::site::Account* A = ss::site::AccountOf(S.Life.Sites, ss::net::SiteId::RunItTwice))
+		{
+			A->Cents = 50000;
+		}
+		S.Life.Update2LinesRead |= ss::life::U2Sites;
+		RL.SiteShown = ss::net::SiteId::RunItTwice;
+		RL.OpenApp(ss::ui::RiverLine::App::RiverLine, Now);
+		S.ShowLobby();
+		RL.OpenPage(Pg, Now);
+		Now = ui_test::Step(S, Now, 1.5);
+	}
+	/** A click at (X, Y): down, up, then the pointer gone; the frame after. */
+	ss::ui::DrawList Press(float X, float Y)
+	{
+		RL.UI.Ptr.Active = true;
+		RL.UI.Ptr.X = X;
+		RL.UI.Ptr.Y = Y;
+		RL.UI.Ptr.Down = true;
+		RL.UI.Ptr.Pressed = true;
+		Frame();
+		Now += 0.05;
+		RL.UI.Ptr.Down = false;
+		RL.UI.Ptr.Released = true;
+		Frame();
+		Now += 0.05;
+		RL.UI.Ptr.Active = false;
+		return Frame();
 	}
 	ss::ui::DrawList Frame()
 	{
@@ -607,6 +653,503 @@ void FestCopyUiHosts()
 	ui_test::Expect(ss::ui::agenda_detail::Word(Opens) == std::pair<int, std::string>(7, "FESTIVAL"), "FestCopyUi (hosts): the wall calendar's festival mark reads FESTIVAL (rank 7)");
 	ui_test::Expect(ss::ui::agenda_detail::Word(Main) == std::pair<int, std::string>(6, "MAIN"), "FestCopyUi (hosts): the wall calendar's Main Event mark reads MAIN (rank 6)");
 }
+
+// THE BOARD's grid (UI/RiverLineRit.cpp's RitGrid, RitRowPitch, RitColEvent, RitColBuy): a row's name at x 322 on the row's y + 22, its
+// tag after the name on y + 21.5 in the room up to RitColBuy - 74.
+constexpr float HostsGridY = 252.0f;
+constexpr float HostsGridH = 680.0f;
+constexpr float HostsRowPitch = 34.0f;
+constexpr float HostsColEvent = 322.0f;
+constexpr float HostsTagEnd = 536.0f;
+
+/** The first RunItTwice edition of a brand (2027's), nullptr when F-net's calendar has none. */
+const ss::fest::Festival* HostsRitEdition(ss::fest::Brand Which)
+{
+	const ss::fest::Festival* First = nullptr;
+	for (const ss::fest::Festival& F : ss::fest::All())
+	{
+		if (F.Site == ss::net::SiteId::RunItTwice && F.Which == Which && (!First || F.FirstDay < First->FirstDay))
+		{
+			First = &F;
+		}
+	}
+	return First;
+}
+
+std::string HostsUpper(std::string S)
+{
+	for (char& Ch : S)
+	{
+		Ch = Ch >= 'a' && Ch <= 'z' ? static_cast<char>(Ch - 'a' + 'A') : Ch;
+	}
+	return S;
+}
+
+/** Today's short form of a name (rlnet_detail::NetShortName's rule): the text after its first ": ". */
+std::string HostsShortName(const std::string& Name)
+{
+	const size_t Colon = Name.find(": ");
+	return Colon == std::string::npos ? Name : Name.substr(Colon + 2);
+}
+
+/** One row of THE BOARD as the last frame drew it: the instance, the row's top and the run in its EVENT column. */
+struct HostsBoardRow
+{
+	ss::net::EventInstance E;
+	float Y = 0.0f;
+	std::string Name;
+	bool Selected = false;
+};
+
+/** THE BOARD's wholly visible rows in the grid's order (its Listed and scroll after the frame L). */
+std::vector<HostsBoardRow> HostsBoardRows(HostsLaptop& P, const ss::ui::DrawList& L)
+{
+	namespace rr = ss::ui::rlrit_detail;
+	const ss::net::Network& Net = ss::net::Site(ss::net::SiteId::RunItTwice);
+	const float Scroll = rr::Access::ListScroll(P.RL);
+	const std::vector<std::string>& Listed = rr::Access::Listed(P.RL);
+	std::vector<HostsBoardRow> Out;
+	for (size_t I = 0; I < Listed.size(); ++I)
+	{
+		HostsBoardRow R;
+		R.Y = HostsGridY + static_cast<float>(I) * HostsRowPitch - Scroll;
+		if (R.Y < HostsGridY - 0.5f || R.Y + HostsRowPitch > HostsGridY + HostsGridH + 0.5f || !Net.FindInstance(Listed[I], R.E))
+		{
+			continue;
+		}
+		R.Name = HostsRunAt(L, HostsColEvent, R.Y + 22.0f);
+		R.Selected = Listed[I] == P.RL.SelectedEvent();
+		Out.push_back(R);
+	}
+	return Out;
+}
+
+/** A Board run as drawn against the whole name: the same, or the name cut with an ellipsis after at least Keep bytes. */
+bool HostsWholeOrCut(const std::string& Run, const std::string& Name, size_t Keep, bool& Cut)
+{
+	const std::string Ell = "\xE2\x80\xA6";
+	const size_t N = Run.size() >= Ell.size() ? Run.size() - Ell.size() : 0;
+	Cut = Run != Name && Run.size() > Ell.size() && Run.compare(N, Ell.size(), Ell) == 0 && N >= Keep && Name.compare(0, N, Run, 0, N) == 0;
+	return Run == Name || Cut;
+}
+
+/** FestCopyUi's N-2 half (§2.3.2, the lead's N-2; §2.15.2's RunItTwice festival pages; FH-5a): on THE BOARD a festival event's row
+ *  reads its instance's name, its code kept ("WRIT 13: $1,050 NLHE [Main Event]", whole: the row runs on to the buy-in figure, and only
+ *  a name longer than that ends in an ellipsis, its code whole), and its Prospectus the same in capitals; every other row on the same
+ *  Board keeps today's NetShortName form. WRIT 2027's day 2 and its Main day at noon.
+ *  Plant: NetShortName left on THE BOARD's festival rows. */
+void FestCopyUiRitBoard(HostsLaptop& P, const ss::fest::Festival& Writ)
+{
+	const ss::net::Network& Net = ss::net::Site(ss::net::SiteId::RunItTwice);
+	const ss::net::SeriesInfo* Sr = Net.FindSeries(Writ.SeriesId);
+	const std::string Short = Sr ? Sr->Short : std::string("WRIT");
+	int FestRows = 0;
+	int PlainRows = 0;
+	int PlainSeries = 0;
+	int Prospects = 0;
+	int Cuts = 0;
+	std::string MainRow;
+	for (const int Day : {Writ.FirstDay + 1, Writ.MainDay})
+	{
+		P.At(static_cast<double>(Day) * ss::net::MinutesPerDay + 12.0 * 60.0);
+		P.OpenRit(ss::ui::RiverLine::Page::Lobby);
+		const ss::ui::DrawList L = P.Settled();
+		const std::string When = " (day " + std::to_string(Day) + ")";
+		std::string FestId;
+		for (const HostsBoardRow& R : HostsBoardRows(P, L))
+		{
+			const ss::net::EventTemplate& T = Net.TemplateOf(R.E);
+			if (!T.Series.empty() && ss::fest::FestivalOf(T.Series))
+			{
+				++FestRows;
+				const std::string Want = Net.NameOf(R.E);
+				bool Cut = false;
+				const bool Ok = HostsWholeOrCut(R.Name, Want, Want.find(": ") + 2, Cut);
+				Cuts += Cut ? 1 : 0;
+				ui_test::Expect(Ok, ("FestCopyUi (N-2): THE BOARD's festival row reads " + Want + ", not " + R.Name + When).c_str());
+				ui_test::Expect(Want.compare(0, Short.size() + 1, Short + " ") == 0 && Want.find(": ") != std::string::npos && Want.find('#') == std::string::npos,
+					("FestCopyUi (N-2): RunItTwice's festival code has no '#' (" + Want + ")").c_str());
+				FestId = FestId.empty() ? R.E.Id : FestId;
+				MainRow = T.Id == Writ.MainId ? R.Name : MainRow;
+			}
+			else
+			{
+				++PlainRows;
+				PlainSeries += T.Series.empty() ? 0 : 1;
+				const std::string Want = HostsShortName(T.Name);
+				ui_test::Expect(R.Name == Want, ("FestCopyUi (N-2): a plain row keeps today's form " + Want + ", not " + R.Name + When).c_str());
+			}
+		}
+		// The Prospectus on a festival event (the Main on its day): the name in capitals, its code kept.
+		ss::net::EventInstance Pick;
+		const bool HasMain = Day == Writ.MainDay && Net.Next(Writ.MainId, P.S.WorldMinutes(), Pick);
+		if (!HasMain && !FestId.empty())
+		{
+			Net.FindInstance(FestId, Pick);
+		}
+		if (HasMain || !FestId.empty())
+		{
+			P.RL.SelectEvent(Pick.Id);
+			const ss::ui::DrawList Sel = P.Settled();
+			const std::string Want = HostsUpper(Net.NameOf(Pick));
+			ui_test::Expect(ui_test::DrewRun(Sel, Want), ("FestCopyUi (N-2): the Prospectus reads " + Want + When).c_str());
+			++Prospects;
+			if (HasMain)
+			{
+				ui_test::Expect(Want == "WRIT 13: $1,050 NLHE [MAIN EVENT]", ("FestCopyUi (N-2): WRIT 2027's Main is WRIT 13: $1,050 NLHE [MAIN EVENT] on the Prospectus, not " + Want).c_str());
+			}
+		}
+	}
+	ui_test::Expect(FestRows >= 2, "FestCopyUi (N-2): THE BOARD lists WRIT's events on its day 2 and Main day");
+	ui_test::Expect(PlainRows >= 2, "FestCopyUi (N-2): THE BOARD lists RunItTwice's own events beside WRIT's");
+	ui_test::Expect(Prospects == 2, "FestCopyUi (N-2): the Prospectus opened on a WRIT event both days");
+	ui_test::Expect(MainRow == "WRIT 13: $1,050 NLHE [Main Event]", ("FestCopyUi (N-2): THE BOARD lists WRIT 2027's Main as WRIT 13: $1,050 NLHE [Main Event], not " + MainRow).c_str());
+	std::printf("FestCopyUi (N-2): THE BOARD on WRIT's day 2 and Main day: %d festival rows (%d cut at the buy-in), %d plain rows (%d of a plain series), %d Prospectus; "
+				"the Main's row: %s\n", FestRows, Cuts, PlainRows, PlainSeries, Prospects, MainRow.c_str());
+}
+
+/** FestCopyUi's N-2 half, the plain series (§2.3.2: every other event unchanged): RunItTwice's own series between WRIT and REIGN (2027's
+ *  Ironworks) keeps today's NetShortName form on THE BOARD, its code dropped as before G1, and the Prospectus likewise. */
+void FestCopyUiRitPlainSeries(HostsLaptop& P, const ss::fest::Festival& Writ, const ss::fest::Festival& Reign)
+{
+	const ss::net::Network& Net = ss::net::Site(ss::net::SiteId::RunItTwice);
+	const ss::net::SeriesInfo* Plain = nullptr;
+	for (const ss::net::SeriesInfo& Sr : Net.Series())
+	{
+		const bool Between = Sr.FirstDay > Writ.MainDay + 1 && Sr.LastDay < Reign.FirstDay - 1;
+		Plain = !Plain && !Sr.Festival && !ss::fest::FestivalOf(Sr.Id) && Between ? &Sr : Plain;
+	}
+	ui_test::Expect(Plain != nullptr, "FestCopyUi (N-2): RunItTwice runs a plain series between WRIT and REIGN");
+	if (!Plain)
+	{
+		return;
+	}
+	P.At(static_cast<double>(Plain->FirstDay + 1) * ss::net::MinutesPerDay + 12.0 * 60.0);
+	P.OpenRit(ss::ui::RiverLine::Page::Lobby);
+	const ss::ui::DrawList L = P.Settled();
+	int Rows = 0;
+	int Coded = 0;
+	std::string Id;
+	for (const HostsBoardRow& R : HostsBoardRows(P, L))
+	{
+		const ss::net::EventTemplate& T = Net.TemplateOf(R.E);
+		if (T.Series != Plain->Id)
+		{
+			continue;
+		}
+		++Rows;
+		Coded += T.Name.find(": ") != std::string::npos ? 1 : 0;
+		Id = Id.empty() ? R.E.Id : Id;
+		const std::string Want = HostsShortName(T.Name);
+		ui_test::Expect(R.Name == Want, ("FestCopyUi (N-2): a plain series' row keeps today's NetShortName form " + Want + ", not " + R.Name).c_str());
+	}
+	ui_test::Expect(Rows >= 1, ("FestCopyUi (N-2): THE BOARD lists " + Plain->Name + "'s events").c_str());
+	if (!Id.empty())
+	{
+		ss::net::EventInstance E;
+		Net.FindInstance(Id, E);
+		P.RL.SelectEvent(Id);
+		const ss::ui::DrawList Sel = P.Settled();
+		const std::string Want = HostsUpper(HostsShortName(Net.TemplateOf(E).Name));
+		ui_test::Expect(ui_test::DrewRun(Sel, Want), ("FestCopyUi (N-2): a plain series' Prospectus keeps today's form " + Want).c_str());
+	}
+	std::printf("FestCopyUi (N-2): %s on day %d: %d rows, %d with a code in the template's name, each drawn without it\n", Plain->Name.c_str(), Plain->FirstDay + 1, Rows, Coded);
+}
+
+/** The first instance of a festival whose name starts with Code ("GRIT 02-E: "), searched day by day through the edition. */
+bool HostsFestRun(const ss::fest::Festival& F, const std::string& Code, ss::net::EventInstance& Out)
+{
+	const ss::net::Network& Net = ss::net::Site(F.Site);
+	for (int Day = F.FirstDay; Day <= F.LastDay; ++Day)
+	{
+		for (const ss::net::EventInstance& E : Net.Window(static_cast<double>(Day) * ss::net::MinutesPerDay, static_cast<double>(Day + 1) * ss::net::MinutesPerDay))
+		{
+			if (Net.TemplateOf(E).Series == F.SeriesId && Net.NameOf(E).compare(0, Code.size(), Code) == 0)
+			{
+				Out = E;
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+/** A table header as RunItTwice composes it for an instance (RitFrame's header: RitTableCode + RitEventName of the listing's name). */
+std::string HostsRitHeader(const ss::net::EventInstance& E)
+{
+	namespace rr = ss::ui::rlrit_detail;
+	const ss::net::Network& Net = ss::net::Site(ss::net::SiteId::RunItTwice);
+	return rr::RitTableCode(E.Id) + rr::RitEventName(Net.Listing(E).Spec.Name);
+}
+
+/** FestCopyUi's N-2 half on GRIT's night (§2.3.2; PIE step 8): THE BOARD lists both runs of a show with their codes, "GRIT 02-E" and
+ *  "GRIT 02-L" (Network::NameOf from the start minute), and a GRIT table's header keeps the code, the run's "-E" included ("GRIT 02-E:
+ *  Box Office PKO"; today's header reads "Box Office PKO"). At 18:00 on the night of GRIT 2027's 02 runs. */
+void FestCopyUiRitGrit(HostsLaptop& P, const ss::fest::Festival& Grit)
+{
+	const ss::net::Network& Net = ss::net::Site(ss::net::SiteId::RunItTwice);
+	const ss::net::SeriesInfo* Sr = Net.FindSeries(Grit.SeriesId);
+	const std::string Short = Sr ? Sr->Short : std::string("GRIT");
+	ss::net::EventInstance Early;
+	ss::net::EventInstance Late;
+	const bool Found = HostsFestRun(Grit, Short + " 02-E: ", Early) && HostsFestRun(Grit, Short + " 02-L: ", Late);
+	ui_test::Expect(Found && ss::net::DayOf(Early.Start) == ss::net::DayOf(Late.Start), "FestCopyUi (N-2): GRIT 2027's show 02 runs twice one night (02-E and 02-L)");
+	if (!Found)
+	{
+		return;
+	}
+	const int Day = ss::net::DayOf(Early.Start);
+	P.At(static_cast<double>(Day) * ss::net::MinutesPerDay + 18.0 * 60.0);
+	P.OpenRit(ss::ui::RiverLine::Page::Lobby);
+	const ss::ui::DrawList L = P.Settled();
+	int Coded = 0;
+	bool SawEarly = false;
+	bool SawLate = false;
+	for (const HostsBoardRow& R : HostsBoardRows(P, L))
+	{
+		const ss::net::EventTemplate& T = Net.TemplateOf(R.E);
+		if (T.Series != Grit.SeriesId)
+		{
+			continue;
+		}
+		const std::string Want = Net.NameOf(R.E);
+		bool Cut = false;
+		ui_test::Expect(HostsWholeOrCut(R.Name, Want, Want.find(": ") + 2, Cut), ("FestCopyUi (N-2): THE BOARD's GRIT row reads " + Want + ", not " + R.Name).c_str());
+		++Coded;
+		SawEarly = SawEarly || R.E.Id == Early.Id;
+		SawLate = SawLate || R.E.Id == Late.Id;
+	}
+	ui_test::Expect(SawEarly && SawLate, "FestCopyUi (N-2): THE BOARD lists both runs of GRIT's show 02 at 18:00");
+	ui_test::Expect(Net.NameOf(Early) == "GRIT 02-E: $16.50 Box Office PKO" && Net.NameOf(Late) == "GRIT 02-L: $16.50 Box Office PKO",
+		("FestCopyUi (N-2): GRIT 2027's show 02 is GRIT 02-E / 02-L: $16.50 Box Office PKO (" + Net.NameOf(Early) + ", " + Net.NameOf(Late) + ")").c_str());
+	const std::string Head = HostsRitHeader(Early);
+	ui_test::Expect(Head == "GRIT 02-E: Box Office PKO", ("FestCopyUi (N-2): a GRIT 02-E table's header reads GRIT 02-E: Box Office PKO, not " + Head).c_str());
+	ui_test::Expect(HostsRitHeader(Late) == "GRIT 02-L: Box Office PKO", "FestCopyUi (N-2): a GRIT 02-L table's header keeps its own run");
+	std::printf("FestCopyUi (N-2): GRIT's night (day %d): %d GRIT rows coded; the 02-E table's header %s\n", Day, Coded, Head.c_str());
+}
+
+/** FestCopyUi's N-2 half at the table, drawn (§2.3.2; PIE step 8b): sat at REIGN 04 in its late registration on REIGN 2027's day 2, the
+ *  table's header keeps the code, whole ("REIGN 04: Dumbwaiter NLHE" in the section slab's capitals: a festival table's header fits
+ *  down to 18, where every other name stops at 22 and ends in an ellipsis). The last step on the laptop (the seat stays). */
+void FestCopyUiRitTable(HostsLaptop& P, const ss::fest::Festival& Reign)
+{
+	const ss::net::Network& Net = ss::net::Site(ss::net::SiteId::RunItTwice);
+	const ss::net::SeriesInfo* Sr = Net.FindSeries(Reign.SeriesId);
+	const std::string Code = (Sr ? Sr->Short : std::string("REIGN")) + " 04: ";
+	ss::net::EventInstance Run;
+	const bool Found = HostsFestRun(Reign, Code, Run);
+	ui_test::Expect(Found && ss::net::DayOf(Run.Start) == Reign.FirstDay + 1, ("FestCopyUi (N-2): REIGN 2027 runs " + Code + "on its day 2").c_str());
+	if (!Found || Run.Start + 20.0 < P.S.WorldMinutes())
+	{
+		return;
+	}
+	P.At(Run.Start + 20.0);
+	P.OpenRit(ss::ui::RiverLine::Page::Lobby);
+	P.S.BankrollCents = 200000;
+	std::string Lock;
+	const ss::LobbyEvent Ev = Net.Listing(Run, &Lock, P.S.Unlocks());
+	const std::string Why = P.S.RegisterEvent(Ev);
+	ui_test::Expect(Why.empty() && P.S.T, ("FestCopyUi (N-2): the player sits " + Net.NameOf(Run) + " in its late registration (" + Why + "; lock '" + Lock + "')").c_str());
+	if (!P.S.T)
+	{
+		return;
+	}
+	P.S.CurrentPace = ss::Pace::Full;
+	const ss::ui::DrawList L = P.Settled();
+	const std::string Want = HostsRitHeader(Run);
+	ui_test::Expect(Want == "REIGN 04: Dumbwaiter NLHE", ("FestCopyUi (N-2): REIGN 04's table is REIGN 04: Dumbwaiter NLHE, not " + Want).c_str());
+	const std::string Head = HostsUpper(Want);
+	bool Drew = false;
+	std::string Seen;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text.compare(0, Code.size(), Code) == 0)
+		{
+			Drew = Drew || Cmd.Text.Text == Head;
+			Seen = Cmd.Text.Text;
+		}
+	}
+	ui_test::Expect(Drew, ("FestCopyUi (N-2): the table header keeps the code, " + Head + " (drawn: " + Seen + ")").c_str());
+	std::printf("FestCopyUi (N-2): the REIGN table's header: %s\n", Seen.c_str());
+}
+
+/** FestYourStrip's N-3 half (§2.8.2, the lead's N-3; FH-5a): on REIGN 2027's day 2 (eleven days before its Main) the Main card's Details
+ *  opens the Prospectus on the Main itself (REIGN 30: $2,100 NLHE [MAIN EVENT], RIT-1800) though THE BOARD's 24-hour window doesn't
+ *  list it, and the Board's fallback leaves it there on the next frames; a filter pick, and a row pick, end the hold. Details is the
+ *  hub's fsmain when this tree's hub draws it (stream A), else its RunItTwice half, rlrit_detail::RitHoldSelection.
+ *  Plant: Details only selecting the Main's id (the Board swaps in its first row). */
+void FestYourStripRitHeld(HostsLaptop& P, const ss::fest::Festival& Reign, ss::ui::DrawList& Board)
+{
+	namespace rr = ss::ui::rlrit_detail;
+	const ss::net::Network& Net = ss::net::Site(ss::net::SiteId::RunItTwice);
+	P.At(static_cast<double>(Reign.FirstDay + 1) * ss::net::MinutesPerDay + 12.0 * 60.0);
+	ss::net::EventInstance Main;
+	const bool HasMain = Net.Next(Reign.MainId, P.S.WorldMinutes(), Main);
+	ui_test::Expect(HasMain && ss::net::DayOf(Main.Start) == Reign.MainDay, "FestYourStrip (N-3): REIGN 2027's Main is on its Main day");
+	if (!HasMain)
+	{
+		return;
+	}
+	P.OpenRit(ss::ui::RiverLine::Page::Lobby);
+	P.Settled();
+	const std::vector<std::string>& Listed = rr::Access::Listed(P.RL);
+	ui_test::Expect(std::find(Listed.begin(), Listed.end(), Main.Id) == Listed.end() && !Listed.empty(), "FestYourStrip (N-3): THE BOARD's window doesn't list the Main on REIGN's day 2");
+	// Details: the hub's Main card when it draws one, else the RunItTwice half the card calls.
+	P.RL.ShowSeries(Reign.SeriesId, P.Now);
+	P.RL.OpenPage(ss::ui::RiverLine::Page::Series, P.Now);
+	const ss::ui::DrawList Hub = P.Settled();
+	const ss::ui::TextItem* Details = nullptr;
+	for (const ss::ui::DrawCmd& Cmd : Hub.Cmds)
+	{
+		Details = Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == "Details" ? &Cmd.Text : Details;
+	}
+	const bool ViaHub = Details != nullptr;
+	if (ViaHub)
+	{
+		P.Press(Details->X + 6.0f, Details->BaselineY - 4.0f);
+	}
+	else
+	{
+		rr::RitHoldSelection(P.RL, Main.Id);
+		P.RL.OpenPage(ss::ui::RiverLine::Page::Lobby, P.Now);
+	}
+	const ss::ui::DrawList Opened = P.Settled();
+	const std::string Want = HostsUpper(Net.NameOf(Main));
+	ui_test::Expect(Want == "REIGN 30: $2,100 NLHE [MAIN EVENT]", ("FestYourStrip (N-3): REIGN 2027's Main reads REIGN 30: $2,100 NLHE [MAIN EVENT], not " + Want).c_str());
+	ui_test::Expect(P.RL.SelectedEvent() == Main.Id, "FestYourStrip (N-3): Details selects the Main and the Board's fallback leaves it");
+	ui_test::Expect(ui_test::DrewRun(Opened, Want) && ui_test::DrewRun(Opened, "RIT-1800"), ("FestYourStrip (N-3): the Prospectus opens on the Main itself, " + Want + " under RIT-1800").c_str());
+	P.Now += 0.05;
+	const ss::ui::DrawList Next = P.Frame();
+	ui_test::Expect(P.RL.SelectedEvent() == Main.Id && ui_test::DrewRun(Next, Want), "FestYourStrip (N-3): the next frame leaves the Prospectus on the Main");
+	Board = P.Settled();
+	ui_test::Expect(P.RL.SelectedEvent() == Main.Id && ui_test::DrewRun(Board, Want), "FestYourStrip (N-3): the Prospectus stays on the Main");
+	const std::vector<HostsBoardRow> Rows = HostsBoardRows(P, Board);
+	// A filter pick ends the hold: the Board's fallback takes its own row.
+	P.RL.SetFilter(ss::ui::RiverLine::Filter::Playable, P.Now);
+	P.Settled();
+	ui_test::Expect(P.RL.SelectedEvent() != Main.Id, "FestYourStrip (N-3): a filter pick ends the hold (the Board selects its own row)");
+	P.RL.SetFilter(ss::ui::RiverLine::Filter::All, P.Now);
+	P.Settled();
+	// Held again, then a row pick ends it: the Main selected alone afterwards is swapped out as today.
+	rr::RitHoldSelection(P.RL, Main.Id);
+	P.Settled();
+	ui_test::Expect(P.RL.SelectedEvent() == Main.Id, "FestYourStrip (N-3): held again");
+	const std::vector<HostsBoardRow> Again = HostsBoardRows(P, P.Frame());
+	std::string Picked;
+	if (!Again.empty())
+	{
+		P.Press(700.0f, Again.front().Y + HostsRowPitch / 2.0f);
+		Picked = P.RL.SelectedEvent();
+		ui_test::Expect(Picked == Again.front().E.Id, "FestYourStrip (N-3): a row pick selects the row");
+	}
+	P.RL.SelectEvent(Main.Id);
+	P.Settled();
+	ui_test::Expect(P.RL.SelectedEvent() != Main.Id, "FestYourStrip (N-3): after a row pick the hold is gone (the Main alone is swapped out, as before G1)");
+	std::printf("FestYourStrip (N-3): Details via %s; the Prospectus on %s from day %d (the Main on day %d), %zu Board rows, the row pick %s\n",
+		ViaHub ? "the hub's fsmain" : "rlrit_detail::RitHoldSelection (this tree's hub has no Main card)", Want.c_str(), Reign.FirstDay + 1, Reign.MainDay, Rows.size(), Picked.c_str());
+}
+
+/** FestReignCopy's THE BOARD's tag half (§2.15.1; PLAN_G1 item 9; FH-5a): on REIGN's Board nothing but REIGN's tag (the Short alone,
+ *  drawn beside a name under 186 units) is drawn in a REIGN row's room after its name, up to the buy-in figure (no vertex, no other
+ *  run), and no sponsor brand's name (a non-site brand: Name or Short) is on the Board at all. Plants: a sponsor brand drawn by the
+ *  REIGN tag (its mark; its name). */
+void FestReignCopyBoardTag(const ss::fest::Festival& Reign, const ss::ui::DrawList& Board, const std::vector<HostsBoardRow>& Rows)
+{
+	const ss::net::Network& Net = ss::net::Site(ss::net::SiteId::RunItTwice);
+	const ss::net::SeriesInfo* Sr = Net.FindSeries(Reign.SeriesId);
+	const std::string Short = Sr ? Sr->Short : std::string("REIGN");
+	int ReignRows = 0;
+	int Tags = 0;
+	float Widest = 0.0f;
+	for (const HostsBoardRow& R : Rows)
+	{
+		if (Net.TemplateOf(R.E).Series != Reign.SeriesId)
+		{
+			continue;
+		}
+		++ReignRows;
+		const ss::ui::TextItem* Tag = nullptr;
+		for (const ss::ui::DrawCmd& Cmd : Board.Cmds)
+		{
+			const bool On = Cmd.Type == ss::ui::DrawCmd::Kind::Text && std::fabs(Cmd.Text.BaselineY - (R.Y + 21.5f)) < 1.0f && Cmd.Text.X > HostsColEvent + 1.0f &&
+				Cmd.Text.X < HostsTagEnd;
+			Tag = On && Cmd.Text.Text == Short ? &Cmd.Text : Tag;
+		}
+		Tags += Tag ? 1 : 0;
+		// The room after the name, up to the buy-in figure (right-aligned at x 610): where the tag would sit, and nothing else.
+		ui_test::TableMeasurer M;
+		const float NameEnd = HostsColEvent + M.Width(R.Name, ss::ui::Font::Regular, 14.0f);
+		const float BuyLeft = 610.0f - M.Width(ss::ui::rlrit_detail::RitBuyIn(Net.TemplateOf(R.E).BuyInCents), ss::ui::Font::BoldCondensed, 15.0f);
+		const ss::ui::Rect Room{NameEnd + 2.0f, R.Y + 3.0f, std::max(0.0f, BuyLeft - NameEnd - 4.0f), HostsRowPitch - 6.0f};
+		Widest = std::max(Widest, Room.W);
+		const auto Inside = [&Room](float X, float Y) { return X >= Room.X && X <= Room.X + Room.W && Y >= Room.Y && Y <= Room.Y + Room.H; };
+		size_t Marks = 0;
+		for (const ss::ui::Vertex& V : Board.Vertices)
+		{
+			Marks += Inside(V.X, V.Y) ? 1 : 0;
+		}
+		size_t Runs = 0;
+		for (const ss::ui::DrawCmd& Cmd : Board.Cmds)
+		{
+			Runs += Cmd.Type == ss::ui::DrawCmd::Kind::Text && &Cmd.Text != Tag && Inside(Cmd.Text.X, Cmd.Text.BaselineY - 4.0f) ? 1 : 0;
+		}
+		ui_test::Expect(Marks == 0 && Runs == 0, ("FestReignCopy (THE BOARD's tag): nothing but the tag is drawn after " + R.Name + " (" + std::to_string(Marks) + " vertices, " +
+			std::to_string(Runs) + " runs)").c_str());
+	}
+	int Brands = 0;
+	for (const ss::sponsor::Brand& B : ss::sponsor::Brands())
+	{
+		if (B.Site != -1)
+		{
+			continue; // a site's own brand (RunItTwice prints its own name on its pages)
+		}
+		++Brands;
+		for (const std::string& Word : {B.Name, B.Short})
+		{
+			if (Word.empty())
+			{
+				continue;
+			}
+			const std::string Low = trademarks::Lower(Word);
+			for (const ss::ui::DrawCmd& Cmd : Board.Cmds)
+			{
+				if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && trademarks::Lower(Cmd.Text.Text).find(Low) != std::string::npos)
+				{
+					ui_test::Expect(false, ("FestReignCopy (THE BOARD's tag): REIGN's Board draws no sponsor brand (" + Word + " in " + Cmd.Text.Text + ")").c_str());
+				}
+			}
+		}
+	}
+	ui_test::Expect(ReignRows >= 2 && Widest >= 12.0f, "FestReignCopy (THE BOARD's tag): REIGN's Board lists REIGN's events, with room after a name");
+	std::printf("FestReignCopy (THE BOARD's tag): %d REIGN rows, %d REIGN tags drawn (none beside a name past 186 units), the widest room after a name %.0f, %d sponsor "
+				"brands looked for\n", ReignRows, Tags, Widest, Brands);
+}
+
+/** The RunItTwice half of FH-5a, on one laptop: WRIT 2027 (N-2 on THE BOARD and the Prospectus), RunItTwice Open Spring (a plain
+ *  series unchanged), GRIT 2027's night of show 02 (the -E and -L codes; the header's code), REIGN 2027's day 2 (N-3 at noon, the REIGN
+ *  tag), then sat at REIGN 04 (the drawn header). */
+void FestRitCodesAndHeld()
+{
+	const auto Began = std::chrono::steady_clock::now();
+	const ss::fest::Festival* Writ = HostsRitEdition(ss::fest::Brand::Writ);
+	const ss::fest::Festival* Grit = HostsRitEdition(ss::fest::Brand::Grit);
+	const ss::fest::Festival* Reign = HostsRitEdition(ss::fest::Brand::Reign);
+	ui_test::Expect(Writ && Grit && Reign, "FestCopyUi (N-2): WRIT, GRIT and REIGN are on F-net's calendar, on RunItTwice");
+	if (!Writ || !Grit || !Reign)
+	{
+		return;
+	}
+	HostsLaptop P("u4-fest-hosts-rit");
+	FestCopyUiRitBoard(P, *Writ);
+	FestCopyUiRitPlainSeries(P, *Writ, *Reign);
+	FestCopyUiRitGrit(P, *Grit);
+	ss::ui::DrawList Board;
+	FestYourStripRitHeld(P, *Reign, Board);
+	FestReignCopyBoardTag(*Reign, Board, HostsBoardRows(P, Board));
+	FestCopyUiRitTable(P, *Reign);
+	std::printf("FestRitCodesAndHeld: WRIT from day %d, GRIT from day %d, REIGN from day %d; %.2f s\n", Writ->FirstDay, Grit->FirstDay, Reign->FirstDay,
+		std::chrono::duration<double>(std::chrono::steady_clock::now() - Began).count());
+}
 } // namespace
 
 namespace u4_ui_test
@@ -616,5 +1159,6 @@ void SegFestHosts()
 	FestHostsRouting();
 	FestBandstandPick();
 	FestCopyUiHosts();
+	FestRitCodesAndHeld();
 }
 } // namespace u4_ui_test
