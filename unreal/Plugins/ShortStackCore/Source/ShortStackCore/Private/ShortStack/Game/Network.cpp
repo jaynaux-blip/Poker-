@@ -953,8 +953,25 @@ const SeriesInfo* Network::FindSeries(const std::string& Id) const
 
 std::string Network::NameOf(const EventInstance& E) const
 {
-	// Update 4 (SPEC v1.7 §2.3.2, §6 PA-4): the template's name until G1 (GRIT's runs, F-net).
-	return TemplateOf(E).Name;
+	// Update 4 (SPEC v1.7 §2.3.2, §6 PA-4): the template's name, but for GRIT's shows (G1, FN-2a): each of its twelve show templates
+	// runs twice a night as one template (19:00 and 22:00, so §2.3.4's counts hold), and the instance's start minute names the run
+	// after the number, "GRIT 07-E: $33 Dress Circle Turbo" at 7 PM, "GRIT 07-L: ..." at 10 PM. Every other instance, RiverLine's
+	// included, reads its template's name as before. The cheap tests first: only a one-off with repeats in a series reaches the
+	// series lookup.
+	const EventTemplate& T = TemplateOf(E);
+	if (T.EveryMinutes <= 0 || T.OnlyDay == -9999 || T.Series.empty())
+	{
+		return T.Name;
+	}
+	const SeriesInfo* Show = FindSeries(T.Series);
+	const size_t Code = T.Name.find(": ");
+	if (!Show || !Show->Festival || Show->Brand != fest::BrandKey(fest::Brand::Grit) || Code == std::string::npos)
+	{
+		return T.Name;
+	}
+	const double InDay = E.Start - std::floor(E.Start / MinutesPerDay) * MinutesPerDay;
+	const char* Run = std::llround(InDay) <= static_cast<long long>(T.StartMinute) ? "-E" : "-L";
+	return T.Name.substr(0, Code) + Run + T.Name.substr(Code);
 }
 
 const SeriesInfo* Network::CurrentSeries(double Now) const
@@ -1364,7 +1381,7 @@ LobbyEvent Network::Listing(const EventInstance& E, std::string* Lock, int Unloc
 	}
 	else
 	{
-		L.Name = T.Name;
+		L.Name = NameOf(E); // Update 4 G1 (§6 PA-4; FN-2a): GRIT's runs ("GRIT 07-L"), every other event its template's name
 		L.BuyInCents = T.BuyInCents;
 		L.BuyInLabel = BuyIn(T.BuyInCents);
 		L.Game = T.Omaha ? "PL Omaha" : T.Fmt == Format::Bounty ? "NL Hold'em PKO" : T.Fmt == Format::Satellite ? "Satellite" : "NL Hold'em";
@@ -1373,7 +1390,7 @@ LobbyEvent Network::Listing(const EventInstance& E, std::string* Lock, int Unloc
 		L.Joinable = Joinable(E, nullptr, Unlocks);
 		TournamentSpec& Sp = L.Spec;
 		Sp.Id = T.Id;
-		Sp.Name = !T.Series.empty() ? T.Name : BuyIn(T.BuyInCents) + " " + T.Name;
+		Sp.Name = !T.Series.empty() ? NameOf(E) : BuyIn(T.BuyInCents) + " " + NameOf(E);
 		Sp.BuyInCents = T.BuyInCents;
 		// The site's rake, pace and tables (update 2 §5.3, §5.8): RiverLine's are FeeOf, 36 or 42 seconds a hand, and the
 		// population by tier, exactly as before.
@@ -1952,7 +1969,8 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 			continue;
 		}
 		auto NameOf = [&](const Placing& P) { return P.Player == -1 ? YouName : P.Player == -2 ? P.Name : Players()[static_cast<size_t>(P.Player)].Name; };
-		const std::string EventName = !T.Series.empty() ? T.Name : BuyIn(T.BuyInCents) + " " + T.Name;
+		// Update 4 G1 (§6 PA-4; FN-2a): the instance's name (GRIT's runs), as every reader of a festival instance's name reads it.
+		const std::string EventName = !T.Series.empty() ? Network::NameOf(E) : BuyIn(T.BuyInCents) + " " + Network::NameOf(E);
 		Post(E.Start + E.Duration, W.Player == -1 ? NewsKind::Hero : NewsKind::BigWin, NameOf(W) + " wins " + EventName,
 			Grouped(E.Entries) + " entries \xC2\xB7 " + MoneyShort(E.Pool) + " prize pool. Runner-up: " + NameOf(R.FinalTable[1]) + " (" + Money(R.FinalTable[1].Prize) + ").",
 			W.Player == -1 ? "YOU" : Series ? (T.Bracelet ? "BRACELET" : T.Ring ? "RING" : FindSeries(T.Series) ? FindSeries(T.Series)->Short : std::string("SERIES")) : "BIG WIN", W.Prize, W.Player == -2 ? -1 : W.Player);
@@ -2012,7 +2030,7 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 		{
 			const EventInstance& E = *Short[K].second;
 			const EventTemplate& T = TemplateOf(E);
-			const std::string EventName = !T.Series.empty() ? T.Name : BuyIn(T.BuyInCents) + " " + T.Name;
+			const std::string EventName = !T.Series.empty() ? NameOf(E) : BuyIn(T.BuyInCents) + " " + NameOf(E); // G1: GRIT's runs (FN-2a)
 			const std::vector<std::pair<std::string, std::string>> Vars = {{"Event", EventName}, {"Amount", Dollars(Short[K].first)}, {"Entries", Grouped(E.Entries)},
 				{"Gtd", Dollars(T.GtdCents)}, {"Site", Rules->Name}};
 			// The item's figure (the card's big number, the ticker's "(…)") is the headline's whole dollars too, never "$1,889.50"
@@ -2020,9 +2038,13 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 			Post(E.Start + E.LateReg, NewsKind::Record, site::FillCopy(site::CopyText("news:overlay:title"), Vars), site::FillCopy(site::CopyText("news:overlay"), Vars), "OVERLAY",
 				static_cast<Chips>(std::llround(static_cast<double>(Short[K].first) / 100.0)) * 100);
 		}
-		// A series a week out.
+		// A series a week out. Update 4 G1 (SPEC v1.7 §2.9.2; FN-2a): never a festival, announced at T-30 instead (its posts, FN-7).
 		for (const SeriesInfo& S : AllSeries)
 		{
+			if (S.Festival)
+			{
+				continue;
+			}
 			const double Announce = (static_cast<double>(S.FirstDay) - 7.0) * MinutesPerDay + 10.0 * 60.0;
 			if (Announce < Opened || Announce > Now || Now >= static_cast<double>(S.LastDay + 1) * MinutesPerDay)
 			{

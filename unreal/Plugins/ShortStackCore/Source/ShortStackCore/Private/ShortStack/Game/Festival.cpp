@@ -16,6 +16,14 @@
 // Prewarm builds it on the game thread (G/Network.cpp), before anything else asks. LastEnd is the one lazy value: the latest
 // scheduled finish of the edition's instances (Make's durations, through Network::Window over the edition's days), worked out the
 // first time a phase past LastDay asks and kept per series id under a lock. Nothing here draws a random number or writes a save.
+//
+// G1, FN-2a (F-net; SPEC v1.7 §1.2 item 13, §2.11; LEAD_CALLS R-3; PLAN_FNET's Corrections items 1 and 5): the rival festivals' rows
+// come from G/NetworkFestival.cpp (FEIGN and GRIT first), with no change here. The bodies of H0's three helpers: TrophyName (§2.11's
+// P1-P12 by brand and tier), NameAfterArticle (a leading "The " dropped after an article the template writes) and DateInSentence
+// (the year printed outside Today's world year). Inventory lists the rival festivals' strings, each with its kind ("label\t" or
+// "sentence\t", the G/VideoCopy.cpp precedent): every edition's name, Short, Title and tagline, and every event's printed name
+// (GRIT's shows as their two runs, through Network::NameOf), blurb and seats text, once each. It grows as rows land (PENNANT and
+// REIGN at FN-3, PUSH and WRIT at FN-2b; RiverLine's dress at FN-4a; the trophies, C1 and the room words at FN-4b).
 #include "ShortStack/Game/Festival.h"
 
 #include "ShortStack/Game/Life.h"
@@ -27,6 +35,7 @@
 #include <algorithm>
 #include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -381,28 +390,97 @@ YourLineView YourLine(const Festival& /*F*/, const world::World* /*W*/)
 
 std::vector<std::string> Inventory()
 {
-	return {};
+	// §2.11's core strings, kind first: every rival festival edition's name, Short, Title and tagline, and every event's printed name,
+	// blurb and seats text (the satellites through Festival::Satellites), each string once, in All()'s order. FestCopy and
+	// FestNamesScreened (festivals_test) run the lint and both trademark tiers over them.
+	std::vector<std::string> Out;
+	std::set<std::string> Seen;
+	const auto Add = [&Out, &Seen](const char* Kind, const std::string& Text) {
+		const std::string Entry = std::string(Kind) + "\t" + Text;
+		if (!Text.empty() && Seen.insert(Entry).second)
+		{
+			Out.push_back(Entry);
+		}
+	};
+	for (const Festival& F : All())
+	{
+		if (F.Site == net::SiteId::RiverLine)
+		{
+			continue; // RiverLine's four join at FN-4a (§2.2.2's strings, the renames, the trio)
+		}
+		const net::Network& N = net::Site(F.Site);
+		const net::SeriesInfo* Sr = N.FindSeries(F.SeriesId);
+		if (!Sr)
+		{
+			continue;
+		}
+		Add("label", Sr->Name);
+		Add("label", Sr->Short);
+		Add("label", Sr->Title);
+		Add("sentence", Sr->Tagline);
+		const std::vector<net::EventTemplate>& Temps = N.Templates();
+		for (size_t I = 0; I < Temps.size(); ++I)
+		{
+			const net::EventTemplate& T = Temps[I];
+			const bool Satellite = std::find(F.Satellites.begin(), F.Satellites.end(), T.Id) != F.Satellites.end();
+			if (T.Series != F.SeriesId && !Satellite)
+			{
+				continue;
+			}
+			// The printed name of each run (GRIT's two runs a night: "GRIT 07-E", "GRIT 07-L"; one run for every other event).
+			net::EventInstance E;
+			E.Template = static_cast<int>(I);
+			for (int M = T.StartMinute; M <= (T.EveryMinutes > 0 ? T.LastMinute : T.StartMinute); M += std::max(1, T.EveryMinutes))
+			{
+				E.Start = fest_detail::FestCalMinute(T.OnlyDay) + static_cast<double>(M);
+				Add("label", N.NameOf(E));
+			}
+			Add("sentence", T.Blurb);
+			Add("label", T.Seats);
+		}
+	}
+	return Out;
 }
 
 // G1's appends (the lead's pre-wave commit H0, PLAN_G1 §4.2): stubs until F-net's bodies (FN-2a). Nothing calls them before G1's
 // packages; each answers empty, or as today's text prints.
 
-const char* TrophyName(Brand /*B*/, int /*Tier*/)
+const char* TrophyName(Brand B, int Tier)
 {
-	// H0: no trophy is named yet (FN-2a: §2.11's P1-P12 by brand and tier).
+	// §2.11 P1-P12, as printed (FN-2a; LEAD_CALLS R-3): the trophies by brand (P1-P10), and the two championships' title objects at
+	// Tier 1 (P11-P12; RCOP, a championship too, has none). "" for None, Count or a tier the brand lacks.
+	static const char* const FestTrophies[] = {"", "The RCOP Cup", "the ring", "the bracelet", "The Slam Plate", "The Funhouse Mirror", "The Big Red Button",
+		"The Seal", "The Grindstone", "The Gold Pennant", "The Sceptre"};
+	static_assert(sizeof(FestTrophies) / sizeof(FestTrophies[0]) == static_cast<size_t>(Brand::Count), "one trophy a brand");
+	if (B <= Brand::None || B >= Brand::Count)
+	{
+		return "";
+	}
+	if (Tier == 0)
+	{
+		return FestTrophies[static_cast<int>(B)];
+	}
+	if (Tier == 1)
+	{
+		return B == Brand::Pennant ? "The Pennant Ribbon" : B == Brand::Reign ? "The Spade Finial" : "";
+	}
 	return "";
 }
 
 std::string NameAfterArticle(const std::string& Name)
 {
-	// H0: the name as it is (FN-2a drops a leading "The ").
-	return Name;
+	// §1.2 item 13, §2.11 (FN-2a): after an article the template writes ("the {Festival} Main Event", "next {Festival}"), a name that
+	// starts with "The " drops it, so no fill prints "the The": "The Championship Online 2027" -> "Championship Online 2027". Every
+	// other name ("FEIGN 2026", "RCOP 2026", "Ring Rush 2027") prints as it is.
+	const std::string Article = "The ";
+	return Name.compare(0, Article.size(), Article) == 0 && Name.size() > Article.size() ? Name.substr(Article.size()) : Name;
 }
 
-std::string DateInSentence(int Day, int /*Today*/)
+std::string DateInSentence(int Day, int Today)
 {
-	// H0: today's date label, "Oct 6" (FN-2a adds the year outside Today's world year).
-	return net::DateLabel(Day);
+	// §1.2 item 13 (FN-2a): "Oct 6" when Day falls in Today's world year, "Oct 6, 2026" in any other (both world days).
+	const int Year = world::YearOf(Day);
+	return Year == world::YearOf(Today) ? net::DateLabel(Day) : net::DateLabel(Day) + ", " + std::to_string(Year);
 }
 } // namespace fest
 } // namespace ss
