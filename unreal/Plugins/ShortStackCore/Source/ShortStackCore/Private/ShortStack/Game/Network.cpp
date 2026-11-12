@@ -2,6 +2,7 @@
 
 #include "SitesDetail.h"
 #include "ShortStack/Game/Chat.h"
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Handles.h"
 #include "ShortStack/Game/Life.h"
@@ -558,6 +559,13 @@ void Network::BuildPlayers()
 	}
 }
 
+namespace calendar_detail
+{
+/** Update 4 G1 (FN-1): RiverLine's series flags by plan key, one table for every year (G/NetworkSeries.cpp). History keeps a series
+ *  already over before Night One out of the festivals. */
+void FestCalDress(const char* Key, bool History, SeriesInfo& Sr);
+} // namespace calendar_detail
+
 void Network::BuildSeries()
 {
 	SeriesInfo Mm;
@@ -572,6 +580,7 @@ void Network::BuildSeries()
 	Mm.Color2 = 0x27d3c3;
 	Mm.Tagline = "Two weeks. Seventy events from 55\xC2\xA2. Everyone's a shot.";
 	Mm.MainEvent = "mm-main";
+	calendar_detail::FestCalDress("mm", false, Mm); // Update 4 G1 (FN-1): Draw 22 (§3.2.1)
 	AllSeries.push_back(Mm);
 
 	SeriesInfo Rc;
@@ -586,6 +595,7 @@ void Network::BuildSeries()
 	Rc.Color2 = 0x8b5cf6;
 	Rc.Tagline = "The RiverLine Championship of Online Poker. $100,000,000 guaranteed.";
 	Rc.MainEvent = "rcop-main";
+	calendar_detail::FestCalDress("rcop", false, Rc); // Update 4 G1 (FN-1): RCOP 2026 is a festival (§2.1.3, §2.2.1): Draw 110, Flagship
 	AllSeries.push_back(Rc);
 
 	SeriesInfo Sl;
@@ -600,6 +610,7 @@ void Network::BuildSeries()
 	Sl.Color2 = 0xef4d5a;
 	Sl.Tagline = "The summer festival: 82 events, $30,000,000 guaranteed.";
 	Sl.MainEvent = "slam-main";
+	calendar_detail::FestCalDress("slam", true, Sl); // Update 4 G1 (FN-1): history (day -30), a series with Summer Slam's Draw
 	AllSeries.push_back(Sl);
 }
 
@@ -1317,6 +1328,9 @@ void Network::Prewarm(double Now) const
 	// Update 4 (SPEC v1.7 §2.4.5, §6 PA-4): every site's largest fields by day, for fest::RecordOf (G/NetworkFestival.cpp; a no-op
 	// until G1, and never DayCache).
 	FillDayMax(Now);
+	// Update 4 G1 (SPEC v1.7 §2.1.2; FN-1): the festival calendar (fest::All(), built once from every site's series), made here on
+	// the game thread before any screen or desk worker reads it (update 2 §5.8's contract); every later call only reads it.
+	fest::All();
 	// With a living world, only the network's own past needs working out; a fresh start (update 2 §3.3 F7) has none, and
 	// neither has a rival (§5.8: no regulars, no past).
 	if ((Living && Living->Began() == world::Start::Blank) || People.empty())

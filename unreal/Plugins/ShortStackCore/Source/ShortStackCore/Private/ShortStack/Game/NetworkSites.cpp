@@ -68,6 +68,7 @@ struct NetSitesSeries
 	bool Bounty;       // a PKO series
 	int FirstYear;     // the first year it runs
 	const char* Tagline;
+	int Draw;          // Update 4 G1 (SPEC v1.7 §3.2.1, §12.1 I-3; FN-1): the Scene Book's pull (inert until G2)
 };
 
 Chips NetSitesCents(double Dollars)
@@ -159,8 +160,8 @@ const NetSitesDaily IgniteDailies[] = {
 		"Ignite's Sunday. Eleven dollars, a guarantee the whole app talks about all week, and a couple of thousand people chasing it."},
 };
 const NetSitesSeries IgniteSeries[] = {
-	{"wildfeb", "Wildfire Winter", "WILDFIRE", 2, 6, 12, 24, 1.10, 22.0, 33.0, 200, false, 2027, "Twenty-four events in twelve days, and every one of them loud."},
-	{"wildaug", "Wildfire Summer", "WILDFIRE", 8, 8, 12, 24, 1.10, 22.0, 33.0, 200, false, 2027, "Twenty-four events in twelve days, and every one of them loud."},
+	{"wildfeb", "Wildfire Winter", "WILDFIRE", 2, 6, 12, 24, 1.10, 22.0, 33.0, 200, false, 2027, "Twenty-four events in twelve days, and every one of them loud.", 8},
+	{"wildaug", "Wildfire Summer", "WILDFIRE", 8, 8, 12, 24, 1.10, 22.0, 33.0, 200, false, 2027, "Twenty-four events in twelve days, and every one of them loud.", 8},
 };
 
 // RunItTwice: tournaments for grown-ups. A grind all day, three Sunday majors, the Open twice a year and a PKO summer.
@@ -199,9 +200,9 @@ const NetSitesDaily RunItTwiceDailies[] = {
 		"The Sunday high roller. Small field, big names, and the lowest rake on the site."},
 };
 const NetSitesSeries RunItTwiceSeries[] = {
-	{"openspring", "RunItTwice Open Spring", "OPEN", 4, 12, 17, 40, 3.30, 215.0, 530.0, 260, false, 2027, "Forty events in seventeen days, and a $530 Main Event to close it."},
-	{"open", "RunItTwice Open", "OPEN", 11, 13, 17, 40, 3.30, 215.0, 530.0, 260, false, 2026, "Forty events in seventeen days, and a $530 Main Event to close it."},
-	{"ironworks", "Ironworks", "IRON", 7, 10, 12, 24, 5.50, 109.0, 215.0, 200, true, 2027, "Twenty-four knockout events, a price on every head."},
+	{"openspring", "RunItTwice Open Spring", "OPEN", 4, 12, 17, 40, 3.30, 215.0, 530.0, 260, false, 2027, "Forty events in seventeen days, and a $530 Main Event to close it.", 10},
+	{"open", "RunItTwice Open", "OPEN", 11, 13, 17, 40, 3.30, 215.0, 530.0, 260, false, 2026, "Forty events in seventeen days, and a $530 Main Event to close it.", 10},
+	{"ironworks", "Ironworks", "IRON", 7, 10, 12, 24, 5.50, 109.0, 215.0, 200, true, 2027, "Twenty-four knockout events, a price on every head.", 6},
 };
 
 /**
@@ -375,6 +376,7 @@ void Network::BuildSite()
 			Sr.Color2 = Color2;
 			Sr.Tagline = Pl.Tagline;
 			Sr.MainEvent = Sr.Id + "-main";
+			Sr.Draw = Pl.Draw; // Update 4 G1 (FN-1)
 			Chips Gtd = 0;
 			for (int No = 1; No <= Pl.Events; ++No)
 			{
