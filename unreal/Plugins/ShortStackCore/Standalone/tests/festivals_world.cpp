@@ -2085,9 +2085,11 @@ std::string FestHeroResultLineWorld(const std::string& Id, int Place, long long 
 /**
  * FestHeroPinsDerived (§2.15.1, §2.6.4): planted hero results (world\theroresult lines on the day-20 world) give RCOP 2026 a gold pin (a
  * win, a cash and a bust in its numbered events: 3 events, 2 cashes, best 1st of the won event's field) and FEIGN 2026 an outline pin
- * (a bust; its satellite win and a weekly never count), in calendar order; HeroFestResults lists RCOP 2026's three newest first with
- * their fields. The budget: HeroFestPins over 5,000 planted results (printed; <= 1 ms asserted under SS_PERF=1, median of five rebuilds).
- * Planted bug: satellites counted.
+ * (a bust; its satellite win and a weekly never count) and the first later edition with a numbered event a silver pin (one cash, 12th,
+ * no win), in calendar order; HeroFestResults lists RCOP 2026's three newest first with their fields, the silver edition's one and
+ * none for an edition never played. The budget: HeroFestPins over 5,000 planted results (printed; <= 1 ms asserted under SS_PERF=1,
+ * median of five rebuilds).
+ * Planted bugs: satellites counted; a cashed edition reading outline.
  */
 void FestHeroPinsDerived()
 {
@@ -2131,26 +2133,61 @@ void FestHeroPinsDerived()
 	// One of the edition's satellites (a satellite has no series, SPEC §2.3.4: Festival::Satellites lists them, as the Ignite floor reads
 	// its rows).
 	HaveSat = !Feign->Satellites.empty() && FestInstanceWorld(*Feign, Feign->Satellites.front(), Sat) && Ig.TemplateOf(Sat).Fmt == ss::net::Format::Satellite;
-	if (Numbered.size() < 3 || !HaveWeekly || !HaveBust || !HaveSat)
+	// The silver pin: one cash and no win in a third edition, the first after FEIGN 2026 in fest::All() (calendar order) with a numbered
+	// event of its series in its days.
+	const ss::fest::Festival* Third = nullptr;
+	ss::net::EventInstance Cash;
+	bool PastFeign = false;
+	for (const ss::fest::Festival& F : ss::fest::All())
 	{
-		Expect(false, "FestHeroPinsDerived: three RCOP 2026 numbered events, a weekly, a FEIGN 2026 event and one of its satellites (" +
+		if (Third)
+		{
+			break;
+		}
+		if (&F == Feign)
+		{
+			PastFeign = true;
+			continue;
+		}
+		if (!PastFeign || &F == Rcop || F.SeriesId.empty())
+		{
+			continue;
+		}
+		const ss::net::Network& N = ss::net::Site(F.Site);
+		for (const ss::net::EventInstance& E : N.Window(FestAtWorld(F.FirstDay), FestAtWorld(F.LastDay + 1)))
+		{
+			const ss::net::EventTemplate& T = N.TemplateOf(E);
+			if (T.Series == F.SeriesId && T.Fmt != ss::net::Format::Satellite && T.Id != F.MainId && E.Entries >= 50)
+			{
+				Third = &F;
+				Cash = E;
+				break;
+			}
+		}
+	}
+	if (Numbered.size() < 3 || !HaveWeekly || !HaveBust || !HaveSat || !Third)
+	{
+		Expect(false, "FestHeroPinsDerived: three RCOP 2026 numbered events, a weekly, a FEIGN 2026 event, one of its satellites and a later edition's event (" +
 						  std::to_string(Numbered.size()) + " numbered, weekly " + (HaveWeekly ? "yes" : "no") + ", event " + (HaveBust ? "yes" : "no") + ", satellite " +
-						  (HaveSat ? "yes" : "no") + ")");
+						  (HaveSat ? "yes" : "no") + ", later edition " + (Third ? "yes" : "no") + ")");
 		return;
 	}
 	const std::string Lines = FestHeroResultLineWorld(Numbered[0].Id, 1, 150000) + FestHeroResultLineWorld(Numbered[1].Id, 30, 2400) +
 							  FestHeroResultLineWorld(Numbered[2].Id, 900, 0) + FestHeroResultLineWorld(Bust.Id, 700, 0) + FestHeroResultLineWorld(Sat.Id, 1, 11000) +
-							  FestHeroResultLineWorld(Weekly.Id, 1, 50000);
+							  FestHeroResultLineWorld(Weekly.Id, 1, 50000) + FestHeroResultLineWorld(Cash.Id, 12, 3100);
 	world::World W;
 	FestLoadWorld(W, FestTextWorld(FestMidWorld()) + Lines);
 	const std::vector<world::HeroFestPin> Pins = world::HeroFestPins(W);
-	const bool Two = Pins.size() == 2 && Pins[0].Key == "rcop" && Pins[1].Key == Feign->SeriesId;
-	const bool Gold = Two && Pins[0].Grade == 3 && Pins[0].Events == 3 && Pins[0].Cashes == 2 && Pins[0].Wins == 1 && Pins[0].BestPlace == 1 && Pins[0].BestEntries == Numbered[0].Entries;
-	const bool Outline = Two && Pins[1].Grade == 1 && Pins[1].Events == 1 && Pins[1].Cashes == 0 && Pins[1].Wins == 0 && Pins[1].BestPlace == 700 && Pins[1].BestEntries == Bust.Entries;
-	Expect(Gold && Outline, "FestHeroPinsDerived: RCOP 2026 gold (3 events, 2 cashes, 1 win, best 1st of " + std::to_string(Numbered[0].Entries) +
-								") and FEIGN 2026 outline (its satellite win and a weekly never count): " + std::to_string(Pins.size()) + " pin(s)" +
-								(Pins.empty() ? std::string() : ", the first " + Pins[0].Key + " grade " + std::to_string(Pins[0].Grade) + " events " + std::to_string(Pins[0].Events)) +
-								(Pins.size() < 2 ? std::string() : ", the second grade " + std::to_string(Pins[1].Grade) + " events " + std::to_string(Pins[1].Events)));
+	const bool Three = Pins.size() == 3 && Pins[0].Key == "rcop" && Pins[1].Key == Feign->SeriesId && Pins[2].Key == Third->SeriesId;
+	const bool Gold = Three && Pins[0].Grade == 3 && Pins[0].Events == 3 && Pins[0].Cashes == 2 && Pins[0].Wins == 1 && Pins[0].BestPlace == 1 && Pins[0].BestEntries == Numbered[0].Entries;
+	const bool Outline = Three && Pins[1].Grade == 1 && Pins[1].Events == 1 && Pins[1].Cashes == 0 && Pins[1].Wins == 0 && Pins[1].BestPlace == 700 && Pins[1].BestEntries == Bust.Entries;
+	const bool Silver = Three && Pins[2].Grade == 2 && Pins[2].Events == 1 && Pins[2].Cashes == 1 && Pins[2].Wins == 0 && Pins[2].BestPlace == 12 && Pins[2].BestEntries == Cash.Entries;
+	Expect(Gold && Outline && Silver, "FestHeroPinsDerived: RCOP 2026 gold (3 events, 2 cashes, 1 win, best 1st of " + std::to_string(Numbered[0].Entries) +
+										  "), FEIGN 2026 outline (its satellite win and a weekly never count) and " + Third->SeriesId + " silver (1 cash, no win, best 12th of " +
+										  std::to_string(Cash.Entries) + "): " + std::to_string(Pins.size()) + " pin(s)" +
+										  (Pins.empty() ? std::string() : ", the first " + Pins[0].Key + " grade " + std::to_string(Pins[0].Grade) + " events " + std::to_string(Pins[0].Events)) +
+										  (Pins.size() < 2 ? std::string() : ", the second grade " + std::to_string(Pins[1].Grade) + " events " + std::to_string(Pins[1].Events)) +
+										  (Pins.size() < 3 ? std::string() : ", the third " + Pins[2].Key + " grade " + std::to_string(Pins[2].Grade) + " cashes " + std::to_string(Pins[2].Cashes)));
 	const std::vector<world::HeroFestResult> Rows = world::HeroFestResults(W, "rcop");
 	bool Newest = Rows.size() == 3 && Numbered[0].Start <= Numbered[1].Start && Numbered[1].Start <= Numbered[2].Start;
 	for (size_t K = 0; Newest && K < Rows.size(); ++K)
@@ -2158,8 +2195,20 @@ void FestHeroPinsDerived()
 		const size_t I = 2 - K; // Numbered is in start order
 		Newest = Rows[K].EventId == Numbered[I].Id && Rows[K].Entries == Numbered[I].Entries && Rows[K].Place == (I == 0 ? 1 : I == 1 ? 30 : 900);
 	}
-	Expect(Newest && world::HeroFestResults(W, "ring27").empty(), "FestHeroPinsDerived: HeroFestResults lists RCOP 2026's three results newest first with their fields (" +
-																	  std::to_string(Rows.size()) + " rows)");
+	// The silver edition's one row; an edition the hero never played has none.
+	const std::vector<world::HeroFestResult> CashRows = world::HeroFestResults(W, Third->SeriesId);
+	const bool CashRow = CashRows.size() == 1 && CashRows[0].EventId == Cash.Id && CashRows[0].Place == 12 && CashRows[0].Prize == 3100 && CashRows[0].Entries == Cash.Entries;
+	std::string Unplayed;
+	for (const ss::fest::Festival& F : ss::fest::All())
+	{
+		if (Unplayed.empty() && &F != Rcop && &F != Feign && &F != Third && !F.SeriesId.empty())
+		{
+			Unplayed = F.SeriesId;
+		}
+	}
+	Expect(Newest && CashRow && !Unplayed.empty() && world::HeroFestResults(W, Unplayed).empty(),
+		"FestHeroPinsDerived: HeroFestResults lists RCOP 2026's three results newest first with their fields (" + std::to_string(Rows.size()) + " rows), " +
+			Third->SeriesId + "'s one cash (" + std::to_string(CashRows.size()) + " rows) and none for " + Unplayed);
 	// The budget: 5,000 planted results (RiverLine's from RCOP 2026's first day: its festival events and the weeklies), one rebuild timed on
 	// each world copy.
 	std::string Many;
