@@ -2467,6 +2467,19 @@ void TableDrawLook(TakePageLook& P, LaptopLook& Lap, bool Emit = true)
 	OnCanvasLook([&](ss::ui::Canvas& C) { P.Marked = C.IsCached(festart::festart_detail::FestFeltMarkKey(festart::LookOf(P.Look), Size)); }, 1.0f);
 }
 
+/** The laptop's ground: the top colour of the first fill RiverLine::Draw makes (its Bg2 over Bg gradient). */
+uint32_t GroundTopLook(const ss::ui::DrawList& L)
+{
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Triangles && Cmd.VertexCount > 0)
+		{
+			return RgbLook(L.Vertices[Cmd.VertexStart].Col);
+		}
+	}
+	return 0;
+}
+
 /** Text runs and drawn colours that are a sponsor's (name, short name, patch or brand colours) inside R. */
 int SponsorMarksLook(const ss::ui::DrawList& L, const ss::ui::Rect& R)
 {
@@ -2735,6 +2748,25 @@ TakeoverLook TakeoverPagesLook()
 		}
 		Clock(Tb);
 		T.Pages.push_back(std::move(Tb));
+		// The laptop's ground (RiverLine::Draw's first fill): RCOP's Bg2 behind the client, RiverLine's own behind another app (the
+		// Bank): the festival dresses the poker client only; the other apps stay outside the scope.
+		const ss::ui::Skin RlDay = ss::ui::Skin::FromHex(ss::net::Def(SiteId::RiverLine).Palette);
+		uint32_t DayBg2 = 0, RcopBg2 = 0;
+		{
+			const ss::ui::SkinScope In(RlDay);
+			DayBg2 = RgbLook(ss::ui::pal::Bg2);
+		}
+		{
+			const ss::ui::SkinScope In(festart::Dressed(RlDay, festart::LookOf(Brand::Rcop)));
+			RcopBg2 = RgbLook(ss::ui::pal::Bg2);
+		}
+		Lap.Open(Page::Lobby);
+		const uint32_t ClientGround = GroundTopLook(Lap.Settled());
+		Lap.RL.OpenApp(ss::ui::RiverLine::App::Bank, Lap.Now);
+		const uint32_t OtherGround = GroundTopLook(Lap.Settled());
+		std::printf("  takeover ground: %06x behind the client, %06x behind the Bank (RiverLine's Bg2 %06x, RCOP's %06x)\n", ClientGround, OtherGround, DayBg2, RcopBg2);
+		ExpectLook(DayBg2 != RcopBg2 && ClientGround == RcopBg2 && OtherGround == DayBg2,
+			"FestSkinRule: during RCOP the laptop's ground is RCOP's behind the client and RiverLine's own behind another app (the Bank)");
 	}
 	// Ignite: FEIGN's first event; Afterburner at 02:00 the next night; the next event's table.
 	if (FestEventLook(*Feign, Feign->FirstDay * 1440.0, E, World))

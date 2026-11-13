@@ -1313,7 +1313,9 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 	// and the other apps stay outside the scope.
 	const net::SiteId Wears = AppShown == App::RiverLine ? rlsites_detail::SitesClient(*this, S) : net::SiteId::RiverLine;
 	{
-		const SkinScope Ground(rlsites_detail::SitesSkin(Wears, World));
+		// Update 4 G1 FL-4 (§2.7.3): a festival dresses the poker client; behind the other apps the ground keeps RiverLine's day
+		// palette (pal's values), as before the takeover.
+		const SkinScope Ground(AppShown == App::RiverLine ? rlsites_detail::SitesSkin(Wears, World) : Skin::FromHex(net::Def(net::SiteId::RiverLine).Palette));
 		C->FillRect({0.0f, 0.0f, RlW, RlH}, Paint::Linear({0.0f, 0.0f}, {0.0f, RlH}, pal::Bg2, pal::Bg));
 	}
 	// While the clock races (a shift, a run, sleep) or a result is up, the screen underneath takes no input.
