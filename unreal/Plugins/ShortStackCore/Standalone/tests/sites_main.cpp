@@ -53,6 +53,7 @@
 #include "ShortStack/AI/View.h"
 #include "ShortStack/Cards.h"
 #include "ShortStack/Game/Autoplay.h"
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/SiteShow.h"
 #include "ShortStack/Hand.h"
 #include "ShortStack/Rng.h"
@@ -276,11 +277,12 @@ std::string SitesHex(uint64_t H)
 }
 
 /** The FNV hash RiverLinePinned takes of a network's first Count templates (ids, series, tickets, buy-in, FeeOf, guarantee, field
- *  and shape), shared with the rival prefixes' pins (Update 4 Phase A) so every pin hashes the same fields. */
-uint64_t SitesTemplatesFnv(const net::Network& N, size_t Count)
+ *  and shape), shared with the rival prefixes' pins (Update 4 Phase A) so every pin hashes the same fields. Update 4 G1 (FN-4a): From
+ *  starts the walk later (RiverLineFestivalPinned's appended block, from index 8,453). */
+uint64_t SitesTemplatesFnv(const net::Network& N, size_t Count, size_t From = 0)
 {
 	uint64_t Templates = 1469598103934665603ull;
-	for (size_t I = 0; I < Count && I < N.Templates().size(); ++I)
+	for (size_t I = From; I < Count && I < N.Templates().size(); ++I)
 	{
 		const net::EventTemplate& T = N.Templates()[I];
 		Templates = SitesFnv(Templates, T.Id + "|" + T.Series + "|" + T.Ticket + "|" + std::to_string(T.BuyInCents) + "|" + std::to_string(net::FeeOf(T.BuyInCents)) + "|" +
@@ -351,9 +353,33 @@ void RiverLinePinned()
  * Update 4 (SPEC v1.7 §2.2.4, §6 PA-7): RiverLine's appended templates, from index 8,453 on (G1's 84 satellites into Ring Rush's
  * and the Championship Online's Mains; Summer Slam's 42 at G3) and their instances over days -14 to 1,095, with RiverLinePinned's
  * fields. Empty in Phase A, when nothing is appended: F-net writes its constants at G1 (84 templates).
+ * G1, FN-4a (F-net; PLAN_FNET Q15): the 84 templates hash with SitesTemplatesFnv's fields, and their instances (one-offs: one each)
+ * are walked template by template through Network::Next, not whole-day Windows, and hash as RiverLinePinned's do (id, template,
+ * seed, entries, pool); the editions 2027-2029 fall inside day 1,095. Planted: the Mega's guarantee at 9 seats.
  */
 void RiverLineFestivalPinned()
 {
+	const net::Network& N = net::Shared();
+	const size_t Total = N.Templates().size();
+	const uint64_t Templates = SitesTemplatesFnv(N, Total, static_cast<size_t>(SitesRiverLinePrefix));
+	uint64_t Instances = 1469598103934665603ull;
+	int Count = 0;
+	for (size_t I = static_cast<size_t>(SitesRiverLinePrefix); I < Total; ++I)
+	{
+		double From = -14.0 * 1440.0;
+		net::EventInstance E;
+		while (N.Next(N.Templates()[I].Id, From, E) && E.Start < 1096.0 * 1440.0)
+		{
+			Instances = SitesFnv(Instances, E.Id + "|" + std::to_string(E.Template) + "|" + std::to_string(E.Seed) + "|" + std::to_string(E.Entries) + "|" + std::to_string(E.Pool) + "\n");
+			++Count;
+			From = E.Start + 1.0;
+		}
+	}
+	Expect(Total == 8537 && Templates == 0xd958e5e6a1fc86ccull,
+		"RiverLine's 84 appended templates (G1's satellites into Ring Rush's and the Championship Online's Mains) are G1's: " +
+			std::to_string(Total - static_cast<size_t>(SitesRiverLinePrefix)) + " " + SitesHex(Templates));
+	Expect(Count == 18 && Instances == 0x76b9544da58b29d1ull,
+		"their " + std::to_string(Count) + " instances over days -14 to 1,095 (ids, seeds, entries, pools) are G1's: " + SitesHex(Instances));
 }
 
 /** Update 4 (SPEC v1.7 §2.15.1, §6 PA-7): the rivals' templates before G1's festivals, taken on Phase A's tree (A-1). */
@@ -1227,7 +1253,10 @@ void RealSchedules()
 		int Sundays;
 		size_t TemplatesLo, TemplatesHi;
 	};
-	const Want Wants[] = {{net::SiteId::Ignite, 18, 110, 2200, 1, 650, 900}, {net::SiteId::RunItTwice, 22, 330, 21500, 3, 1400, 1650}};
+	// Update 4 G1 (SPEC v1.7 §2.3.4, §8.4; F-net): the template bands grow with the festivals BuildFestivals appends. FN-2b's final
+	// bands, the six festivals in: Ignite 2,100-2,300 (2,198 = 783 + FEIGN's 435 + PUSH's 322 + PENNANT's 658), RunItTwice 2,400-2,600
+	// (2,487 = 1,521 + WRIT's 196 + GRIT's 238 + REIGN's 532).
+	const Want Wants[] = {{net::SiteId::Ignite, 18, 110, 2200, 1, 2100, 2300}, {net::SiteId::RunItTwice, 22, 330, 21500, 3, 2400, 2600}};
 	std::set<std::string> Every;
 	for (const net::EventTemplate& T : net::Shared().Templates())
 	{
@@ -1335,8 +1364,10 @@ void RealSchedules()
 			ss::world::DayOn(2027, 8, 1) <= Aug->FirstDay && Aug->FirstDay < ss::world::DayOn(2027, 9, 1) && !Ig.FindSeries("ignite.wildaug26"),
 		"Wildfire in February and August from 2027 (after Ignite opens), 24 events each");
 	// (Review.) A rival series event costs a standard buy-in, as RiverLine's series do ($5.50, $11, $22, $55, $109...), never
-	// a $67.90 or a $118.20.
-	static const Chips Standard[] = {110, 220, 330, 440, 550, 770, 1100, 1650, 2200, 2750, 3300, 4400, 5500, 8250, 10900, 16200, 21500, 32000, 53000};
+	// a $67.90 or a $118.20. Update 4 G1 (SPEC v1.7 §2.3.2, §8.4; F-net, FN-3 and FN-2b): REIGN's Main ($2,100) and High Roller ($5,250)
+	// and WRIT's ladder and Main ($1,050; its $215-$2,100 rungs), prices RunItTwice already runs.
+	static const Chips Standard[] = {110, 220, 330, 440, 550, 770, 1100, 1650, 2200, 2750, 3300, 4400, 5500, 8250, 10900, 16200, 21500, 32000, 53000, 105000, 210000,
+		525000};
 	bool Priced = true;
 	std::set<Chips> Seen;
 	for (const net::Network* Nw : {&Ig, &Rt})
@@ -2617,6 +2648,41 @@ void SoftBound(int Count)
 	Expect(IgFee == 61 && Micro0 > 0.0 && Soft0 + Ceiling <= 1.5 * Micro0 && Soft0 + Window <= 1.5 * Micro0,
 		"the soft bound with promotional EV: Ignite's ROI " + SitesNum(100.0 * Soft0) + "% plus the Governor's most (50%, " + SitesNum(100.0 * Ceiling) +
 			" points; 75% in the welcome window, " + SitesNum(100.0 * Window) + ") is at most 1.5x RiverLine's " + SitesNum(100.0 * Micro0) + "%");
+	// Update 4 G1 (SPEC v1.7 §2.4.2, §2.15.3, the lead's P-3; F-net, FN-5; PLAN_FNET Q13 and its Corrections item 10): the bound with
+	// the juice on top. PENNANT's Main (Ignite's championship: $10,000 added on a 1.0x guarantee) as an entrant sees it, from its
+	// instances 2027-2040 as the network draws them: the site money in its pool (E.Pool less what the field put in: the added money
+	// and any overlay paid) over the entries' buy-ins, averaged over the editions. Counted as if every $5.50 sit-and-go carried it
+	// (an upper bound by construction: it is once a year), on top of the Governor's 50%: asserted at most 1.5x RiverLine's; the
+	// welcome window's 75% beside it is printed only.
+	double PennantEv = 0.0;
+	int Editions = 0;
+	for (const ss::fest::Festival& F : ss::fest::All())
+	{
+		if (F.Which != ss::fest::Brand::Pennant || F.Year < 2027 || F.Year > 2040)
+		{
+			continue;
+		}
+		const net::Network& Ig = net::Site(F.Site);
+		net::EventInstance E;
+		if (!Ig.Next(F.MainId, F.MainStart - 1.0, E))
+		{
+			continue;
+		}
+		const net::EventTemplate& T = Ig.TemplateOf(E);
+		const Chips Each = static_cast<Chips>(std::llround(static_cast<double>(T.BuyInCents) * Ig.Definition().Rake.PrizeShare(T)));
+		PennantEv += static_cast<double>(E.Pool - Each * static_cast<Chips>(E.Entries)) / (static_cast<double>(T.BuyInCents) * static_cast<double>(std::max(1, E.Entries)));
+		++Editions;
+	}
+	PennantEv /= std::max(1, Editions);
+	std::printf("soft bound with PENNANT's Main: its entrant EV over %d editions (2027-2040; the added money and the overlay paid over the entries' buy-ins) %+.1f%%; "
+				"Ignite %+.1f%% + the Governor's 50%% + PENNANT's = %+.1f%% (ratio %.2f), with the welcome window's 75%% %+.1f%% (%.2f, printed only), against RiverLine's %+.1f%%\n",
+		Editions, 100.0 * PennantEv, 100.0 * Soft0, 100.0 * (Soft0 + Ceiling + PennantEv), Micro0 > 0.0 ? (Soft0 + Ceiling + PennantEv) / Micro0 : 0.0,
+		100.0 * (Soft0 + Window + PennantEv), Micro0 > 0.0 ? (Soft0 + Window + PennantEv) / Micro0 : 0.0, 100.0 * Micro0);
+	Expect(Editions == 14 && PennantEv > 0.0 && Micro0 > 0.0 && Soft0 + Ceiling + PennantEv <= 1.5 * Micro0,
+		"the soft bound with PENNANT's Main: Ignite's ROI " + SitesNum(100.0 * Soft0) + "% plus the Governor's 50% (" + SitesNum(100.0 * Ceiling) + " points) and PENNANT "
+			"Main's entrant EV (" + SitesNum(100.0 * PennantEv) + " points over " + std::to_string(Editions) + " editions) is at most 1.5x RiverLine's " + SitesNum(100.0 * Micro0) + "%");
+	Expect(std::fabs(PennantEv - 0.141) <= 0.02, "PENNANT Main's entrant EV from its 2027-2040 instances (" + SitesNum(100.0 * PennantEv) +
+													  "%) is SPEC §2.4.2's +14.1% within 2 points: the line carries the Main's added money once");
 }
 
 void SitesCopy()
@@ -2625,6 +2691,11 @@ void SitesCopy()
 	Vars.insert({{"Site", "Ignite"}, {"Month", "November"}, {"Tier", "Gold"}, {"Rate", "14%"}, {"Rake", "$212.40"}, {"Released", "$35.00"},
 		{"Left", "$65.00"}, {"Min", "$10.00"}, {"Fee", "$1.50"}, {"Why", "A series title gets noticed around here."}, {"Money", "$197.00 is on its way from Ignite (Mon to Wed)."},
 		{"Gtd", "$25K"}, {"Entries", "410"}, {"Events", "40"}, {"Days", "17"}, {"Series", "RunItTwice Open 2026"}, {"Buyin", "$530"}, {"Window", "Mon to Wed"}, {"Method", "card"}});
+	// Update 4 G1 (SPEC v1.7 §2.11; F-world's fworld_to_fnet_1): the variables of the festival rows in the copy table (News and
+	// headlines, the Pass's letters, the crown letter, the step refund's ledger line), at realistic lengths (PENNANT I's announcement).
+	Vars.insert({{"Festival", "PENNANT"}, {"Date", "Mar 30"}, {"MainBuyIn", "$215"}, {"Added", "$10,000"}, {"MicroBuyIn", "$2.20"}, {"MiniBuyIn", "$22"},
+		{"Step1", "$1.10"}, {"MainDate", "Apr 11"}, {"Nights", "14"}, {"Show1", "7 PM"}, {"Show2", "10 PM"}, {"Prize", "$41,280"}, {"Trophy", "The Gold Pennant"},
+		{"Points", "1,284"}, {"Cashes", "9"}, {"Year", "2027"}, {"K", "2"}});
 	std::vector<std::pair<std::string, std::string>> Sentences;
 	for (const std::string& S : site::Inventory())
 	{
@@ -2661,7 +2732,8 @@ void SitesCopy()
 	Expect(Silent, "the sites' copy never mentions AI, bots or autoplay");
 	// The trademark screen over the sites, their reps, series, events, promotions and methods: no real site, wallet, platform,
 	// format or product (tests/Trademarks.h, both tiers, whole words), none of the ten closed sites the world already tells of
-	// and no drink brand (the screen's own list, matched anywhere as before).
+	// and no drink brand (the screen's own list, matched anywhere as before). Update 4 G1 (SPEC v1.7 §2.15.3; F-net, FN-4b): a
+	// series' Title too (SeriesInfo::Title: PUSH's, WRIT's and GRIT's full titles, on the hub banner and the strip's popover).
 	const char* Real[] = {"northpot", "bluffharbor", "aceline", "chipcity", "felt republic", "pocketrocket", "riverbend", "saltwater poker", "cardroom 88", "tiltproof",
 		"monster", "red bull", "rockstar"};
 	std::vector<std::string> Names;
@@ -2680,6 +2752,10 @@ void SitesCopy()
 		for (const net::SeriesInfo& Sr : net::Site(S).Series())
 		{
 			Names.push_back(Sr.Name + " " + Sr.Tagline);
+			if (!Sr.Title.empty())
+			{
+				Names.push_back(Sr.Title);
+			}
 		}
 	}
 	for (const site::TierInfo& T : site::SecondRunTiers())

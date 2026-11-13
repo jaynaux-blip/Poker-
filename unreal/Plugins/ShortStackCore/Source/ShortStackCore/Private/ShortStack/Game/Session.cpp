@@ -40,6 +40,14 @@
 
 namespace ss
 {
+namespace fest
+{
+namespace fest_text_detail
+{
+const char* FestText(const std::string& Key); // G/SessionFest.cpp: the festival texts' one table (SPEC v1.7 §2.11), by key
+} // namespace fest_text_detail
+} // namespace fest
+
 namespace session_detail
 {
 const uint32_t Gold = 0xf2c14e;
@@ -3746,7 +3754,9 @@ void Session::ShowResults()
 	if (SeriesEvent && BustPlace == 1)
 	{
 		StoryText("mm-title", "Dee", "Your name is on the Micro Madness leaderboard. A TITLE. The whole laundromat is refreshing the page.");
-		StoryText("mm-title-rival", RivalName, "gg on the title. enjoy it. the RCOP satellites start at $2.20, see you on the steps");
+		// Update 4 (SPEC v1.7 §2.11 T12): the line comes from the festival texts' table (fest::TextInventory lists it), its {Step1} the
+		// typed $2.20 it always said until §2.2.2's fill reads the RCOP ladder's first step.
+		StoryText("mm-title-rival", RivalName, site::FillCopy(fest::fest_text_detail::FestText("T12"), {{"Step1", "$2.20"}}));
 	}
 	else if (SeriesEvent && BustPlace <= 9)
 	{
@@ -6281,7 +6291,7 @@ void Session::CheckUnlocks()
 		}
 	};
 	Open("bounty", Cashes > 0, "New on your account: bounty tournaments. Progressive knockouts and mystery bounties, every head pays.");
-	Open("satellite", Finals > 0, "New on your account: satellites. Win your way up the steps to the RCOP Main Event.");
+	Open("satellite", Finals > 0, fest::fest_text_detail::FestText("T13")); // §2.11 T13, from the festival texts' table
 	Open("sixmax", Wins > 0, "New on your account: six-max tournaments. Fewer seats, more action.");
 	if (Cashes > 0)
 	{

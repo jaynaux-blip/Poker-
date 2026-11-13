@@ -1963,21 +1963,29 @@ void LeagueScoring(world::World& Base, uint32_t Seed, std::string& DecemberText)
 		Fresh = Fresh && Ids.insert(M.Npc).second && Room.Get(M.Npc) && M.Days == 0 && M.Best[0].second == 0 && M.TodayKey == -1;
 	}
 	Check(Fresh, "league: a new month's group starts everyone at nothing: at most 19, each once, only people the world has");
-	// January at a pace of 1: the member's second entry of a day doesn't count.
+	// January at a pace of 1: the member's second entry of a day doesn't count. The member is the first of the group the world has in
+	// no RunItTwice event on Jan 5-7 (Update 4 G1: FEIGN I, from day 56, moves the world's December and January, so December's member
+	// can be planned into one and count a second League day).
 	const int Jan6 = Jan1 + 5;
 	Room.AdvanceTo((Jan6 - 1) * Day + 720.0);
+	const std::set<int> JanBusy = LeagueBusy(Room, (Jan6 - 1) * Day, (Jan6 + 1) * Day + 360.0);
+	int Pacer = -1;
+	for (const int Id : Roster)
+	{
+		Pacer = Pacer < 0 && JanBusy.count(Id) == 0 && world::LeagueMemberOf(*Room.League(Rit), Id) ? Id : Pacer;
+	}
 	std::vector<net::EventInstance> Two(2);
 	const bool Pair = LeagueEvent("runittwice.the-sweat", Jan6 * Day + 360.0, (Jan6 + 1) * Day, Two[0]) && LeagueEvent("runittwice.encore-pko", Jan6 * Day + 360.0, (Jan6 + 1) * Day, Two[1]) &&
-		LeagueBusy(Room, (Jan6 - 1) * Day, (Jan6 + 1) * Day + 360.0).count(Roster[0]) == 0 && !Room.RegisteredNow(Two[0].Id).empty() && !Room.RegisteredNow(Two[1].Id).empty();
+		Pacer >= 0 && !Room.RegisteredNow(Two[0].Id).empty() && !Room.RegisteredNow(Two[1].Id).empty();
 	if (Pair)
 	{
-		Room.KnownPlaces(Two[0].Id, {{Roster[0], 1}});
-		Room.KnownPlaces(Two[1].Id, {{Roster[0], 1}});
+		Room.KnownPlaces(Two[0].Id, {{Pacer, 1}});
+		Room.KnownPlaces(Two[1].Id, {{Pacer, 1}});
 	}
-	const world::LeagueMember* Unpaced = world::LeagueMemberOf(*Room.League(Rit), Roster[0]);
+	const world::LeagueMember* Unpaced = world::LeagueMemberOf(*Room.League(Rit), Pacer);
 	const int DaysBefore = Unpaced ? Unpaced->Days : -1;
 	Room.AdvanceTo((Jan6 + 1) * Day + 300.0);
-	const world::LeagueMember* Paced = world::LeagueMemberOf(*Room.League(Rit), Roster[0]);
+	const world::LeagueMember* Paced = world::LeagueMemberOf(*Room.League(Rit), Pacer);
 	Check(Pair && Paced && Paced->TodayCount == (Live ? 1 : 0) && Paced->Days == DaysBefore + (Live ? 1 : 0) && (!Live || Paced->TodayKey == Jan6),
 		"league: at the group's pace of 1 only a day's first entry counts");
 	Room.SetLeagueRoster(Rit, December.MonthKey + 1, world::LeaguePack(2, 0), {});

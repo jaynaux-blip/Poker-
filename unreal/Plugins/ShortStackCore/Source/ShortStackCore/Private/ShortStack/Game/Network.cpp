@@ -2,6 +2,7 @@
 
 #include "SitesDetail.h"
 #include "ShortStack/Game/Chat.h"
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Handles.h"
 #include "ShortStack/Game/Life.h"
@@ -15,8 +16,11 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <memory>
 #include <set>
+#include <utility>
+#include <vector>
 
 namespace ss
 {
@@ -96,6 +100,135 @@ NetSiteRegistry& NetSites()
 {
 	static NetSiteRegistry Registry;
 	return Registry;
+}
+
+/**
+ * Update 4 G1 (SPEC v1.7 §2.3.2; F-net, FN-6): the first run of one-off T on its day starting at or after Floor (minutes into the
+ * day; -1: none), over the runs Instances lists for it: StartMinute alone when it doesn't repeat; else, when its last start wraps
+ * past midnight, the early-morning runs first (StartMinute - 1440 by EveryMinutes to LastMinute, from 00:00), then StartMinute by
+ * EveryMinutes to LastMinute before midnight (the runs past midnight would fall on the next day, where a one-off has no list).
+ */
+int NetNextForRun(const EventTemplate& T, double DayStart, double Floor)
+{
+	if (T.EveryMinutes <= 0)
+	{
+		return DayStart + static_cast<double>(T.StartMinute) >= Floor ? T.StartMinute : -1;
+	}
+	if (T.LastMinute < T.StartMinute)
+	{
+		for (int M = T.StartMinute - 1440; M <= T.LastMinute; M += T.EveryMinutes)
+		{
+			if (M >= 0 && DayStart + static_cast<double>(M) >= Floor)
+			{
+				return M;
+			}
+		}
+	}
+	const int Last = std::min(1439, T.LastMinute >= T.StartMinute ? T.LastMinute : T.LastMinute + 1440);
+	for (int M = T.StartMinute; M <= Last; M += T.EveryMinutes)
+	{
+		if (DayStart + static_cast<double>(M) >= Floor)
+		{
+			return M;
+		}
+	}
+	return -1;
+}
+
+/**
+ * Update 4 G1 (SPEC v1.7 §2.4.5; F-net, FN-7): every run scheduled on Day as (template index, start), in the order Instances made
+ * them before its sort: Day's weekly templates, then its one-offs (a rival's launch week: a guaranteed daily's one-off that day keeps
+ * the daily out), a repeating template's runs through the night (a last start before the first wraps past midnight, and the early
+ * hours hold yesterday's run). Instances makes its cached list from them; FillDayMax walks them through Make without the cache
+ * (fest::RecordOf's day maxima), so the two read one schedule.
+ */
+std::vector<std::pair<int, double>> NetDaySlots(const std::vector<EventTemplate>& Temps, const std::vector<int>& Recurring, const std::map<int, std::vector<int>>& OnDay,
+	const std::map<std::string, int>& TempIndex, SiteId Site, int Day)
+{
+	std::vector<std::pair<int, double>> Slots;
+	const int Wd = Weekday(Day);
+	std::vector<int> Today = Recurring;
+	const auto One = OnDay.find(Day);
+	// A rival's launch week (update 2 §5.3): a guaranteed daily runs as its one-off that day ("ignite.spark-jackpot-launch3",
+	// the guarantee raised), so the daily itself stays out. RiverLine has none.
+	std::set<int> Standing;
+	if (One != OnDay.end())
+	{
+		Today.insert(Today.end(), One->second.begin(), One->second.end());
+		for (int K : One->second)
+		{
+			const std::string Base = Site == SiteId::RiverLine ? std::string() : netsites_detail::NetSitesLaunchBase(Temps[static_cast<size_t>(K)].Id);
+			const auto It = Base.empty() ? TempIndex.end() : TempIndex.find(Base);
+			if (It != TempIndex.end())
+			{
+				Standing.insert(It->second);
+			}
+		}
+	}
+	for (int K : Today)
+	{
+		const size_t I = static_cast<size_t>(K);
+		const EventTemplate& T = Temps[I];
+		if ((T.OnlyDay == -9999 && !(T.Days & (1 << Wd))) || (!Standing.empty() && Standing.count(K) > 0))
+		{
+			continue;
+		}
+		const double DayStart = static_cast<double>(Day) * MinutesPerDay;
+		if (T.EveryMinutes > 0)
+		{
+			// Repeats run through the night: a last start before the first means it wraps past midnight.
+			const int Last = T.LastMinute >= T.StartMinute ? T.LastMinute : T.LastMinute + 1440;
+			for (int M = T.StartMinute; M <= Last && M < T.StartMinute + 1440; M += T.EveryMinutes)
+			{
+				const int InDay = M % 1440;
+				const double Start = DayStart + static_cast<double>(M >= 1440 ? InDay + 1440 : InDay);
+				if (Start < DayStart + MinutesPerDay)
+				{
+					Slots.emplace_back(K, Start);
+				}
+			}
+			if (T.LastMinute < T.StartMinute)
+			{
+				// The early-morning repeats of yesterday's run.
+				for (int M = T.StartMinute - 1440; M <= T.LastMinute; M += T.EveryMinutes)
+				{
+					if (M >= 0)
+					{
+						Slots.emplace_back(K, DayStart + static_cast<double>(M));
+					}
+				}
+			}
+		}
+		else
+		{
+			Slots.emplace_back(K, DayStart + static_cast<double>(T.StartMinute));
+		}
+	}
+	return Slots;
+}
+
+/** Update 4 G1 (SPEC v1.7 §2.11; FN-7): a festival's {Festival} in its News posts, the edition's name without its year ("PENNANT",
+ *  "Ring Rush", "The Championship Online", "RCOP": §2.11's PENNANT I sample), the brand as the posts name it. */
+std::string NetFestNewsName(const std::string& Name, int Year)
+{
+	const std::string Tail = " " + std::to_string(Year);
+	return Name.size() > Tail.size() && Name.compare(Name.size() - Tail.size(), Tail.size(), Tail) == 0 ? Name.substr(0, Name.size() - Tail.size()) : Name;
+}
+
+/** Update 4 G1 (FN-7): whole dollars, grouped ("$281,100", "$10,000"), as §2.11's announcement sample prints a guarantee. */
+std::string NetFestDollars(Chips Cents)
+{
+	return "$" + Grouped(static_cast<int64_t>(std::llround(static_cast<double>(Cents) / 100.0)));
+}
+
+/** Update 4 G1 (FN-7): a show's start as GRIT's opening night names it, "7 PM", "10 PM" ("7:30 PM" off the hour). */
+std::string NetFestShowTime(int Minute)
+{
+	const int InDay = ((Minute % 1440) + 1440) % 1440;
+	const int H = InDay / 60;
+	const int M = InDay % 60;
+	const std::string Mm = M < 10 ? "0" + std::to_string(M) : std::to_string(M);
+	return std::to_string(H % 12 == 0 ? 12 : H % 12) + (M > 0 ? ":" + Mm : std::string()) + (H < 12 ? " AM" : " PM");
 }
 } // namespace network_detail
 
@@ -326,12 +459,52 @@ HeroStats StatsFrom(const std::string& Name, const std::vector<HistoryEntry>& Hi
 
 // ------------------------------------------------------------------ the network
 
+namespace calendar_detail
+{
+/** Update 4 G1 (FN-4a): a festival guarantee in whole dollars ("$78,203,400"), cents only if it has them. */
+std::string FestRcopMoney(Chips Cents)
+{
+	return Cents % 100 == 0 ? "$" + Grouped(Cents / 100) : Money(Cents);
+}
+
+/**
+ * Update 4 G1 (SPEC v1.7 §2.2.2, the W5 fixes; F-net, FN-4a; PLAN_FNET Q12): RCOP 2026's guarantee is the sum of its 154 templates'
+ * guarantees ($78,203,400), no longer a typed $100,000,000, and its tagline prints that sum. Both RiverLine constructors call this
+ * right after BuildCalendar (BuildSeries runs before any RCOP template exists), so Network() and Network(Def(RiverLine)) stay
+ * byte-identical. A SeriesInfo field and a string: no template, instance or listing moves (U9), and SeriesInfo is in no pinned hash.
+ */
+void FestRcopGtd(const std::vector<EventTemplate>& Temps, std::vector<SeriesInfo>& AllSeries)
+{
+	Chips Gtd = 0;
+	for (const EventTemplate& T : Temps)
+	{
+		Gtd += T.Series == "rcop" ? T.GtdCents : 0;
+	}
+	for (SeriesInfo& Sr : AllSeries)
+	{
+		if (Sr.Id == "rcop")
+		{
+			Sr.GtdCents = Gtd;
+			Sr.Tagline = "The RiverLine Championship of Online Poker. " + FestRcopMoney(Gtd) + " guaranteed.";
+		}
+	}
+}
+
+/** Update 4 G1 (§2.2.2, FN-4a): the day -6 "RCOP 2026: the schedule" post's body, its figure read from RCOP 2026's GtdCents (News posts
+ *  it; fest::Inventory lists it). The rest of the body is today's. */
+std::string FestRcopPost(const SeriesInfo& Rcop)
+{
+	return "154 events. " + FestRcopMoney(Rcop.GtdCents) + " guaranteed. October 18 to November 8. Satellites run every day from $2.20.";
+}
+} // namespace calendar_detail
+
 Network::Network() : Rules(std::make_shared<const SiteDef>(Def(SiteId::RiverLine)))
 {
 	BuildPlayers();
 	BuildSeries();
 	BuildSchedule();
 	BuildCalendar();
+	calendar_detail::FestRcopGtd(Temps, AllSeries); // Update 4 G1 (FN-4a, §2.2.2): RCOP 2026's guarantee and tagline from its templates
 	Index();
 }
 
@@ -344,6 +517,7 @@ Network::Network(const SiteDef& D) : Rules(std::make_shared<const SiteDef>(D)), 
 		BuildSeries();
 		BuildSchedule();
 		BuildCalendar();
+		calendar_detail::FestRcopGtd(Temps, AllSeries); // Update 4 G1 (FN-4a, §2.2.2), as the default network's
 	}
 	else
 	{
@@ -425,10 +599,16 @@ bool Network::NextFor(const std::string& Ticket, double From, EventInstance& Out
 		{
 			continue;
 		}
-		const EventInstance E = Make(K, static_cast<double>(T.OnlyDay) * MinutesPerDay + static_cast<double>(T.StartMinute));
-		if (E.Start >= From && E.Start >= Launch)
+		// Update 4 G1 (SPEC v1.7 §2.3.2; F-net, FN-6): every run of the one-off on its day, as Instances lists them (a championship's
+		// Step 1 every 90 or 120 minutes from 12:00, its Step 2 at 14:00, 17:00, 20:00 and 23:00), not its first alone, so a step
+		// ticket held after a step's first run still finds the next and WorldSim's ExpireTickets credits no step ticket while runs
+		// remain. The order holds: the first template with a run at or after From answers, so a ticket whose events never repeat
+		// (every ticket a satellite seats outside the championships' steps; GRIT's shows take none) gets the answer it always did.
+		const double DayStart = static_cast<double>(T.OnlyDay) * MinutesPerDay;
+		const int Run = network_detail::NetNextForRun(T, DayStart, std::max(From, Launch));
+		if (Run >= 0)
 		{
-			Out = E;
+			Out = Make(K, DayStart + static_cast<double>(Run));
 			return true;
 		}
 	}
@@ -558,6 +738,13 @@ void Network::BuildPlayers()
 	}
 }
 
+namespace calendar_detail
+{
+/** Update 4 G1 (FN-1): RiverLine's series flags by plan key, one table for every year (G/NetworkSeries.cpp). History keeps a series
+ *  already over before Night One out of the festivals. */
+void FestCalDress(const char* Key, bool History, SeriesInfo& Sr);
+} // namespace calendar_detail
+
 void Network::BuildSeries()
 {
 	SeriesInfo Mm;
@@ -572,6 +759,7 @@ void Network::BuildSeries()
 	Mm.Color2 = 0x27d3c3;
 	Mm.Tagline = "Two weeks. Seventy events from 55\xC2\xA2. Everyone's a shot.";
 	Mm.MainEvent = "mm-main";
+	calendar_detail::FestCalDress("mm", false, Mm); // Update 4 G1 (FN-1): Draw 22 (§3.2.1)
 	AllSeries.push_back(Mm);
 
 	SeriesInfo Rc;
@@ -581,11 +769,13 @@ void Network::BuildSeries()
 	Rc.FirstDay = 13;
 	Rc.LastDay = 34;
 	Rc.Events = 154;
-	Rc.GtdCents = Cents(1.0e8);
 	Rc.Color = 0xf2c14e;
 	Rc.Color2 = 0x8b5cf6;
-	Rc.Tagline = "The RiverLine Championship of Online Poker. $100,000,000 guaranteed.";
+	// Update 4 G1 (FN-4a, §2.2.2): GtdCents and the tagline's " {Gtd} guaranteed." are set from the 154 templates once they exist
+	// (calendar_detail::FestRcopGtd, after BuildCalendar).
+	Rc.Tagline = "The RiverLine Championship of Online Poker.";
 	Rc.MainEvent = "rcop-main";
+	calendar_detail::FestCalDress("rcop", false, Rc); // Update 4 G1 (FN-1): RCOP 2026 is a festival (§2.1.3, §2.2.1): Draw 110, Flagship
 	AllSeries.push_back(Rc);
 
 	SeriesInfo Sl;
@@ -600,6 +790,7 @@ void Network::BuildSeries()
 	Sl.Color2 = 0xef4d5a;
 	Sl.Tagline = "The summer festival: 82 events, $30,000,000 guaranteed.";
 	Sl.MainEvent = "slam-main";
+	calendar_detail::FestCalDress("slam", true, Sl); // Update 4 G1 (FN-1): history (day -30), a series with Summer Slam's Draw
 	AllSeries.push_back(Sl);
 }
 
@@ -728,13 +919,14 @@ void Network::BuildSchedule()
 	Weekly("saturday-six", "Saturday Six-Max", 109, 150000, Format::ReEntry, "Regular", 12.0, 1500, At(19, 0), 5, false, "");
 	Weekly("millions", "RiverLine Millions", 1050, 3000000, Format::ReEntry, "Regular", 15.0, 3100, At(13, 0), 6, true,
 		"The Sunday flagship. $3,000,000 guaranteed, 15-minute levels, and the best in the world at every table.");
-	Weekly("sunday-showdown", "Sunday Showdown", 215, 1000000, Format::ReEntry, "Regular", 12.0, 5400, At(15, 0), 6, true,
-		"The people's major. $1M guaranteed every Sunday; last week 7,412 entries built a $1.47M prize pool.");
+	// Update 4 G1 (FN-4a, §2.2.2's W5 fixes): no typed past in a blurb (Sunday Showdown's), and no seat count the Mega doesn't guarantee.
+	Weekly("sunday-showdown", "Sunday Showdown", 215, 1000000, Format::ReEntry, "Regular", 12.0, 5400, At(15, 0), 6, true, "The people's major. $1M guaranteed every Sunday.");
 	Weekly("sunday-special", "Sunday Special", 54, 300000, Format::Bounty, "Regular", 12.0, 6200, At(16, 0), 6, false, "");
 	Weekly("sunday-storm", "Sunday Storm", 11, 150000, Format::ReEntry, "Regular", 10.0, 15600, At(17, 0), 6, true, "The biggest micro-stakes tournament of the week.");
 	Weekly("sunday-shr", "Super High Roller Bounty", 2100, 300000, Format::Bounty, "Regular", 15.0, 150, At(18, 0), 6, false, "");
-	Weekly("mega-rcop", "RCOP Main Mega Satellite", 109, 0, Format::Satellite, "Turbo", 8.0, 1400, At(18, 0), 5, true, "25 seats to the $5,250 RCOP Main Event guaranteed.");
-	Temps.back().Seats = "25 Main Event seats";
+	Weekly("mega-rcop", "RCOP Main Mega Satellite", 109, 0, Format::Satellite, "Turbo", 8.0, 1400, At(18, 0), 5, true,
+		"Seats to the $5,250 RCOP Main Event: one for every $5,250 in the pool.");
+	Temps.back().Seats = "RCOP Main Event seats";
 	Temps.back().SeatTicket = "rcop-main";
 	Temps.back().SeatValueCents = Cents(5250.0);
 
@@ -861,7 +1053,7 @@ void Network::BuildSchedule()
 					T.Field = 5200;
 					T.OpensHours = 24 * 40;
 					T.Featured = true;
-					T.Blurb = "The one that changes a life. $25,000,000 guaranteed; last year's champion won $4.1M.";
+					T.Blurb = "The one that changes a life. $25,000,000 guaranteed."; // Update 4 G1 (FN-4a, §2.2.2): no typed champion's prize
 				}
 				else if (Day == 33 && K == 2)
 				{
@@ -942,8 +1134,25 @@ const SeriesInfo* Network::FindSeries(const std::string& Id) const
 
 std::string Network::NameOf(const EventInstance& E) const
 {
-	// Update 4 (SPEC v1.7 §2.3.2, §6 PA-4): the template's name until G1 (GRIT's runs, F-net).
-	return TemplateOf(E).Name;
+	// Update 4 (SPEC v1.7 §2.3.2, §6 PA-4): the template's name, but for GRIT's shows (G1, FN-2a): each of its twelve show templates
+	// runs twice a night as one template (19:00 and 22:00, so §2.3.4's counts hold), and the instance's start minute names the run
+	// after the number, "GRIT 07-E: $33 Dress Circle Turbo" at 7 PM, "GRIT 07-L: ..." at 10 PM. Every other instance, RiverLine's
+	// included, reads its template's name as before. The cheap tests first: only a one-off with repeats in a series reaches the
+	// series lookup.
+	const EventTemplate& T = TemplateOf(E);
+	if (T.EveryMinutes <= 0 || T.OnlyDay == -9999 || T.Series.empty())
+	{
+		return T.Name;
+	}
+	const SeriesInfo* Show = FindSeries(T.Series);
+	const size_t Code = T.Name.find(": ");
+	if (!Show || !Show->Festival || Show->Brand != fest::BrandKey(fest::Brand::Grit) || Code == std::string::npos)
+	{
+		return T.Name;
+	}
+	const double InDay = E.Start - std::floor(E.Start / MinutesPerDay) * MinutesPerDay;
+	const char* Run = std::llround(InDay) <= static_cast<long long>(T.StartMinute) ? "-E" : "-L";
+	return T.Name.substr(0, Code) + Run + T.Name.substr(Code);
 }
 
 const SeriesInfo* Network::CurrentSeries(double Now) const
@@ -1013,64 +1222,11 @@ void Network::Instances(int Day, std::vector<EventInstance>& Out) const
 	auto Found = DayCache.find(Day);
 	if (Found == DayCache.end())
 	{
+		// The day's runs (network_detail::NetDaySlots: G1, FN-7 shares them with FillDayMax), made and kept in start order.
 		std::vector<EventInstance> List;
-		const int Wd = Weekday(Day);
-		std::vector<int> Today = Recurring;
-		const auto One = OnDay.find(Day);
-		// A rival's launch week (update 2 §5.3): a guaranteed daily runs as its one-off that day ("ignite.spark-jackpot-launch3",
-		// the guarantee raised), so the daily itself stays out. RiverLine has none.
-		std::set<int> Standing;
-		if (One != OnDay.end())
+		for (const std::pair<int, double>& Slot : NetDaySlots(Temps, Recurring, OnDay, TempIndex, NetSite, Day))
 		{
-			Today.insert(Today.end(), One->second.begin(), One->second.end());
-			for (int K : One->second)
-			{
-				const std::string Base = NetSite == SiteId::RiverLine ? std::string() : netsites_detail::NetSitesLaunchBase(Temps[static_cast<size_t>(K)].Id);
-				const auto It = Base.empty() ? TempIndex.end() : TempIndex.find(Base);
-				if (It != TempIndex.end())
-				{
-					Standing.insert(It->second);
-				}
-			}
-		}
-		for (int K : Today)
-		{
-			const size_t I = static_cast<size_t>(K);
-			const EventTemplate& T = Temps[I];
-			if ((T.OnlyDay == -9999 && !(T.Days & (1 << Wd))) || (!Standing.empty() && Standing.count(K) > 0))
-			{
-				continue;
-			}
-			const double DayStart = static_cast<double>(Day) * MinutesPerDay;
-			if (T.EveryMinutes > 0)
-			{
-				// Repeats run through the night: a last start before the first means it wraps past midnight.
-				const int Last = T.LastMinute >= T.StartMinute ? T.LastMinute : T.LastMinute + 1440;
-				for (int M = T.StartMinute; M <= Last && M < T.StartMinute + 1440; M += T.EveryMinutes)
-				{
-					const int InDay = M % 1440;
-					const double Start = DayStart + static_cast<double>(M >= 1440 ? InDay + 1440 : InDay);
-					if (Start < DayStart + MinutesPerDay)
-					{
-						List.push_back(Make(static_cast<int>(I), Start));
-					}
-				}
-				if (T.LastMinute < T.StartMinute)
-				{
-					// The early-morning repeats of yesterday's run.
-					for (int M = T.StartMinute - 1440; M <= T.LastMinute; M += T.EveryMinutes)
-					{
-						if (M >= 0)
-						{
-							List.push_back(Make(static_cast<int>(I), DayStart + static_cast<double>(M)));
-						}
-					}
-				}
-			}
-			else
-			{
-				List.push_back(Make(static_cast<int>(I), DayStart + static_cast<double>(T.StartMinute)));
-			}
+			List.push_back(Make(Slot.first, Slot.second));
 		}
 		std::sort(List.begin(), List.end(), [](const EventInstance& A, const EventInstance& B) { return A.Start < B.Start || (A.Start == B.Start && A.Id < B.Id); });
 		Found = DayCache.emplace(Day, std::move(List)).first;
@@ -1317,6 +1473,9 @@ void Network::Prewarm(double Now) const
 	// Update 4 (SPEC v1.7 §2.4.5, §6 PA-4): every site's largest fields by day, for fest::RecordOf (G/NetworkFestival.cpp; a no-op
 	// until G1, and never DayCache).
 	FillDayMax(Now);
+	// Update 4 G1 (SPEC v1.7 §2.1.2; FN-1): the festival calendar (fest::All(), built once from every site's series), made here on
+	// the game thread before any screen or desk worker reads it (update 2 §5.8's contract); every later call only reads it.
+	fest::All();
 	// With a living world, only the network's own past needs working out; a fresh start (update 2 §3.3 F7) has none, and
 	// neither has a rival (§5.8: no regulars, no past).
 	if ((Living && Living->Began() == world::Start::Blank) || People.empty())
@@ -1350,7 +1509,7 @@ LobbyEvent Network::Listing(const EventInstance& E, std::string* Lock, int Unloc
 	}
 	else
 	{
-		L.Name = T.Name;
+		L.Name = NameOf(E); // Update 4 G1 (§6 PA-4; FN-2a): GRIT's runs ("GRIT 07-L"), every other event its template's name
 		L.BuyInCents = T.BuyInCents;
 		L.BuyInLabel = BuyIn(T.BuyInCents);
 		L.Game = T.Omaha ? "PL Omaha" : T.Fmt == Format::Bounty ? "NL Hold'em PKO" : T.Fmt == Format::Satellite ? "Satellite" : "NL Hold'em";
@@ -1359,7 +1518,7 @@ LobbyEvent Network::Listing(const EventInstance& E, std::string* Lock, int Unloc
 		L.Joinable = Joinable(E, nullptr, Unlocks);
 		TournamentSpec& Sp = L.Spec;
 		Sp.Id = T.Id;
-		Sp.Name = !T.Series.empty() ? T.Name : BuyIn(T.BuyInCents) + " " + T.Name;
+		Sp.Name = !T.Series.empty() ? NameOf(E) : BuyIn(T.BuyInCents) + " " + NameOf(E);
 		Sp.BuyInCents = T.BuyInCents;
 		// The site's rake, pace and tables (update 2 §5.3, §5.8): RiverLine's are FeeOf, 36 or 42 seconds a hand, and the
 		// population by tier, exactly as before.
@@ -1894,8 +2053,11 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 		}
 		Post(DayAt(-7, 12, 0), NewsKind::Schedule, "Mystery Madness goes nightly",
 			"Every night at 10:00 PM: $10.80 to enter, $40,000 guaranteed, mystery bounties up to $10,000 in the envelopes.", "SCHEDULE");
-		Post(DayAt(-6, 10, 0), NewsKind::Series, "RCOP 2026: the schedule",
-			"154 events. $100,000,000 guaranteed. October 18 to November 8. Satellites run every day from $2.20.", "RCOP 2026");
+		// Update 4 G1 (FN-4a, §2.2.2): the schedule's figure is RCOP 2026's GtdCents (the templates' sum).
+		if (const SeriesInfo* Rcop = FindSeries("rcop"))
+		{
+			Post(DayAt(-6, 10, 0), NewsKind::Series, "RCOP 2026: the schedule", calendar_detail::FestRcopPost(*Rcop), "RCOP 2026");
+		}
 		Post(DayAt(-5, 15, 0), NewsKind::Series, "Micro Madness starts Thursday",
 			"Seventy events from 55\xC2\xA2 with $5,000,000 guaranteed. The Main Event on October 11: $11 to play for $1,000,000.", "MICRO MADNESS");
 		Post(DayAt(-1, 23, 55), NewsKind::Record, "Record night for the Sunday Showdown",
@@ -1938,7 +2100,8 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 			continue;
 		}
 		auto NameOf = [&](const Placing& P) { return P.Player == -1 ? YouName : P.Player == -2 ? P.Name : Players()[static_cast<size_t>(P.Player)].Name; };
-		const std::string EventName = !T.Series.empty() ? T.Name : BuyIn(T.BuyInCents) + " " + T.Name;
+		// Update 4 G1 (§6 PA-4; FN-2a): the instance's name (GRIT's runs), as every reader of a festival instance's name reads it.
+		const std::string EventName = !T.Series.empty() ? Network::NameOf(E) : BuyIn(T.BuyInCents) + " " + Network::NameOf(E);
 		Post(E.Start + E.Duration, W.Player == -1 ? NewsKind::Hero : NewsKind::BigWin, NameOf(W) + " wins " + EventName,
 			Grouped(E.Entries) + " entries \xC2\xB7 " + MoneyShort(E.Pool) + " prize pool. Runner-up: " + NameOf(R.FinalTable[1]) + " (" + Money(R.FinalTable[1].Prize) + ").",
 			W.Player == -1 ? "YOU" : Series ? (T.Bracelet ? "BRACELET" : T.Ring ? "RING" : FindSeries(T.Series) ? FindSeries(T.Series)->Short : std::string("SERIES")) : "BIG WIN", W.Prize, W.Player == -2 ? -1 : W.Player);
@@ -1998,7 +2161,7 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 		{
 			const EventInstance& E = *Short[K].second;
 			const EventTemplate& T = TemplateOf(E);
-			const std::string EventName = !T.Series.empty() ? T.Name : BuyIn(T.BuyInCents) + " " + T.Name;
+			const std::string EventName = !T.Series.empty() ? NameOf(E) : BuyIn(T.BuyInCents) + " " + NameOf(E); // G1: GRIT's runs (FN-2a)
 			const std::vector<std::pair<std::string, std::string>> Vars = {{"Event", EventName}, {"Amount", Dollars(Short[K].first)}, {"Entries", Grouped(E.Entries)},
 				{"Gtd", Dollars(T.GtdCents)}, {"Site", Rules->Name}};
 			// The item's figure (the card's big number, the ticker's "(…)") is the headline's whole dollars too, never "$1,889.50"
@@ -2006,9 +2169,13 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 			Post(E.Start + E.LateReg, NewsKind::Record, site::FillCopy(site::CopyText("news:overlay:title"), Vars), site::FillCopy(site::CopyText("news:overlay"), Vars), "OVERLAY",
 				static_cast<Chips>(std::llround(static_cast<double>(Short[K].first) / 100.0)) * 100);
 		}
-		// A series a week out.
+		// A series a week out. Update 4 G1 (SPEC v1.7 §2.9.2; FN-2a): never a festival, announced at T-30 instead (its posts, FN-7).
 		for (const SeriesInfo& S : AllSeries)
 		{
+			if (S.Festival)
+			{
+				continue;
+			}
 			const double Announce = (static_cast<double>(S.FirstDay) - 7.0) * MinutesPerDay + 10.0 * 60.0;
 			if (Announce < Opened || Announce > Now || Now >= static_cast<double>(S.LastDay + 1) * MinutesPerDay)
 			{
@@ -2036,6 +2203,104 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 					continue;
 				}
 				Post(It->At, NewsKind::People, Headline, Body, Tag, It->Amount, It->Npc);
+			}
+		}
+	}
+	// Update 4 G1 (SPEC v1.7 §2.9.2, §2.4.5, §2.11; F-net, FN-7): the festivals' own posts on the host's page, from the calendar and
+	// the clock (nothing saved), each while its edition is Announced and not yet over. The announcement at FirstDay - 30, 10:00 (a
+	// rival's on its launch day at 10:00 when that comes later: FEIGN I on day 28), RiverLine's in its ":rl" form and RCOP 2026's
+	// left to its two scripted posts above; a championship's with its sentence; the first-festival line only on the site's first
+	// festival in this world (FEIGN I, WRIT I), never a championship's. Opening night at FirstDay 09:00 (GRIT's in its nights form). A
+	// rival's record field when registration closes (E.Start + E.LateReg) inside the last three days, only when fest::RecordOf says
+	// so (§2.4.5: RiverLine never claims one). {Festival} is the edition's name without its year (NetFestNewsName), each date
+	// fest::DateInSentence's from the post's day, the money whole dollars (NetFestDollars) and buy-ins as the lobby prints them.
+	if (Home || !Rules->Key.empty())
+	{
+		const double FestOpened = Home ? -std::numeric_limits<double>::infinity() : netsites_detail::NetSitesLaunch(*this);
+		const int FestOpenDay = Home ? std::numeric_limits<int>::min() : DayOf(FestOpened);
+		const int FestToday = DayOf(Now);
+		const std::string FestTag = site::CopyText("tag:fest:festival");
+		// The site's first festival in this world: the first edition to open on or after its launch day (FEIGN I, WRIT I).
+		const fest::Festival* FestFirst = nullptr;
+		for (size_t K = 0; !Home && !FestFirst && K < fest::All().size(); ++K)
+		{
+			const fest::Festival& F = fest::All()[K];
+			FestFirst = F.Site == NetSite && F.FirstDay >= FestOpenDay ? &F : nullptr;
+		}
+		auto FestBuyIn = [this](const std::string& Id) {
+			const EventTemplate* T = FindTemplate(Id);
+			return BuyIn(T ? T->BuyInCents : 0);
+		};
+		for (const fest::Festival* F : fest::Festivals(FestToday, FestToday + fest::kAnnounceDays))
+		{
+			const SeriesInfo* Sr = F->Site == NetSite ? FindSeries(F->SeriesId) : nullptr;
+			const EventTemplate* Main = Sr ? FindTemplate(F->MainId) : nullptr;
+			if (!Main || F->FirstDay < FestOpenDay)
+			{
+				continue;
+			}
+			const int FestDays = F->LastDay - F->FirstDay + 1;
+			const std::string Name = NetFestNewsName(F->Name, F->Year);
+			if (F->SeriesId != "rcop")
+			{
+				const double Announce = std::max(static_cast<double>(F->FirstDay - fest::kAnnounceDays) * MinutesPerDay + 600.0,
+					Home ? -std::numeric_limits<double>::infinity() : std::max(static_cast<double>(FestOpenDay) * MinutesPerDay + 600.0, FestOpened + 2.0));
+				const int On = DayOf(Announce);
+				std::vector<std::pair<std::string, std::string>> Vars = {{"Festival", Name}, {"Site", Rules->Name}, {"Date", fest::DateInSentence(F->FirstDay, On)},
+					{"Events", std::to_string(Sr->Events)}, {"Gtd", NetFestDollars(Sr->GtdCents)}, {"MainBuyIn", BuyIn(Main->BuyInCents)},
+					{"Added", NetFestDollars(Main->AddedCents)}, {"MainDate", fest::DateInSentence(F->MainDay, On)}};
+				std::string Body = site::FillCopy(site::CopyText(Home ? "news:fest:announce:rl" : "news:fest:announce"), Vars);
+				if (!Home && fest::IsChampionship(F->Which) && F->TitleIds.size() >= 3 && !F->Satellites.empty())
+				{
+					Vars.insert(Vars.end(), {{"MicroBuyIn", FestBuyIn(F->TitleIds[2])}, {"MiniBuyIn", FestBuyIn(F->TitleIds[1])}, {"Step1", FestBuyIn(F->Satellites[0])}});
+					Body += " " + site::FillCopy(site::CopyText("news:fest:announce:champ:" + Rules->Key), Vars);
+				}
+				else if (F == FestFirst && !fest::IsChampionship(F->Which))
+				{
+					Body += " " + site::FillCopy(site::CopyText("news:fest:announce:first"), Vars);
+				}
+				Post(Announce, NewsKind::Series, site::FillCopy(site::CopyText("news:fest:announce:title"), Vars), Body, FestTag);
+			}
+			const double Opening = static_cast<double>(F->FirstDay) * MinutesPerDay + 540.0;
+			if (Opening < FestOpened)
+			{
+				continue;
+			}
+			std::vector<std::pair<std::string, std::string>> Open = {{"Festival", Name}, {"Days", std::to_string(FestDays)}, {"Nights", std::to_string(FestDays)},
+				{"Events", std::to_string(Sr->Events)}, {"Gtd", NetFestDollars(Sr->GtdCents)}, {"MainDate", fest::DateInSentence(F->MainDay, F->FirstDay)}};
+			bool Grit = false;
+			const auto Shows = F->Which == fest::Brand::Grit ? OnDay.find(F->FirstDay) : OnDay.end();
+			for (size_t K = 0; Shows != OnDay.end() && K < Shows->second.size() && !Grit; ++K)
+			{
+				const EventTemplate& T = Temps[static_cast<size_t>(Shows->second[K])];
+				if (T.Series == F->SeriesId && T.EveryMinutes > 0 && T.Fmt != Format::Satellite)
+				{
+					Open.insert(Open.end(), {{"Show1", NetFestShowTime(T.StartMinute)}, {"Show2", NetFestShowTime(T.StartMinute + T.EveryMinutes)}});
+					Grit = true;
+				}
+			}
+			Post(Opening, NewsKind::Series, site::FillCopy(site::CopyText("news:fest:open:title"), Open),
+				site::FillCopy(site::CopyText(Grit ? "news:fest:open:grit" : "news:fest:open"), Open), FestTag);
+		}
+		if (!Home)
+		{
+			for (const EventInstance& E : Window(Now - 4.0 * MinutesPerDay, Now))
+			{
+				const double At = E.Start + E.LateReg;
+				const EventTemplate& T = TemplateOf(E);
+				const SeriesInfo* Sr = At <= Now && At > Now - 3.0 * MinutesPerDay && !T.Series.empty() ? FindSeries(T.Series) : nullptr;
+				if (!Sr || !Sr->Festival)
+				{
+					continue;
+				}
+				const fest::FieldRecord Rec = fest::RecordOf(*this, E, Living);
+				if (!Rec.Ever && !Rec.Year)
+				{
+					continue;
+				}
+				const std::vector<std::pair<std::string, std::string>> Vars = {{"Event", NameOf(E)}, {"Entries", Grouped(E.Entries)}, {"Site", Rules->Name}};
+				Post(At, NewsKind::Record, site::FillCopy(site::CopyText("news:fest:record:title"), Vars),
+					site::FillCopy(site::CopyText(Rec.Ever ? "news:fest:record:ever" : "news:fest:record:year"), Vars), FestTag);
 			}
 		}
 	}

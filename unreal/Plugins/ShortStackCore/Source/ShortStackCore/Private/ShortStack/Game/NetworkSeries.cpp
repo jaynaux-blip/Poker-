@@ -51,11 +51,12 @@ struct Named
 	const char* Tagline;
 };
 
-// The seasonal series: a new one every year.
+// The seasonal series: a new one every year. Update 4 G1 (SPEC v1.7 §2.2.2, X2; FN-4a): "festival" is the tier only, so five lost
+// the word (Polar Night, Deep Freeze, Spring Fever, Greenlight and Fireside; their Short codes, ids and glyphs stay).
 const Named Winter[] = {
 	{"Frostbite Open", "FROST", "Twelve days of frozen fingers and hot guarantees. Bundle up."},
 	{"Black Ice Classic", "BLACK", "Looks like a smooth road. It isn't."},
-	{"Polar Night Festival", "POLAR", "The sun barely rises. Nobody at the tables notices."},
+	{"Polar Night Series", "POLAR", "The sun barely rises. Nobody at the tables notices."},
 	{"Whiteout Week", "WHITE", "You can't see the road. You can see the river."},
 	{"The Ice Box", "ICE", "Keep it cool. Everyone else won't."},
 	{"Frost Line Classic", "FLINE", "Below the line everything freezes but the action."},
@@ -63,13 +64,13 @@ const Named Winter[] = {
 	{"Snowblind Series", "SNOW", "Twelve days you won't see coming."},
 	{"Glacier Games", "GLAC", "Slow, patient, unstoppable. Play like the ice."},
 	{"The Long Night", "NIGHT", "The longest nights of the year, the deepest runs."},
-	{"Deep Freeze Festival", "FREEZ", "Freezeouts, frostbite and nowhere to be until spring."},
+	{"Deep Freeze Classic", "FREEZ", "Freezeouts, frostbite and nowhere to be until spring."},
 	{"Avalanche Open", "AVAL", "It starts with one chip. Then everything comes down."},
 	{"Permafrost Classic", "PERMA", "Some stacks never thaw."},
 	{"Hailstorm Series", "HAIL", "Bounties falling out of the sky all week."},
 };
 const Named Spring[] = {
-	{"Spring Fever Festival", "FEVER", "Windows open, guarantees up. The micros come back to life."},
+	{"Spring Fever Series", "FEVER", "Windows open, guarantees up. The micros come back to life."},
 	{"Bloom & Bust", "BLOOM", "Everything grows. Some of it gets cut down."},
 	{"April Showdown", "APRIL", "Showers for some, flowers for the rest."},
 	{"Equinox Open", "EQNX", "Equal day, equal night, equal stacks to start."},
@@ -77,7 +78,7 @@ const Named Spring[] = {
 	{"Petal to the Metal", "PETAL", "Spring's fastest structures, start to finish."},
 	{"The Thaw", "THAW", "The ice breaks. The bankrolls run."},
 	{"Rainmaker Series", "RAIN", "Somebody always makes it rain."},
-	{"Greenlight Festival", "GREEN", "Every field says go."},
+	{"Greenlight Open", "GREEN", "Every field says go."},
 	{"May Day Melee", "MELEE", "Everybody in. Nobody safe."},
 	{"Wildflower Open", "FLWR", "Grows anywhere. Wins anywhere."},
 	{"Cherry Pit Classic", "CHRRY", "Sweet runs, hard finishes."},
@@ -108,7 +109,7 @@ const Named Holidays[] = {
 	{"Last Call Classic", "LAST", "The last chance to fix the year's graph."},
 	{"The Twelve Nights", "TWLV", "One for every night, and a Main Event to close."},
 	{"Silver Bells Showdown", "BELLS", "Ring out the year. Ring up the bounties."},
-	{"Fireside Festival", "FIRE", "Blankets, cocoa and a final table at 3 AM."},
+	{"Fireside Classic", "FIRE", "Blankets, cocoa and a final table at 3 AM."},
 	{"Mistletoe Masters", "MISTL", "Somebody's getting kissed by the river."},
 	{"Countdown Classic", "CNTDN", "Ten, nine, eight... shove."},
 	{"Candlelight Open", "CNDL", "The quietest tables of the year. The loudest finish."},
@@ -117,6 +118,19 @@ const Named Holidays[] = {
 	{"The Year-End Rush", "YEAR", "One last run at the leaderboard."},
 	{"Northern Star Series", "STAR", "Follow it home. Or to the final table."},
 };
+
+/** Update 4 G1 (§2.2.2, FN-4a): the five renamed rows, read by fest::Inventory (G/Festival.cpp) so the copy lint sees the names shipped. */
+const Named* const FestRenamedRows[] = {&Winter[2], &Winter[10], &Spring[0], &Spring[8], &Holidays[7]};
+
+std::vector<std::string> FestRenamedNames()
+{
+	std::vector<std::string> Out;
+	for (const Named* Row : FestRenamedRows)
+	{
+		Out.push_back(Row->Name);
+	}
+	return Out;
+}
 
 // Event names: an adjective and a noun, every pair used at most once in the whole calendar.
 const char* const Adjectives[] = {"Midnight", "Iron", "Velvet", "Golden", "Crimson", "Silent", "Electric", "Lucky", "Wild", "Neon", "Rolling", "Burning",
@@ -273,6 +287,55 @@ std::string Two(int Year)
 	const int Y = Year % 100;
 	return (Y < 10 ? "0" : "") + std::to_string(Y);
 }
+
+/**
+ * Update 4 G1 (SPEC v1.7 §2.1.2, §2.2.1, §3.2.1, §12.1 I-3; F-net, FN-1): RiverLine's series flags by plan key, the same every year,
+ * in this one table (Build reads it for every series it makes; Network::BuildSeries for 2026's hand-built three, through
+ * FestCalDress). Festival and Brand on the four festivals only (RCOP, Ring Rush, The Championship Online, Summer Slam); Flagship, a
+ * Main that can start a Summer (read from G2), on RCOP and Summer Slam; Draw, the Scene Book's pull (§3.2.1's list; inert until G2),
+ * on every series; HighRoller, the high-roller arrival mix, on the high rollers' July (Top Floor Series). No Title (FEIGN, PENNANT,
+ * REIGN and RiverLine's four have none) and no juice: no template, instance or listing changes here (§2.2.1, U9).
+ */
+struct FestCalDressRow
+{
+	const char* Key;   // the plan's key (the series id's stem)
+	const char* Brand; // the festival's brand key; "" for a series
+	int Draw;
+	bool Flagship;
+	bool HighRoller;
+};
+const FestCalDressRow FestCalDressRows[] = {
+	{"rcop", "rcop", 110, true, false},
+	{"slam", "slam", 80, true, false},
+	{"tco", "tco", 70, false, false},
+	{"ring", "ring", 40, false, false},
+	{"mm", "", 22, false, false},
+	{"win", "", 12, false, false},
+	{"spr", "", 12, false, false},
+	{"hol", "", 12, false, false},
+	{"hrs", "", 4, false, true},
+};
+
+/** Dresses Sr from its plan key's row. History: a series already over before Night One (Summer Slam 2026, day -30: §2.1.3's first
+ *  edition is 2027) keeps its Draw but stays a series. */
+void FestCalDress(const char* Key, bool History, SeriesInfo& Sr)
+{
+	for (const FestCalDressRow& Row : FestCalDressRows)
+	{
+		if (std::strcmp(Row.Key, Key) == 0)
+		{
+			Sr.Draw = Row.Draw;
+			Sr.HighRoller = Row.HighRoller;
+			if (!History && Row.Brand[0] != '\0')
+			{
+				Sr.Festival = true;
+				Sr.Brand = Row.Brand;
+				Sr.Flagship = Row.Flagship;
+			}
+			return;
+		}
+	}
+}
 } // namespace calendar_detail
 
 using namespace calendar_detail;
@@ -419,6 +482,7 @@ void Network::BuildCalendar()
 	HolidayPlan.Color2 = 0x27d3c3;
 
 	static const uint32_t Accents[5] = {0x27d3c3, 0xa855f7, 0xf2c14e, 0x3b82f6, 0xf472b6};
+	std::map<std::string, size_t> FestTrioMains; // Update 4 G1 (FN-4a): series id -> its Main's template index, for the appended trio
 
 	auto Build = [&](const Plan& Pl, int Year, const std::string& Name, const std::string& Short, const std::string& Tagline, int Rotate) {
 		// The flagships come back every year: their events carry the year ("RCOP '27 #132"), so no two names match.
@@ -431,6 +495,7 @@ void Network::BuildCalendar()
 		Sr.LastDay = Sr.FirstDay + Pl.Days - 1;
 		Sr.Color = Pl.Color;
 		Sr.Color2 = Rotate >= 0 ? Accents[Rotate % 5] : Pl.Color2;
+		FestCalDress(Pl.Key, false, Sr); // Update 4 G1 (FN-1): the festival flags and Draw (no draw from R: nothing below moves)
 		const std::vector<int> Slots = Times(Pl.PerDay);
 		Rng R("riverline/series/" + Sr.Id);
 		int Total = 0;
@@ -555,6 +620,7 @@ void Network::BuildCalendar()
 				if (Sp && std::strcmp(Sp->Id, "main") == 0)
 				{
 					Sr.MainEvent = T.Id;
+					FestTrioMains[Sr.Id] = Temps.size();
 				}
 				Temps.push_back(T);
 			}
@@ -638,6 +704,73 @@ void Network::BuildCalendar()
 		T.Blurb = Wk.Blurb;
 		T.Field = std::max(40, static_cast<int>(Wk.Gtd / (Wk.BuyIn * Rules->Rake.PrizeShare(T)) * 1.15));
 		Temps.push_back(T);
+	}
+
+	// Update 4 G1 (SPEC v1.7 §2.2.3; F-net, FN-4a): satellites into the two playable RiverLine festival Mains, appended after the
+	// weeklies so every older index holds (a world's Pending saves template indices). For each year and each of Ring Rush and the
+	// Championship Online, in that order: the Main Satellite two days out, the Mega the night before (ten seats guaranteed at the Main's
+	// buy-in) and the Last Chance two hours before the Main. One-offs with no series (the Series board and SeriesPoints never score
+	// them) and no number; each seat is the Main's ticket at the Main's buy-in (pool money through SeatTicket, W6). The 1.2x field floor
+	// applies as to any RiverLine template (Make). 84 templates (2 x 3 x 14); Summer Slam's trio waits for G3 (§4.14 item 7).
+	struct FestTrioRow
+	{
+		const char* Stem;
+		const char* Name;
+		double BuyIn;
+		const char* Speed;
+		double Level;
+		int Stack;
+		int LateReg;
+		int DaysOut;  // before the Main's day
+		int Field[2]; // Ring Rush, the Championship Online
+		int Seats;    // guaranteed (GtdCents = Seats x the Main's buy-in)
+		int OpensHours;
+	};
+	const FestTrioRow FestTrio[] = {
+		{"step", "Main Satellite", 55.0, "Turbo", 6.0, 20000, 60, 2, {120, 300}, 0, 72},
+		{"mega", "Main Mega Satellite", 109.0, "Turbo", 6.0, 20000, 60, 1, {130, 650}, 10, 24 * 7},
+		{"last", "Main Last Chance", 215.0, "Hyper", 3.0, 10000, 15, 0, {60, 90}, 0, 72},
+	};
+	struct FestTrioFestival
+	{
+		const char* Key;
+		const char* Festival; // H11-H13's {Festival}
+		const char* Short;
+	};
+	const FestTrioFestival FestTrioOf[] = {{"ring", "Ring Rush", "RING"}, {"tco", "The Championship Online", "TCO"}};
+	for (int Year = FirstYear; Year <= LastYear; ++Year)
+	{
+		for (int P = 0; P < 2; ++P)
+		{
+			const auto Main = FestTrioMains.find(std::string(FestTrioOf[P].Key) + Two(Year));
+			if (Main == FestTrioMains.end())
+			{
+				continue;
+			}
+			const EventTemplate M = Temps[Main->second]; // a copy: the pushes below may move Temps
+			for (const FestTrioRow& Row : FestTrio)
+			{
+				EventTemplate T;
+				T.Id = Main->first + "-" + Row.Stem;
+				T.Name = std::string(FestTrioOf[P].Festival) + " " + Row.Name;
+				T.BuyInCents = SeriesCents(Row.BuyIn);
+				T.GtdCents = static_cast<Chips>(Row.Seats) * M.BuyInCents;
+				T.Fmt = Format::Satellite;
+				T.Speed = Row.Speed;
+				T.LevelMinutes = Row.Level;
+				T.StartStack = Row.Stack;
+				T.LateRegMinutes = Row.LateReg;
+				T.TableSize = 8;
+				T.Field = Row.Field[P];
+				T.OnlyDay = M.OnlyDay - Row.DaysOut;
+				T.StartMinute = Row.DaysOut > 0 ? At(20, 0) : M.StartMinute - 120;
+				T.OpensHours = Row.OpensHours;
+				T.Seats = std::string(FestTrioOf[P].Short) + " Main Event seats"; // step4's form ("RCOP Main Event seats", H22)
+				T.SeatTicket = M.Ticket.empty() ? M.Id : M.Ticket;
+				T.SeatValueCents = M.BuyInCents;
+				Temps.push_back(T);
+			}
+		}
 	}
 }
 } // namespace net
