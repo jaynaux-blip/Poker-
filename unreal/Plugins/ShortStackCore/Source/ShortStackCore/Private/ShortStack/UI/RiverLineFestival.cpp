@@ -112,6 +112,32 @@
 //   call, Q17). A championship's Mini and Micro rows are pinned at the top of their day's rows (the broadcast is the Main's day only).
 // - Previews (FestPreviewStill's flap, bell and reel half): every flap cell its settled character, the reel whole, no bell, no sound;
 //   nothing a still draws touches the side state.
+//
+// G1 FH-6a (stream A; SPEC v1.7 §2.8.5, §2.5.3, §2.8.7, §2.7.6, §2.11; LEAD_CALLS R-7; PLAN_G1 §2.1 and item 16; PLAN_FHUBS §4 FH-6 and
+// its Corrections): the moments, the pin wall's body and the stings.
+// - FestivalOverlays plays Session::PeekFestMoment once, over the poker client in front (the lobby or a result; never at a table, at
+//   the title screen, under a time skip or an outcome): the scrim {0, 0, 1600, 962} (Bg at 0.82) and, for Kinds 1, 2, 3 and 5, the card
+//   {500, 170, 600, 580}: the crest slams in (Spring, 0-0.5 s), CHAMPION or PLAYER OF THE SERIES staged (0.4-1.0 s), U18's line, the
+//   trophy (220; 260 for a championship's, the RCOP Cup included), the belt, the gold pin (Kind 3) or the title object (Kind 5; the gold
+//   pin on RCOP) rising (0.8-1.6 s), the prize counting up (the belt's points), festival confetti (Accent, Accent2, Gold; 160 quads,
+//   behind the card), FestChampion with CrowdApplause once, TAKE A BOW (`fsmoment`) and U19 after 1.6 s (a click anywhere on the scrim
+//   too); beneath a Main's card U29's shelf line (kHubShelfShips, Q20) and, while its race is uncrowned, the belt line; from a
+//   championship's second edition in this world the Main's line adds "{Ordinal} edition" (U36). Kind 4 is the mark card
+//   {560, 250, 480, 420}: the edition's pin rises, the mark's medal drops onto it (Spring), the mark, the edition, U28's rank line and
+//   the crown ticket's line when one was earned; no confetti and no sting, the Bubble cue. A DEV moment (R-7) prints DEV beside its
+//   numbers; Session::DoneFestMoment on dismiss keys only the belt and the marks. A still while previewing: the settled frame, no cue,
+//   no input, nothing granted. No sponsor mark is drawn on any moment (REIGN's title moment included).
+// - The pointer: the overlay holds it from the app's frame through rlfest_detail::FestMomentHold (SitesBlockUnder over the scrim),
+//   which RiverLine::Draw calls before the app (the lead's line, patch fhubs_to_lead_4); FestivalOverlays hands it back for the moment's
+//   own clicks. Without that line a press beneath still never completes (the scrim takes the press), but a one-frame click would.
+// - The stings (§2.7.6): the host's sting (HubStingOf: the look's, else the site's FestRiver, FestIgnite or FestRit) on the first live
+//   hub open of a world day per festival on this laptop, and once when a festival registration is confirmed and core accepts it (a
+//   new open table whose event is a festival's, whichever register button made it); the opening bell shares the open's sting when both
+//   fall in one frame. Never while previewing.
+// - CareerPins (§2.8.7), {1092, 656, 484, 104} on RiverLine's Career page (stream B's FH-6b calls it): hidden until the hero holds a
+//   festival pin (World::HeroFestPins); "FESTIVAL PINS · {Year}" with ‹ › (`fpy-`, `fpy+`, vector marks) over the years holding a pin,
+//   ten slots of 40 at x = R.X + 12 + 47i, y R.Y + 44 in calendar order: FestPin by grade and mark, an empty socket for an edition this
+//   world holds that the hero skipped, a faint dash for one it never held (before Night One, or not founded); hover prints the facts.
 #include "ShortStack/UI/RiverLine.h"
 
 #include "../Game/SitesDetail.h"
@@ -133,6 +159,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -303,6 +330,26 @@ std::vector<std::string> FestUiInventory()
 		"label\tStreams on Kast",
 		"label\t{Festival} champion",
 		"label\tPlayer of the Series, {Festival}",
+		// FH-6a. U18: the moments' lines under CHAMPION and PLAYER OF THE SERIES (above): a Main's (U36 from a championship's second
+		// edition in this world), another festival event's, the belt's and a title's; U38: a DEV moment's mark beside its numbers.
+		"label\t{Festival} Main Event",
+		"label\t{Festival} Main Event \xC2\xB7 {Ordinal} edition",
+		"label\t{Event}",
+		"label\t{Festival} {Year}",
+		"label\t{Festival} {Year} \xC2\xB7 {Tier} Main Event",
+		"label\t{Ordinal} edition",
+		"label\t{Prize}",
+		"label\tDEV",
+		// U19 and U29: the moment's close, and the lines beneath a Main's card (the shelf line while kHubShelfShips, Q20).
+		"sentence\tClick anywhere to continue.",
+		"label\tTAKE A BOW",
+		"sentence\tThe trophy goes on the shelf at home.",
+		"sentence\tThe belt is decided at the crown, later tonight.",
+		// U28: the mark card's rank line (its mark is U8's word, its edition U18's line, its ticket line the YOUR panel's).
+		"label\t{Rank} of {Scorers} in the race",
+		// U20's pin wall half: the Career page's title (the hover joins U12's grade and U10's line after the edition's name).
+		"label\tFESTIVAL PINS \xC2\xB7 {Year}",
+		"label\t{Festival} \xC2\xB7 {Grade} \xC2\xB7 {Events} events \xC2\xB7 {Cashes} cashes",
 	};
 	for (std::string& Line : ui::rlfest_detail::HostUiStrings())
 	{
@@ -341,6 +388,17 @@ struct Access
 	static void PlacingPlayer(RiverLine& RL, const net::Placing& P, float X, float Y, float Size, float MaxW) { RL.PlayerName(P, X, Y, Size, MaxW, true); }
 	static void Sound(RiverLine& RL, SoundId Id, float Vol) { RL.S.UiSound(Id, Vol); }
 	static void SetPreviewing(RiverLine& RL, bool On) { RL.Previewing = On; }
+	// FH-6a: the moment's pointer hold before the app's frame, and the pin wall drawn alone (u4_ui's FestPinsReveal).
+	static bool Previewing(const RiverLine& RL) { return RL.Previewing; }
+	static Session& SessionMut(RiverLine& RL) { return RL.S; }
+	static void Pins(RiverLine& RL, Canvas& Cv, const Rect& R, double Now)
+	{
+		RL.C = &Cv;
+		RL.UI.Begin(Cv, Now);
+		RL.World = RL.S.WorldMinutes();
+		RL.CareerPins(R, Now);
+		RL.UI.Ptr.EndFrame();
+	}
 };
 
 /** THE FESTIVAL YEAR's ten brands in calendar order (§2.8.2: the cells' ids fsy0..9). */
@@ -930,6 +988,9 @@ struct HubUi
 	// hub's open, 50 ms a cell).
 	std::string FlapText;
 	std::vector<double> FlapAt;
+	// FH-6a: this open's sting looked at (its first live frame), and when it played (the bell shares it in that frame).
+	bool StingChecked = false;
+	double StingAt = -100.0;
 };
 
 /** FH-5b: what Main Event Day keeps per laptop across hub opens (the HubRaceBooks precedent): the opening bell rung for one Main (and
@@ -953,6 +1014,50 @@ std::map<const RiverLine*, HubUi>& HubStates()
 {
 	static std::map<const RiverLine*, HubUi> FestHubByLaptop;
 	return FestHubByLaptop;
+}
+
+/** FH-6a: a laptop's festival cues and its moment (UI side, never saved; a new session starts afresh): the world day each festival's
+ *  hub last stung on (§2.7.6), the open festival tables the registration sting watches, the moment on screen (its first live frame,
+ *  its cue, the pointer FestMomentHold took) and the pin wall's year. */
+struct HubCues
+{
+	const Session* Of = nullptr;
+	double LastWorld = -1.0e18;           // the session's world minute when last looked
+	std::map<std::string, int> StingDay; // series id -> world day
+	int Tables = -1;                      // the open tables when last looked (-1: not yet)
+	std::vector<std::string> Seats;       // their festival events' ids
+	std::string MomentId;                 // "<Kind>:<Key>[:dev]", "" with none on screen
+	double MomentAt = -1.0;               // real seconds of its first live frame (-1: not drawn live yet)
+	bool Sung = false;                    // its cue played
+	bool Held = false;                    // FestMomentHold took the pointer in this frame
+	rlsites_detail::SitesBlocked Saved;   // what it took
+	int PinsYear = 0;                     // the pin wall's year (0: the newest holding a pin)
+};
+
+HubCues& HubCuesOf(const RiverLine& RL)
+{
+	static std::map<const RiverLine*, HubCues> FestCuesByLaptop;
+	HubCues& Q = FestCuesByLaptop[&RL];
+	const Session* Of = &Access::SessionOf(RL);
+	const double World = Access::SessionOf(RL).WorldMinutes();
+	if (Q.Of != Of || World < Q.LastWorld)
+	{
+		// Another session, or the clock went back (a load, a new career, a laptop at a freed address): this laptop starts afresh.
+		Q = HubCues();
+		Q.Of = Of;
+	}
+	Q.LastWorld = World;
+	return Q;
+}
+
+/** The host's sting (§2.7.6): the look's (F-look's FestRiver, FestIgnite or FestRit), else the host site's own; never a click. */
+SoundId HubStingOf(const festart::FestivalLook& L, net::SiteId Site)
+{
+	if (L.Sting != SoundId::Click)
+	{
+		return L.Sting;
+	}
+	return Site == net::SiteId::Ignite ? SoundId::FestIgnite : Site == net::SiteId::RunItTwice ? SoundId::FestRit : SoundId::FestRiver;
 }
 
 HubUi& HubOf(const RiverLine& RL, const fest::Festival& F, double Now)
@@ -1233,7 +1338,10 @@ void HubHeroBand(HubCtx& X, HubUi& U)
 	{
 		Cast.BellFor = H.Main.Id;
 		Cast.BellAt = X.Now;
-		Access::Sound(X.RL, X.Look.Sting, 0.5f);
+		if (U.StingAt != X.Now)
+		{
+			Access::Sound(X.RL, HubStingOf(X.Look, H.F->Site), 0.5f); // FH-6a: the host's sting, shared with the open's in one frame
+		}
 	}
 	if (!X.Still && Cast.BellFor == H.Main.Id && X.Now - Cast.BellAt < 3.0)
 	{
@@ -2821,6 +2929,493 @@ void HubPopover(RiverLine& RL, Canvas& C, Ui& UI, HubUi& U, double Now)
 		P = HubUi::Pop();
 	}
 }
+
+// ---- FH-6a: the stings (§2.7.6), the moments (§2.8.5) and the pin wall (§2.8.7).
+
+/** Q20 (PLAN_FHUBS): U29's shelf line prints while the 3D shelf ships; true at G1, the lead flips it if cut 5 is taken. */
+constexpr bool kHubShelfShips = true;
+
+/** §2.7.6: the host's sting on the first live hub open of a world day per festival (this laptop's memory); never in a still. */
+void HubOpenSting(HubCtx& X, HubUi& U)
+{
+	if (X.Still || U.StingChecked)
+	{
+		return;
+	}
+	U.StingChecked = true;
+	HubCues& Q = HubCuesOf(X.RL);
+	const int Day = net::DayOf(X.H.World);
+	const auto It = Q.StingDay.find(X.H.F->SeriesId);
+	if (It != Q.StingDay.end() && It->second == Day)
+	{
+		return;
+	}
+	Q.StingDay[X.H.F->SeriesId] = Day;
+	U.StingAt = X.Now;
+	Access::Sound(X.RL, HubStingOf(X.Look, X.H.F->Site), 0.5f);
+}
+
+/** The festival edition an event instance belongs to (its template's series), or null. */
+const fest::Festival* HubEventFestival(const std::string& EventId)
+{
+	const size_t At = EventId.find('@');
+	if (At == std::string::npos)
+	{
+		return nullptr;
+	}
+	const net::EventTemplate* T = net::ForEvent(EventId).FindTemplate(EventId.substr(0, At));
+	return T ? fest::FestivalOf(T->Series) : nullptr;
+}
+
+/** §2.7.6: a festival registration's sting, once, when its press is confirmed and core accepts it: a new open table whose event is a
+ *  festival's, whichever register button made it (the hub's rows, RegisterBlock, IgniteSheet, RitProspectus). The tables are looked at
+ *  only when their count moves; a laptop's first look takes the tables it finds as heard. */
+void HubSeatSting(Session& S, HubCues& Q)
+{
+	const int N = S.TableCount();
+	if (N == Q.Tables)
+	{
+		return;
+	}
+	std::vector<std::string> Seats;
+	for (int I = 0; I < N; ++I)
+	{
+		const TableGlance G = S.Glance(I);
+		if (HubEventFestival(G.EventId))
+		{
+			Seats.push_back(G.EventId);
+		}
+	}
+	for (const std::string& Id : Seats)
+	{
+		if (Q.Tables >= 0 && std::find(Q.Seats.begin(), Q.Seats.end(), Id) == Q.Seats.end())
+		{
+			const fest::Festival* F = HubEventFestival(Id);
+			S.UiSound(HubStingOf(festart::LookOf(F->Which), F->Site), 0.5f);
+			break;
+		}
+	}
+	Q.Seats = std::move(Seats);
+	Q.Tables = N;
+}
+
+/** Whether the laptop shows a moment now (§2.8.5): over the poker client in front, at the lobby or a result; never at a table, at the
+ *  title screen, under a time skip or an outcome card. */
+bool HubMomentRoom(const RiverLine& RL, const Session& S)
+{
+	return RL.CurrentApp() == RiverLine::App::RiverLine && S.CurrentScreen != Screen::Boot && S.CurrentScreen != Screen::Table && !S.TimeSkip.Active &&
+		!S.HasOutcome;
+}
+
+/** The moment's identity on this laptop: a new one restarts its clocks and its cue. */
+std::string HubMomentId(const FestMoment& M)
+{
+	return std::to_string(M.Kind) + ":" + M.Key + (M.Dev ? ":dev" : "");
+}
+
+/** A small FNV-1a over the moment's id: confetti's paths (presentation only, §2.12). */
+uint32_t HubMomentHash(const std::string& Text)
+{
+	uint32_t H = 2166136261u;
+	for (const char Ch : Text)
+	{
+		H ^= static_cast<uint8_t>(Ch);
+		H *= 16777619u;
+	}
+	return H;
+}
+
+/** U8's word for a mark (world::FestMark as FestMoment::Mark carries it). */
+const char* HubMarkWord(int Mark)
+{
+	switch (static_cast<world::FestMark>(Mark))
+	{
+	case world::FestMark::Top25: return "TOP 25%";
+	case world::FestMark::Top10: return "TOP 10%";
+	case world::FestMark::Finalist: return "FINALIST";
+	case world::FestMark::Podium: return "PODIUM";
+	case world::FestMark::Title: return "THE BELT";
+	default: break;
+	}
+	return "";
+}
+
+/** U36: the edition's place among this world's editions of its brand (from Night One on, this one included). */
+int HubWorldEdition(const fest::Festival& F)
+{
+	int N = 0;
+	for (const fest::Festival& G : fest::All())
+	{
+		N += G.Which == F.Which && G.FirstDay >= 0 && G.FirstDay <= F.FirstDay ? 1 : 0;
+	}
+	return N;
+}
+
+/** U18's line under the card's title: a Main's ("{Festival} Main Event", U36's edition from a championship's second in this world),
+ *  the belt's and a title's edition, another festival event's name (the win on the results screen; a DEV moment's is the edition's
+ *  first numbered event, as ss.Fest.Moment's prize reads it; else the edition). */
+std::string HubMomentLine(const Session& S, const FestMoment& M, const fest::Festival& F)
+{
+	switch (M.Kind)
+	{
+	case 1:
+	{
+		const int N = HubWorldEdition(F);
+		return F.Name + " Main Event" + (fest::IsChampionship(F.Which) && N >= 2 ? " \xC2\xB7 " + ss::Ordinal(N) + " edition" : std::string());
+	}
+	case 3:
+		if (M.Dev)
+		{
+			const net::Network& Net = net::ForEvent(F.MainId);
+			for (const net::EventInstance& E : Net.Window(static_cast<double>(F.FirstDay) * net::MinutesPerDay, static_cast<double>(F.LastDay + 1) * net::MinutesPerDay))
+			{
+				const net::EventTemplate& T = Net.TemplateOf(E);
+				if (T.Series == F.SeriesId && std::find(F.Satellites.begin(), F.Satellites.end(), T.Id) == F.Satellites.end())
+				{
+					return Net.NameOf(E);
+				}
+			}
+		}
+		return S.HasResults && S.LastResults.Won && !S.LastResults.EventName.empty() ? S.LastResults.EventName : F.Name;
+	case 5: return F.Name + " \xC2\xB7 " + (M.Mark == 2 ? "Micro" : "Mini") + " Main Event";
+	default: break;
+	}
+	return F.Name;
+}
+
+/** Kinds 1, 2, 3 and 5's card {500, 170, 600, 580} (§2.8.5), Tm seconds after its first live frame (a still: settled). */
+void HubChampionCard(Canvas& C, Ui& UI, const Session& S, const FestMoment& M, const fest::Festival& F, double Tm, bool Still, double Now)
+{
+	const Rect K{500.0f, 170.0f, 600.0f, 580.0f};
+	const float Cx = K.X + K.W / 2.0f;
+	C.FillRoundRect(K, 18.0f, Paint::Linear({0.0f, K.Y}, {0.0f, K.Y + K.H}, pal::Bg2, pal::Bg));
+	C.StrokeRoundRect(K, 18.0f, pal::Accent, 2.0f);
+	const float A0 = C.GetAlpha();
+	// The crest slams in (Spring, 0-0.5 s).
+	const double Slam = Still ? 1.0 : motion::Spring(Tm, 0.0);
+	const net::SeriesInfo* Series = net::Site(F.Site).FindSeries(F.SeriesId);
+	if (Series && Slam > 0.02)
+	{
+		eventart::SeriesCrest(C, *Series, Cx, K.Y + 70.0f, static_cast<float>(84.0 * Slam), Still ? 0.0 : Now);
+	}
+	// CHAMPION (PLAYER OF THE SERIES for the belt) staged from 0.4 s to 1.0 s, with U18's line.
+	const float Staged = Still ? 1.0f : static_cast<float>(std::clamp((Tm - 0.4) / 0.6, 0.0, 1.0));
+	if (Staged > 0.0f)
+	{
+		C.SetAlpha(A0 * Staged);
+		UI.Text(M.Kind == 2 ? "PLAYER OF THE SERIES" : "CHAMPION", Cx, K.Y + 166.0f, Ts(M.Kind == 2 ? 34.0f : 44.0f, 900, pal::Gold, Align::Center));
+		UI.Text(HubMomentLine(S, M, F), Cx, K.Y + 198.0f, Ts(18.0f, 700, pal::Ink, Align::Center, Baseline::Alphabetic, false, K.W - 48.0f));
+		C.SetAlpha(A0);
+	}
+	// The trophy (260 for a championship's, the RCOP Cup included), the belt, the gold pin or the title object rises (0.8-1.6 s).
+	const double Rise = Still ? 1.0 : std::clamp((Tm - 0.8) / 0.8, 0.0, 1.0);
+	if (Rise > 0.0)
+	{
+		const float E = static_cast<float>(1.0 - (1.0 - Rise) * (1.0 - Rise));
+		const float Oy = K.Y + 318.0f + (1.0f - E) * 50.0f;
+		const double T = Still ? 0.0 : Tm;
+		C.SetAlpha(A0 * E);
+		if (M.Kind == 1)
+		{
+			festart::FestTrophy(C, F.Which, Cx, Oy, fest::IsChampionship(F.Which) ? 260.0f : 220.0f, T, false);
+		}
+		else if (M.Kind == 2)
+		{
+			festart::FestBelt(C, F.Which, Cx, Oy, 220.0f, T, false);
+		}
+		else if (M.Kind == 5 && F.Which != fest::Brand::Rcop)
+		{
+			festart::FestTrophy(C, F.Which, Cx, Oy, 220.0f, T, false, {}, 1);
+		}
+		else
+		{
+			festart::FestPin(C, F.Which, 3, world::FestMark::None, Cx, Oy, 150.0f); // Kind 3, and RCOP's title (no title object)
+		}
+		C.SetAlpha(A0);
+	}
+	// The prize counts up (the engine's number; the belt shows its points), DEV beside a dev moment's.
+	const double Shown = Still ? static_cast<double>(M.Prize) : motion::CountUp(0.0, static_cast<double>(M.Prize), Tm, 1.0, 1.0);
+	const Chips V = static_cast<Chips>(std::llround(Shown));
+	const std::string Figure = M.Kind == 2 ? Grouped(V) + " pts" : NetMoney(V);
+	const float Fw = UI.Text(Figure, Cx, K.Y + 486.0f, Ts(34.0f, 900, pal::Gold, Align::Center, Baseline::Alphabetic, true));
+	if (M.Dev)
+	{
+		UI.Text("DEV", Cx + Fw / 2.0f + 12.0f, K.Y + 486.0f, Ts(13.0f, 800, pal::Accent));
+	}
+}
+
+/** Kind 4's card {560, 250, 480, 420} (§2.8.5, M2b): the edition's pin rises, the mark's medal drops onto it (Spring), the mark, the
+ *  edition, "{Rank} of {Scorers} in the race" (U28) and the crown ticket's line when one was earned (FINALIST or PODIUM). */
+void HubMarkCard(Canvas& C, Ui& UI, const Session& S, const FestMoment& M, const fest::Festival& F, double Tm, bool Still)
+{
+	const Rect K{560.0f, 250.0f, 480.0f, 420.0f};
+	const float Cx = K.X + K.W / 2.0f;
+	C.FillRoundRect(K, 16.0f, Paint::Linear({0.0f, K.Y}, {0.0f, K.Y + K.H}, pal::Bg2, pal::Bg));
+	C.StrokeRoundRect(K, 16.0f, NetA(pal::Line, 0.9f), 1.5f);
+	int Grade = 1;
+	for (const world::HeroFestPin& P : world::HeroFestPins(S.Living()))
+	{
+		Grade = P.Key == M.Key ? std::max(1, P.Grade) : Grade;
+	}
+	const float A0 = C.GetAlpha();
+	const double Rise = Still ? 1.0 : std::clamp(Tm / 0.6, 0.0, 1.0);
+	const float E = static_cast<float>(1.0 - (1.0 - Rise) * (1.0 - Rise));
+	const bool Medal = Still || Tm >= 0.6;
+	const float Drop = !Medal ? 0.0f : Still ? 1.0f : static_cast<float>(motion::Spring(Tm, 0.6));
+	C.SetAlpha(A0 * E);
+	festart::FestPin(C, F.Which, Grade, Medal ? static_cast<world::FestMark>(M.Mark) : world::FestMark::None, Cx,
+		K.Y + 120.0f + (1.0f - E) * 40.0f - (Medal ? (1.0f - Drop) * 16.0f : 0.0f), 110.0f);
+	C.SetAlpha(A0);
+	UI.Text(HubMarkWord(M.Mark), Cx, K.Y + 238.0f, Ts(30.0f, 900, pal::Gold, Align::Center));
+	UI.Text(F.Name, Cx, K.Y + 268.0f, Ts(16.0f, 700, pal::Ink, Align::Center, Baseline::Alphabetic, false, K.W - 40.0f));
+	const std::string Rank = ss::Ordinal(M.Rank) + " of " + Grouped(M.Scorers) + " in the race";
+	const float Rw = UI.Text(Rank, Cx, K.Y + 294.0f, Ts(14.0f, 600, pal::Muted, Align::Center));
+	if (M.Dev)
+	{
+		UI.Text("DEV", Cx + Rw / 2.0f + 10.0f, K.Y + 294.0f, Ts(12.0f, 800, pal::Accent));
+	}
+	const world::FestMark Mk = static_cast<world::FestMark>(M.Mark);
+	if (fest::kCrownTickets && (Mk == world::FestMark::Finalist || Mk == world::FestMark::Podium))
+	{
+		UI.Text("A seat in the next Main Event", Cx, K.Y + 324.0f, Ts(14.0f, 700, pal::Green, Align::Center));
+	}
+}
+
+/** u4_ui and RiverLine::Draw (FH-6a; the lead's line before the app's frame, patch fhubs_to_lead_4): a moment about to draw takes the
+ *  pointer over its scrim (SitesBlockUnder), so nothing beneath sees this frame's press, release or wheel, its first frame included;
+ *  FestivalOverlays hands it back for the moment's own clicks. Once a frame (a second call in the frame does nothing); never while
+ *  previewing. */
+void FestMomentHold(RiverLine& RL)
+{
+	HubCues& Q = HubCuesOf(RL);
+	const Session& S = Access::SessionOf(RL);
+	if (Q.Held || Access::Previewing(RL) || !HubMomentRoom(RL, S))
+	{
+		return;
+	}
+	const std::optional<FestMoment> M = S.PeekFestMoment();
+	if (!M || !fest::FestivalOf(M->Key))
+	{
+		return;
+	}
+	Q.Saved = rlsites_detail::SitesBlockUnder(RL.UI, {0.0f, 0.0f, 1600.0f, 962.0f}, false);
+	Q.Held = Q.Saved.Active;
+}
+
+/** The moment on screen (§2.8.5), drawn by FestivalOverlays over the client's frame: the scrim, the card, its cue once, and the close
+ *  (TAKE A BOW or a click anywhere on the scrim after 1.6 s; Session::DoneFestMoment). A still while previewing: the settled card, no
+ *  cue, no input, nothing granted, nothing in the side state. */
+void HubMoment(RiverLine& RL, Canvas& C, Ui& UI, double World, bool Still, double Now)
+{
+	HubCues& Q = HubCuesOf(RL);
+	if (Q.Held)
+	{
+		rlsites_detail::SitesUnblock(UI, Q.Saved);
+		Q.Held = false;
+	}
+	Session& S = Access::SessionMut(RL);
+	const std::optional<FestMoment> M = HubMomentRoom(RL, S) ? S.PeekFestMoment() : std::nullopt;
+	const fest::Festival* F = M ? fest::FestivalOf(M->Key) : nullptr;
+	if (!F)
+	{
+		if (!Still)
+		{
+			Q.MomentId.clear();
+		}
+		return;
+	}
+	double Tm = 30.0;
+	if (!Still)
+	{
+		const std::string Id = HubMomentId(*M);
+		if (Id != Q.MomentId)
+		{
+			Q.MomentId = Id;
+			Q.MomentAt = Now;
+			Q.Sung = false;
+		}
+		Tm = Now - Q.MomentAt;
+		if (!Q.Sung)
+		{
+			// One cue a moment (§2.7.6): FestChampion with CrowdApplause under it, the mark's pencil-weight Bubble.
+			Q.Sung = true;
+			if (M->Kind == 4)
+			{
+				S.UiSound(SoundId::Bubble, 0.4f);
+			}
+			else
+			{
+				S.UiSound(SoundId::FestChampion, 0.6f);
+				S.UiSound(SoundId::CrowdApplause, 0.4f);
+			}
+		}
+	}
+	const SkinScope Worn(festart::Dressed(rlsites_detail::SitesSkin(F->Site, World), festart::LookOf(F->Which)));
+	const Rect Scrim{0.0f, 0.0f, 1600.0f, 962.0f};
+	C.FillRect(Scrim, NetA(pal::Bg, 0.82f));
+	const bool Ready = Still || Tm >= 1.6;
+	// The scrim takes every press (a press beneath never completes); after 1.6 s a click anywhere on it closes the moment.
+	bool Close = !Still && UI.Clickable(Ready ? "fsmomentany" : "fsmomentwait", Scrim).Clicked && Ready;
+	if (M->Kind == 4)
+	{
+		HubMarkCard(C, UI, S, *M, *F, Tm, Still);
+		if (Ready)
+		{
+			UI.Text("Click anywhere to continue.", 800.0f, 644.0f, Ts(13.0f, 600, pal::Muted, Align::Center));
+		}
+	}
+	else
+	{
+		if (!Still)
+		{
+			motion::Confetti(C, HubMomentHash(Q.MomentId), Q.MomentAt, Now, 160, Scrim);
+		}
+		HubChampionCard(C, UI, S, *M, *F, Tm, Still, Now);
+		if (Ready)
+		{
+			ButtonOpts O;
+			O.Kind = ButtonKind::Gold;
+			O.Size = 18.0f;
+			const bool Bow = rlsites_detail::SitesButton(UI, C, "fsmoment", {700.0f, 680.0f, 200.0f, 46.0f}, "TAKE A BOW", O);
+			Close = Close || (Bow && !Still);
+			UI.Text("Click anywhere to continue.", 800.0f, 912.0f, Ts(13.0f, 600, pal::Muted, Align::Center));
+		}
+		// Beneath a Main's card (U29): the shelf line while the shelf ships, and the belt line while the edition's race is uncrowned.
+		float Y = 788.0f;
+		if (M->Kind == 1 && kHubShelfShips)
+		{
+			UI.Text("The trophy goes on the shelf at home.", 800.0f, Y, Ts(15.0f, 600, pal::Ink, Align::Center));
+			Y += 26.0f;
+		}
+		const world::World& W = S.Living();
+		if (M->Kind == 1 && world::FestRaceKey(W) == F->SeriesId && world::FestCrownedAt(W, F->SeriesId) < 0.0)
+		{
+			UI.Text("The belt is decided at the crown, later tonight.", 800.0f, Y, Ts(15.0f, 600, pal::Muted, Align::Center));
+		}
+	}
+	if (Close)
+	{
+		S.DoneFestMoment();
+		Q.MomentId.clear();
+	}
+}
+
+/** The pin wall (§2.8.7) in R ({1092, 656, 484, 104} on RiverLine's Career page): hidden until the hero holds a festival pin. */
+void HubPins(RiverLine& RL, Canvas& C, Ui& UI, const Session& S, const Rect& R, bool Still)
+{
+	const world::World& W = S.Living();
+	const std::vector<world::HeroFestPin> Pins = world::HeroFestPins(W);
+	std::vector<int> Years;
+	for (const world::HeroFestPin& P : Pins)
+	{
+		if (const fest::Festival* F = fest::FestivalOf(P.Key))
+		{
+			Years.push_back(F->Year);
+		}
+	}
+	if (Years.empty())
+	{
+		return;
+	}
+	std::sort(Years.begin(), Years.end());
+	Years.erase(std::unique(Years.begin(), Years.end()), Years.end());
+	HubCues& Q = HubCuesOf(RL);
+	const auto Found = std::find(Years.begin(), Years.end(), Q.PinsYear);
+	const size_t At = Found == Years.end() ? Years.size() - 1 : static_cast<size_t>(Found - Years.begin());
+	const int Year = Years[At];
+	UI.Text("FESTIVAL PINS \xC2\xB7 " + std::to_string(Year), R.X + 12.0f, R.Y + 26.0f, Ts(13.0f, 800, pal::Ink));
+	// ‹ › over the years holding a pin, drawn as vector marks.
+	const Rect Prev{R.X + R.W - 68.0f, R.Y + 8.0f, 26.0f, 26.0f};
+	const Rect Next{R.X + R.W - 36.0f, R.Y + 8.0f, 26.0f, 26.0f};
+	const bool HasPrev = At > 0;
+	const bool HasNext = At + 1 < Years.size();
+	for (int Side = 0; Side < 2; ++Side)
+	{
+		const Rect& B = Side == 0 ? Prev : Next;
+		const float Mx = B.X + B.W / 2.0f;
+		const float My = B.Y + B.H / 2.0f;
+		const float D = Side == 0 ? 3.0f : -3.0f;
+		C.StrokePolyline({{Mx + D, My - 6.0f}, {Mx - D, My}, {Mx + D, My + 6.0f}}, false, (Side == 0 ? HasPrev : HasNext) ? pal::Ink : NetA(pal::Muted, 0.45f), 2.0f, true);
+	}
+	if (!Still)
+	{
+		if (UI.Clickable("fpy-", Prev, HasPrev).Clicked)
+		{
+			Q.PinsYear = Years[At - 1];
+		}
+		if (UI.Clickable("fpy+", Next, HasNext).Clicked)
+		{
+			Q.PinsYear = Years[At + 1];
+		}
+	}
+	// Ten slots of 40 in the year's calendar order (WRIT ... FEIGN).
+	const char* const Grades[3] = {"OUTLINE \xC2\xB7 played", "SILVER \xC2\xB7 cashed", "GOLD \xC2\xB7 won an event"};
+	std::string Facts;
+	for (int I = 0; I < 10; ++I)
+	{
+		const fest::Brand B = HubYearOrder[I];
+		const Rect Slot{R.X + 12.0f + 47.0f * static_cast<float>(I), R.Y + 44.0f, 40.0f, 40.0f};
+		const float Cx = Slot.X + 20.0f;
+		const float Cy = Slot.Y + 20.0f;
+		const fest::Festival* F = nullptr;
+		for (const fest::Festival& G : fest::All())
+		{
+			F = !F && G.Which == B && G.Year == Year ? &G : F;
+		}
+		const world::HeroFestPin* Pin = nullptr;
+		for (const world::HeroFestPin& P : Pins)
+		{
+			Pin = F && P.Key == F->SeriesId ? &P : Pin;
+		}
+		if (Pin)
+		{
+			festart::FestPin(C, B, Pin->Grade, world::HeroMark(W, F->SeriesId), Cx, Cy, 40.0f);
+		}
+		else if (F && F->FirstDay >= 0)
+		{
+			C.FillCircle(Cx, Cy, 16.0f, NetA(pal::Bg, 0.7f)); // an empty socket: an edition this world holds, skipped
+			C.StrokeEllipse(Cx, Cy, 17.0f, 17.0f, NetA(pal::Line, 0.9f), 1.5f);
+		}
+		else
+		{
+			C.FillRect({Cx - 8.0f, Cy - 1.0f, 16.0f, 2.0f}, NetA(pal::Muted, 0.35f)); // a faint dash: never held in this world
+		}
+		if (!Still && F && UI.Hover(Slot))
+		{
+			if (Pin)
+			{
+				fest::YourLineView V;
+				V.Events = Pin->Events;
+				V.Cashes = Pin->Cashes;
+				V.Best = Pin->BestPlace;
+				V.Field = Pin->BestEntries;
+				for (const world::HeroFestMark& K : world::HeroMarks(W))
+				{
+					if (K.Key == F->SeriesId)
+					{
+						V.Rank = K.Rank;
+						V.Scorers = K.Scorers;
+					}
+				}
+				Facts = F->Name + " \xC2\xB7 " + Grades[std::clamp(Pin->Grade, 1, 3) - 1] + " \xC2\xB7 " + HubYourCounts(V, V.Rank > 0);
+			}
+			else
+			{
+				Facts = F->Name;
+			}
+		}
+	}
+	if (!Facts.empty())
+	{
+		UI.Text(Facts, R.X + 12.0f, R.Y + 98.0f, Ts(12.0f, 600, pal::Muted, Align::Left, Baseline::Alphabetic, false, R.W - 24.0f));
+	}
+}
+
+/** u4_ui (FH-6a, FestPinsReveal): the pin wall drawn alone into Cv in its Career-page rect. */
+void HubPinsDraw(RiverLine& RL, Canvas& Cv, double Now)
+{
+	Access::Pins(RL, Cv, {1092.0f, 656.0f, 484.0f, 104.0f}, Now);
+}
 } // namespace rlfest_detail
 
 void RiverLine::FestivalHub(const Rect& R, const fest::Festival& F, double Now)
@@ -2834,6 +3429,7 @@ void RiverLine::FestivalHub(const Rect& R, const fest::Festival& F, double Now)
 		return;
 	}
 	rlfest_detail::HubCtx X{*this, *C, UI, H, rlfest_detail::HubFrameOf(F.Site), festart::LookOf(F.Which), Now, Now - U.OpenedAt, Previewing};
+	rlfest_detail::HubOpenSting(X, U); // FH-6a: the host's sting, once a world day per festival on this laptop (§2.7.6)
 	// FH-1b, house law 3: an open popover holds the pointer for the whole hub (modal: a click on it reaches nothing beneath, a click
 	// anywhere else closes it and is swallowed); FestivalOverlays draws it once the hub has drawn, with the pointer handed back.
 	const bool PopUp = U.Popover.Open && !X.Still;
@@ -2898,23 +3494,30 @@ void RiverLine::FestivalHub(const Rect& R, const fest::Festival& F, double Now)
 void RiverLine::FestivalOverlays(double Now)
 {
 	// G1 FH-1b: the strip's popover, over the hub that drew in this frame (another page, app or the stream preview leaves it
-	// unseen; a new page or series closes it, HubOf). The moments (Kinds 1-5, the mark card) are FH-6a's.
+	// unseen; a new page or series closes it, HubOf).
 	const auto It = rlfest_detail::HubStates().find(this);
-	if (It == rlfest_detail::HubStates().end())
+	if (It != rlfest_detail::HubStates().end())
 	{
-		return;
+		rlfest_detail::HubUi& U = It->second;
+		const bool Drew = U.Drew;
+		U.Drew = false;
+		if (Drew && U.Popover.Open)
+		{
+			rlfest_detail::HubPopover(*this, *C, UI, U, Now);
+		}
 	}
-	rlfest_detail::HubUi& U = It->second;
-	const bool Drew = U.Drew;
-	U.Drew = false;
-	if (Drew && U.Popover.Open)
+	// G1 FH-6a: a festival registration's sting, then the moment over everything above (it hands back the pointer FestMomentHold took).
+	if (!Previewing)
 	{
-		rlfest_detail::HubPopover(*this, *C, UI, U, Now);
+		rlfest_detail::HubSeatSting(S, rlfest_detail::HubCuesOf(*this));
 	}
+	rlfest_detail::HubMoment(*this, *C, UI, World, Previewing, Now);
 }
 
-void RiverLine::CareerPins(const Rect& /*R*/, double /*Now*/)
+void RiverLine::CareerPins(const Rect& R, double /*Now*/)
 {
+	// G1 FH-6a (§2.8.7): the pin wall; stream B's CareerPage calls it in the band at y 656 (FH-6b).
+	rlfest_detail::HubPins(*this, *C, UI, S, R, Previewing);
 }
 } // namespace ui
 } // namespace ss

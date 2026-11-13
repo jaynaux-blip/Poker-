@@ -31,11 +31,20 @@
 // cues counted by HubsHooks), FestReignCopy's REIGN hub half, the broadcast against the network and World::FieldStoriesOf on each host,
 // the Mini and Micro rows pinned on PENNANT's and REIGN's days, FestCopyUi's FH-5b listing. U33's finished form (FH-2) is read in WRIT's
 // Afterglow: The Summons ends past midnight on the Main's day, where the broadcast holds the hub.
+// G1 FH-6a (PLAN_G1 §2.1, §3.2, item 16; PLAN_FHUBS §4 FH-6 and its Corrections; after F-world's FW-5 and FW-6): the moments, the pin
+// wall and the stings. Career A plays FEIGN 2026's dev moments on its Main day (fest_moment_main, fest_moment_event, fest_moment_belt;
+// ss.Fest.Moment through Session::DebugFest, R-7) and PENNANT 2027's title (fest_moment_title); career B plays REIGN 2027's title (no
+// sponsor mark) and RCOP 2027's Main (U36's "2nd edition"), checks the pin wall before and after the hero's first festival event and the
+// hub's sting once a world day; a third career plants one world\tfest\tmark line a grade (§2.13's format, the belt's too) and plays
+// them through the keyed path across a reload (fest_moment_mark, FINALIST). Every moment frame is drawn as RiverLine::Draw draws it
+// with the lead's FestMomentHold line (patch fhubs_to_lead_4): HubsHeld calls the hold first. Checks: FestMarkMoment, FestTitleMoment,
+// FestPinsReveal, FestOneFrameClicks' moments half and FestPreviewStill's moments, sting-once and registration-sting half.
 #include "UiSeg.h"
 
 #include "CopyLint.h"
 #include "Trademarks.h"
 #include "ShortStack/Game/Festival.h"
+#include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
@@ -54,6 +63,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -74,6 +85,10 @@ int HubRaceMoves(const RiverLine& RL);
 void HubPreviewing(RiverLine& RL, bool On);
 // FH-4A fix round 1: U35's two pills for a step row (its rung, the rung its seat is; 0 the Main).
 std::pair<std::string, std::string> HubStepPills(int K, int Next);
+// FH-6a: the host's sting, the moments' pointer hold (the lead's line in RiverLine::Draw, emulated here) and the pin wall drawn alone.
+SoundId HubStingOf(const festart::FestivalLook& L, net::SiteId Site);
+void FestMomentHold(RiverLine& RL);
+void HubPinsDraw(RiverLine& RL, Canvas& Cv, double Now);
 } // namespace rlfest_detail
 } // namespace ui
 } // namespace ss
@@ -83,21 +98,31 @@ namespace
 using ss::ui::DrawList;
 using ss::ui::RiverLine;
 
-/** FH-5b: a laptop's hooks with its cues counted (the opening bell's sting, FestPreviewStill). */
+/** FH-5b: a laptop's hooks with its cues counted (the opening bell's sting, FestPreviewStill). FH-6a: Keep holds the last save (the
+ *  marks' reload). */
 struct HubsHooks : ui_test::QuietHooks
 {
 	std::vector<ss::SoundId> Sounds;
+	bool Keep = false;
+	ss::SaveData Last;
 	void Sound(ss::SoundId Id, double /*Volume*/) override { Sounds.push_back(Id); }
+	void Save(const ss::SaveData& D) override
+	{
+		if (Keep)
+		{
+			Last = D;
+		}
+	}
 };
 
-/** A session and its laptop on RiverLine's SERIES page, the pointer away. */
+/** A session and its laptop on RiverLine's SERIES page, the pointer away (FH-6a: From, a save to load). */
 struct HubsLaptop
 {
 	HubsHooks H;
 	ss::Session S;
 	RiverLine RL;
 	double Now = 1.0;
-	explicit HubsLaptop(const std::string& Seed) : S(H, Seed), RL(S)
+	explicit HubsLaptop(const std::string& Seed, const ss::SaveData* From = nullptr) : S(H, Seed, From), RL(S)
 	{
 		S.CurrentScreen = ss::Screen::Lobby;
 		RL.UI.Ptr.Active = false;
@@ -186,6 +211,17 @@ std::pair<float, float> HubsRunAt(const DrawList& L, const std::string& Text)
 		}
 	}
 	return {-1.0f, -1.0f};
+}
+
+/** FH-6a: how many times Id played from the laptop's cue From on. */
+int HubsCues(const HubsHooks& H, ss::SoundId Id, size_t From)
+{
+	int N = 0;
+	for (size_t I = From; I < H.Sounds.size(); ++I)
+	{
+		N += H.Sounds[I] == Id ? 1 : 0;
+	}
+	return N;
 }
 
 /** A page's cost (§2.8.10's columns): vertices, text runs, NetSpaced lines (a baseline holding three or more one-glyph runs in a
@@ -405,8 +441,12 @@ void FestStrikeGateHubs()
 			Btn = HubsRunAt(L, ss::ui::rlsites_detail::SitesStrikeShort); // the warning shortened to fit the row's button (SitesFitButton)
 		}
 		ui_test::Expect(Btn.second > RowY && Btn.second < RowY + 66.0f, ("FestStrikeGate: the row's button is RegisterBlock's (\"" + First + "\")").c_str());
+		const ss::SoundId Sting = ss::ui::rlfest_detail::HubStingOf(ss::ui::festart::LookOf(Rcop->Which), ss::net::SiteId::RiverLine);
+		P.Now = ui_test::Step(P.S, P.Now, 0.2); // past the open's sting (the session plays an id once in 50 ms)
+		const size_t Cues = P.H.Sounds.size();
 		L = P.Click(Bx + 180.0f, RowY + 33.0f);
 		ui_test::Expect(!S.IsPlaying(E.Id), Clause ? "FestStrikeGate: under the clause the first press registers nothing" : "FestStrikeGate: the first press registers nothing");
+		ui_test::Expect(HubsCues(P.H, Sting, Cues) == 0, "FestPreviewStill (the registration sting): the first press stings nothing");
 		ui_test::Expect(S.ConfirmRegister && P.RL.SelectedEvent() == E.Id, "FestStrikeGate: the first press arms the confirm step, for the row pressed");
 		const std::string Ok = Clause ? "Take the strike" : "Confirm";
 		ui_test::Expect(HubsRuns(L, Ok) == 1 && ui_test::DrewRun(L, "Cancel"), ("FestStrikeGate: one confirm step (\"" + Ok + "\", Cancel), the pressed row's alone").c_str());
@@ -416,6 +456,9 @@ void FestStrikeGateHubs()
 		}
 		P.Click(Bx + 60.0f, RowY + 33.0f); // the confirm step's left half ("regok")
 		ui_test::Expect(S.IsPlaying(E.Id), Clause ? "FestStrikeGate: \"Take the strike\" registers through core's gate" : "FestStrikeGate: the second press registers");
+		P.Frame(1.0f);
+		ui_test::Expect(HubsCues(P.H, Sting, Cues) == 1, ("FestPreviewStill (the registration sting): the confirmed festival registration stings once, after core took it (" +
+			std::to_string(HubsCues(P.H, Sting, Cues)) + ")").c_str());
 	}
 }
 
@@ -612,7 +655,7 @@ void FestCopyUiHubs()
 		{"Nights", "12"}, {"Show1", "7 PM"}, {"Show2", "10 PM"}, {"Need", "20"}, {"Rank", "164th"}, {"Scorers", "2,214"}, {"Points", "290"},
 		{"Events", "9"}, {"Cashes", "3"}, {"Best", "31st"}, {"Field", "1,964"}, {"MARK", "FINALIST"}, {"Dates", "Apr 7 and Apr 9"}, {"Prize", "$795.32"},
 		{"Place", "31st"}, {"K", "2"}, {"Left", "1,212"}, {"Trophy", "The RCOP Cup"}, {"Journey", "On RiverLine since 2019. First title on record."},
-		{"Satellite", "The Summons"}, {"S", "09"}, {"Name", "slychip"}};
+		{"Satellite", "The Summons"}, {"S", "09"}, {"Name", "slychip"}, {"Tier", "Mini"}, {"Ordinal", "2nd"}, {"Grade", "GOLD \xC2\xB7 won an event"}};
 	for (const auto& Kv : Extra)
 	{
 		Vars[Kv.first] = Kv.second;
@@ -1324,6 +1367,13 @@ void FestRollTitlesDay400(HubsLaptop& P)
 bool HubsMainOf(const ss::fest::Festival& F, ss::net::EventInstance& Out);
 int FestMainDayCommon(const char* Page, const DrawList& L, HubsLaptop& P, const ss::fest::Festival& F, const ss::net::EventInstance& Main, float WordX, float BandY, int Max);
 void FestTitleRowsPinned(HubsLaptop& P, const ss::fest::Festival& F, ss::net::SiteId Host);
+// FH-6a (defined below SegFest's other checks).
+struct HubsMoment;
+void FestMomentsFeign(HubsLaptop& P, const ss::fest::Festival& Feign);
+void FestTitleMomentHubs(HubsLaptop& P, const ss::fest::Festival& F, const char* Brand, const char* Page);
+void FestPinsRevealAfter(HubsLaptop& P, const ss::fest::Festival& Rcop);
+void FestMainEditionTwo(HubsLaptop& P);
+int HubsSponsorScan(const DrawList& L, const char* What);
 
 void FestCareerIgnite()
 {
@@ -1370,6 +1420,10 @@ void FestCareerIgnite()
 			ui_test::DrewRun(Pl, "DAY " + std::to_string(185 - Pennant->FirstDay + 1) + " OF " + std::to_string(Pennant->LastDay - Pennant->FirstDay + 1)),
 		"fest_hub_ig_champ_live: PENNANT's hub on Ignite, THE RACE first while Live");
 	FestTitleRowsPinned(P, *Pennant, ss::net::SiteId::Ignite);
+	// FH-6a, after every page above (the moments' frames and steps move the laptop's clock): PENNANT 2027's Mini title moment
+	// (fest_moment_title, FestTitleMoment), then FEIGN 2026's three dev moments over PENNANT's hub (fest_moment_main, _event, _belt).
+	FestTitleMomentHubs(P, *Pennant, "pennant", "fest_moment_title");
+	FestMomentsFeign(P, *Feign);
 }
 
 /** FestCopyUi's drawn U35 half (§2.8.2; FH-4A fix round 1): REIGN 2027's step rows on RunItTwice's hub (rows {232, 412, 860, 504}) on
@@ -1712,7 +1766,7 @@ void FestBellWrit(HubsLaptop& P, const ss::fest::Festival& Writ)
 	ss::ui::rlfest_detail::HubPreviewing(P.RL, false);
 	ui_test::Expect(P.H.Sounds.size() == Cues && !ui_test::DrewRun(Still, Band), "FestPreviewStill: the preview rings no bell and shows no band");
 	const DrawList Rung = P.Frame(1.0f);
-	const ss::SoundId Sting = ss::ui::festart::LookOf(Writ.Which).Sting;
+	const ss::SoundId Sting = ss::ui::rlfest_detail::HubStingOf(ss::ui::festart::LookOf(Writ.Which), Writ.Site); // FH-6a: shared with the open's
 	ui_test::Expect(P.H.Sounds.size() == Cues + 1 && P.H.Sounds.back() == Sting && ui_test::DrewRun(Rung, Band),
 		"fest_hub_rit_bell: the Main's start rings the look's sting once and shows the band");
 	P.Frame(1.0f);
@@ -1735,6 +1789,14 @@ void FestReignHub(HubsLaptop& P, const ss::fest::Festival& Reign)
 	ui_test::Expect(ss::fest::PhaseOf(Reign, P.S.WorldMinutes(), &P.S.Living()) == ss::fest::Phase::MainDay, "fest_hub_rit_champ_mainday: REIGN 2027 is on its Main day");
 	const DrawList L = HubsPage("fest_hub_rit_champ_mainday", P);
 	FestMainDayCommon("fest_hub_rit_champ_mainday", L, P, Reign, Main, 418.0f, 144.0f, 12);
+	const int Brands = HubsSponsorScan(L, "the REIGN hub");
+	std::printf("FestReignCopy (the REIGN hub): %d sponsor brands looked for on fest_hub_rit_champ_mainday\n", Brands);
+}
+
+/** FestReignCopy's scan (FH-5b; FH-6a shares it for REIGN's title moment): no text run in L holds a sponsor brand (every brand but a
+ *  site's own, by name and short name, three letters or more). Returns how many brands it looked for. */
+int HubsSponsorScan(const DrawList& L, const char* What)
+{
 	int Brands = 0;
 	for (const ss::sponsor::Brand& B : ss::sponsor::Brands())
 	{
@@ -1754,12 +1816,12 @@ void FestReignHub(HubsLaptop& P, const ss::fest::Festival& Reign)
 			{
 				if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && trademarks::Lower(Cmd.Text.Text).find(Low) != std::string::npos)
 				{
-					ui_test::Expect(false, ("FestReignCopy (the REIGN hub): no sponsor brand on REIGN's Main Event Day (" + Word + " in " + Cmd.Text.Text + ")").c_str());
+					ui_test::Expect(false, ("FestReignCopy (" + std::string(What) + "): no sponsor brand drawn (" + Word + " in " + Cmd.Text.Text + ")").c_str());
 				}
 			}
 		}
 	}
-	std::printf("FestReignCopy (the REIGN hub): %d sponsor brands looked for on fest_hub_rit_champ_mainday\n", Brands);
+	return Brands;
 }
 
 /** FH-5b (§2.8.4): on a championship's Micro and Mini days the schedule stays, the title row pinned at the top of the day's rows. */
@@ -1819,14 +1881,30 @@ void FestCareerRiverLine()
 	HubsStripClicks(P, HubsStripRiverLine);
 	// RCOP 2026's first day: the Main card's lock line, THE RACE first.
 	HubsTo(P, Rcop->FirstDay, 12.0);
+	const ss::SoundId RlSting = ss::ui::rlfest_detail::HubStingOf(ss::ui::festart::LookOf(Rcop->Which), ss::net::SiteId::RiverLine);
+	const size_t Stung = P.H.Sounds.size();
 	P.OpenHub();
 	const DrawList Live = HubsPage("fest_hub_rl_live", P);
 	const std::string Lock = HubsMainLock(P.S, *Rcop);
 	ui_test::Expect(!Lock.empty() && ui_test::DrewRun(Live, Lock), ("FestLockedMain: RCOP 2026's Main card shows the lock line (\"" + Lock + "\")").c_str());
 	ui_test::Expect(ui_test::DrewRun(Live, "PLAYER OF THE SERIES") && !ui_test::Drew(Live, "No champion yet."), "FestLockedMain: the hub opens on THE RACE while Live, never past it");
 	ui_test::Expect(ui_test::DrewRun(Live, "DAY 1 OF 22"), "fest_hub_rl_live: RCOP 2026's first day reads DAY 1 OF 22");
+	// FH-6a, FestPreviewStill (the hub's sting, §2.7.6): the day's first open stung once; the series shown again in the same instant and
+	// the preview add none; FestYourStripHub's reopen at 23:30 (the session's clock moved, so a second sting would be heard) adds none, and
+	// days 14 and 15 one each: three in all. Plant: a sting on every hub open (the 23:30 reopen makes four).
+	const int FirstOpen = HubsCues(P.H, RlSting, Stung);
+	P.RL.ShowSeries(std::string(), P.Now + 0.001);
+	P.Frame(1.0f);
+	ss::ui::rlfest_detail::HubPreviewing(P.RL, true);
+	P.Frame(1.0f);
+	ss::ui::rlfest_detail::HubPreviewing(P.RL, false);
+	ui_test::Expect(FirstOpen == 1 && HubsCues(P.H, RlSting, Stung) == 1,
+		("FestPreviewStill (the hub's sting): RCOP 2026's first open of day 13 stings once, the series shown again and the preview never (" +
+			std::to_string(FirstOpen) + ", " + std::to_string(HubsCues(P.H, RlSting, Stung)) + ")").c_str());
 	// FH-4A: the YOUR panel before and after the hero's first RCOP event (fest_hub_your_ladder), then THE RACE's movement on days 14-15.
 	FestYourStripHub(P, *Rcop);
+	// FH-6a: the pin wall after the hero's first festival event (FestPinsReveal's after half).
+	FestPinsRevealAfter(P, *Rcop);
 	for (const int Day : {14, 15})
 	{
 		HubsTo(P, Day, 12.0);
@@ -1834,6 +1912,8 @@ void FestCareerRiverLine()
 		P.Frame(1.0f);
 		std::printf("  THE RACE on day %d: %d movement marks (the hub saw the day before)\n", Day, ss::ui::rlfest_detail::HubRaceMoves(P.RL));
 	}
+	ui_test::Expect(HubsCues(P.H, RlSting, Stung) == 3, ("FestPreviewStill (the hub's sting): day 13's 23:30 reopen stings nothing, the first open of days 14 and 15 once each (" +
+		std::to_string(HubsCues(P.H, RlSting, Stung)) + " in all from day 13)").c_str());
 	// Day 19 (a Saturday): the ladder in view.
 	HubsTo(P, 19, 12.0);
 	P.OpenHub();
@@ -1854,6 +1934,16 @@ void FestCareerRiverLine()
 	// FH-5b: RCOP 2026's Main Event Day, the reel before the crown, then the Afterglow on day 35.
 	FestMainDayRcop(P, *Rcop);
 	HubsTo(P, 35, 12.0);
+	// FH-6a: RCOP 2026's crown left the hero a mark (the one cash of FestYourStripHub); its moment would cover every page below (and take
+	// their clicks), so the hero bows it at once through the session (Session::DoneFestMoment, as TAKE A BOW does), moving no clock.
+	// The moments' own pages and checks are FestMarkMomentHubs'.
+	for (int K = 0; K < 8 && P.S.PeekFestMoment(); ++K)
+	{
+		const std::optional<ss::FestMoment> Mm = P.S.PeekFestMoment();
+		std::printf("  day 35: the hero bows the moment RCOP 2026's crown left (kind %d, %s, mark %d, %d of %d)\n", Mm->Kind, Mm->Key.c_str(), Mm->Mark, Mm->Rank, Mm->Scorers);
+		P.S.DoneFestMoment();
+	}
+	ui_test::Expect(!P.S.PeekFestMoment(), "FestMarkMoment: the crown's moments are bowed (keyed) before the Afterglow's pages");
 	P.OpenHub();
 	ui_test::Expect(ss::fest::PhaseOf(*Rcop, P.S.WorldMinutes(), &P.S.Living()) == ss::fest::Phase::Afterglow, "fest_hub_rl_afterglow: RCOP 2026 is in its Afterglow on day 35");
 	const DrawList Glow = HubsPage("fest_hub_rl_afterglow", P);
@@ -2006,6 +2096,352 @@ void FestCareerRiverLine()
 	// FH-4A: day 400, RCOP 2026 and 2027 on one roll.
 	HubsTo(P, 400, 12.0);
 	FestRollTitlesDay400(P);
+	// FH-6a, after every page above (the moments' frames and steps move the laptop's clock): REIGN 2027's Mini title moment draws no
+	// sponsor mark (FestReignCopy's title-moment half, FestTitleMoment), and RCOP 2027's Main moment names this world's second edition (U36).
+	if (const ss::fest::Festival* Reign = ss::fest::FestivalOf("runittwice.reign27"))
+	{
+		FestTitleMomentHubs(P, *Reign, "reign", nullptr);
+	}
+	FestMainEditionTwo(P);
+}
+
+// ---- FH-6a: the moments (§2.8.5), the pin wall (§2.8.7) and the stings (§2.7.6).
+
+/** A frame as RiverLine::Draw draws it with the lead's FestMomentHold line before the app (patch fhubs_to_lead_4): the hold, the draw. */
+DrawList HubsHeld(HubsLaptop& P)
+{
+	ss::ui::rlfest_detail::FestMomentHold(P.RL);
+	return P.Frame(1.0f);
+}
+
+/** A one-frame click at (X, Y) (pressed and released inside one frame) on a held frame, then (Settle) a settled held frame. */
+DrawList HubsHeldClick(HubsLaptop& P, float X, float Y, bool Settle = true)
+{
+	P.RL.UI.Ptr.Active = true;
+	P.RL.UI.Ptr.X = X;
+	P.RL.UI.Ptr.Y = Y;
+	P.RL.UI.Ptr.Pressed = true;
+	P.RL.UI.Ptr.Down = false;
+	P.RL.UI.Ptr.Released = true;
+	const DrawList L = HubsHeld(P);
+	P.Away();
+	return Settle ? HubsHeld(P) : L;
+}
+
+std::string HubsMomentKey(const std::optional<ss::FestMoment>& M)
+{
+	return M ? std::to_string(M->Kind) + ":" + M->Key : std::string();
+}
+
+/** What one moment showed through its life (HubsPlayMoment). */
+struct HubsMoment
+{
+	DrawList Settled;                 // two seconds after its first live frame
+	ss::FestMoment M;                 // the moment as the session handed it
+	long long Vertices = 0, Runs = 0; // the card's cost over the page beneath
+	int Champion = 0, Applause = 0, Bubble = 0;
+	bool Still = false;  // the preview's still before its first live frame: settled, no cue, nothing granted
+	bool Waited = false; // a click at 0.5 s closed nothing
+	bool Closed = false; // TAKE A BOW (or a click anywhere) took it away
+	std::string Next;    // the moment after ("Kind:Key", "" none)
+};
+
+/** One moment through its life on P (§2.8.5): the preview's still first; the first live frame (FirstClick: a one-frame click there,
+ *  FestOneFrameClicks); a click at 0.5 s; at 2 s the page (Page through HubsPage, else a frame); then TAKE A BOW (Bow) or a click anywhere
+ *  on the scrim, every frame held. Under: the page beneath, drawn just before the moment existed. */
+HubsMoment HubsPlayMoment(HubsLaptop& P, const DrawList& Under, const char* Page, bool Bow, std::pair<float, float> FirstClick = {-1.0f, -1.0f})
+{
+	HubsMoment Out;
+	const std::optional<ss::FestMoment> M = P.S.PeekFestMoment();
+	if (!M)
+	{
+		ui_test::Expect(false, (std::string(Page ? Page : "a moment") + ": the session holds a moment to play").c_str());
+		return Out;
+	}
+	Out.M = *M;
+	const bool Mark = M->Kind == 4;
+	const size_t Cues = P.H.Sounds.size();
+	P.Away();
+	ss::ui::rlfest_detail::HubPreviewing(P.RL, true);
+	const DrawList Still = P.Frame(1.0f);
+	ss::ui::rlfest_detail::HubPreviewing(P.RL, false);
+	const std::string Figure = M->Kind == 2 ? ss::Grouped(M->Prize) + " pts" : ss::ui::rlnet_detail::NetMoney(M->Prize);
+	Out.Still = P.H.Sounds.size() == Cues && HubsMomentKey(P.S.PeekFestMoment()) == HubsMomentKey(M) &&
+		(Mark ? ui_test::DrewRun(Still, "Click anywhere to continue.") : ui_test::DrewRun(Still, "TAKE A BOW") && ui_test::DrewRun(Still, Figure));
+	// The cues are counted around the moment's frames only (a step may bring a text's own Bubble); a tenth of a second first, so the
+	// session's 50 ms rule never folds the moment's cue into one an earlier frame played.
+	auto Count = [&Out, &P](size_t From) {
+		Out.Champion += HubsCues(P.H, ss::SoundId::FestChampion, From);
+		Out.Applause += HubsCues(P.H, ss::SoundId::CrowdApplause, From);
+		Out.Bubble += HubsCues(P.H, ss::SoundId::Bubble, From);
+	};
+	P.Now = ui_test::Step(P.S, P.Now, 0.1);
+	size_t From = P.H.Sounds.size();
+	if (FirstClick.first >= 0.0f)
+	{
+		HubsHeldClick(P, FirstClick.first, FirstClick.second);
+	}
+	else
+	{
+		HubsHeld(P);
+	}
+	Count(From);
+	P.Now = ui_test::Step(P.S, P.Now, 0.5);
+	From = P.H.Sounds.size();
+	HubsHeldClick(P, 300.0f, 300.0f);
+	Count(From);
+	Out.Waited = HubsMomentKey(P.S.PeekFestMoment()) == HubsMomentKey(M);
+	P.Now = ui_test::Step(P.S, P.Now, 1.5);
+	From = P.H.Sounds.size();
+	Out.Settled = Page ? HubsPage(Page, P) : P.Frame(1.0f);
+	Count(From);
+	const HubsCost K = HubsCostOf(Out.Settled);
+	const HubsCost U = HubsCostOf(Under);
+	Out.Vertices = static_cast<long long>(K.Vertices) - static_cast<long long>(U.Vertices);
+	Out.Runs = static_cast<long long>(K.Runs) - static_cast<long long>(U.Runs);
+	// The close, with no frame after it: the next moment's first live frame is the next HubsPlayMoment's.
+	if (Bow && !Mark)
+	{
+		HubsHeldClick(P, 800.0f, 703.0f, false); // TAKE A BOW {700, 680, 200, 46}
+	}
+	else
+	{
+		HubsHeldClick(P, 300.0f, 300.0f, false);
+	}
+	const std::optional<ss::FestMoment> After = P.S.PeekFestMoment();
+	Out.Next = HubsMomentKey(After);
+	Out.Closed = Out.Next != HubsMomentKey(M) || (After && After->Dev != M->Dev);
+	std::printf("  %-22s kind %d %s: card %lld vertices, %lld runs over the page (moments <= 10000/60, the mark card <= 4000/30); cues %d/%d/%d\n",
+		Page ? Page : "(moment)", M->Kind, M->Key.c_str(), Out.Vertices, Out.Runs, Out.Champion, Out.Applause, Out.Bubble);
+	return Out;
+}
+
+/** FH-6a: FEIGN 2026's three dev moments on its Main day (§2.16 step 7; R-7), career A over Ignite's broadcast: the Main's, another
+ *  event's and the belt's, each once with one cue (FestChampion with CrowdApplause), DEV beside its numbers, a still while previewing,
+ *  within the moments' budget; TAKE A BOW keeps no key. FestOneFrameClicks: a click at 0.5 s closes nothing. */
+void FestMomentsFeign(HubsLaptop& P, const ss::fest::Festival& Feign)
+{
+	const char* const Kinds[3] = {"main", "event", "belt"};
+	const char* const Pages[3] = {"fest_moment_main", "fest_moment_event", "fest_moment_belt"};
+	const ss::world::World& W = P.S.Living();
+	// Kind 3's line: the edition's first numbered event (never a satellite), as ss.Fest.Moment reads its prize.
+	std::string EventName;
+	const ss::net::Network& Net = ss::net::ForEvent(Feign.MainId);
+	for (const ss::net::EventInstance& E : Net.Window(static_cast<double>(Feign.FirstDay) * ss::net::MinutesPerDay, static_cast<double>(Feign.LastDay + 1) * ss::net::MinutesPerDay))
+	{
+		const ss::net::EventTemplate& T = Net.TemplateOf(E);
+		if (EventName.empty() && T.Series == Feign.SeriesId && std::find(Feign.Satellites.begin(), Feign.Satellites.end(), T.Id) == Feign.Satellites.end())
+		{
+			EventName = Net.NameOf(E);
+		}
+	}
+	for (int I = 0; I < 3; ++I)
+	{
+		P.Away();
+		const DrawList Under = P.Frame(1.0f);
+		const std::string Ack = P.S.DebugFest(std::string("moment feign ") + Kinds[I]);
+		ui_test::Expect(Ack.find("plays next") != std::string::npos, (std::string(Pages[I]) + ": ss.Fest.Moment queues FEIGN 2026's dev moment (" + Ack + ")").c_str());
+		const HubsMoment Mo = HubsPlayMoment(P, Under, Pages[I], true);
+		const std::string Title = I == 2 ? "PLAYER OF THE SERIES" : "CHAMPION";
+		const std::string Line = I == 0 ? Feign.Name + " Main Event" : I == 1 ? EventName : Feign.Name;
+		ui_test::Expect(Mo.M.Dev && Mo.M.Kind == (I == 0 ? 1 : I == 1 ? 3 : 2) && ui_test::DrewRun(Mo.Settled, Title) && ui_test::DrewRun(Mo.Settled, Line) &&
+				ui_test::DrewRun(Mo.Settled, "DEV"),
+			(std::string(Pages[I]) + ": " + Title + ", U18's line (\"" + Line + "\") and DEV beside the numbers").c_str());
+		if (I == 0)
+		{
+			const bool Uncrowned = ss::world::FestRaceKey(W) == Feign.SeriesId && ss::world::FestCrownedAt(W, Feign.SeriesId) < 0.0;
+			ui_test::Expect(ui_test::DrewRun(Mo.Settled, "The trophy goes on the shelf at home.") &&
+					ui_test::DrewRun(Mo.Settled, "The belt is decided at the crown, later tonight.") == Uncrowned,
+				"fest_moment_main: U29's shelf line beneath the Main's card, and the belt line exactly while FEIGN 2026's race is uncrowned");
+		}
+		else
+		{
+			ui_test::Expect(!ui_test::Drew(Mo.Settled, "shelf at home") && !ui_test::Drew(Mo.Settled, "decided at the crown"), (std::string(Pages[I]) + ": U29's lines only beneath a Main's card").c_str());
+		}
+		ui_test::Expect(Mo.Champion == 1 && Mo.Applause == 1 && Mo.Bubble == 0, (std::string("FestPreviewStill (one sting a moment): ") + Pages[I] + " plays FestChampion and CrowdApplause once").c_str());
+		ui_test::Expect(Mo.Still, (std::string("FestPreviewStill (moments): ") + Pages[I] + "'s still is settled, silent, and leaves the moment pending").c_str());
+		ui_test::Expect(Mo.Waited, (std::string("FestOneFrameClicks (moments): a click before 1.6 s closes nothing (") + Pages[I] + ")").c_str());
+		ui_test::Expect(Mo.Closed && Mo.Next.empty(), (std::string(Pages[I]) + ": TAKE A BOW closes the moment").c_str());
+		ui_test::Expect(Mo.Vertices <= 10000 && Mo.Runs <= 60, (std::string(Pages[I]) + ": the moment within 10k vertices and 60 runs over the page (\xC2\xA7" "2.8.10)").c_str());
+	}
+	ui_test::Expect(P.S.Life.Sites.Done.count("festbelt:" + Feign.SeriesId) == 0, "R-7: the DEV belt keeps no festbelt: key");
+}
+
+/** FestTitleMoment (§2.15.2, v1.6): a championship's Mini title (Kind 5, ss.Fest.Moment <brand> title) plays once with U18's tier line,
+ *  one cue, a still while previewing, <= 10k vertices over the page; Page emits it. Plant: the title moment playing twice for one title. */
+void FestTitleMomentHubs(HubsLaptop& P, const ss::fest::Festival& F, const char* Brand, const char* Page)
+{
+	P.Away();
+	const DrawList Under = P.Frame(1.0f);
+	const std::string Ack = P.S.DebugFest(std::string("moment ") + Brand + " title");
+	ui_test::Expect(Ack.find("plays next") != std::string::npos, ("FestTitleMoment: ss.Fest.Moment queues " + F.Name + "'s title (" + Ack + ")").c_str());
+	const HubsMoment Mo = HubsPlayMoment(P, Under, Page, true);
+	const std::string Line = F.Name + " \xC2\xB7 Mini Main Event";
+	ui_test::Expect(Mo.M.Kind == 5 && Mo.M.Mark == 1 && ui_test::DrewRun(Mo.Settled, "CHAMPION") && ui_test::DrewRun(Mo.Settled, Line),
+		("FestTitleMoment: " + F.Name + "'s Mini title shows CHAMPION and \"" + Line + "\" (U18)").c_str());
+	const size_t Cues = P.H.Sounds.size();
+	P.Now = ui_test::Step(P.S, P.Now, 0.5);
+	const DrawList After = HubsHeld(P);
+	P.Now = ui_test::Step(P.S, P.Now, 2.0);
+	const DrawList Later = HubsHeld(P);
+	ui_test::Expect(Mo.Closed && !P.S.PeekFestMoment() && !ui_test::DrewRun(After, Line) && !ui_test::DrewRun(Later, "TAKE A BOW") && Mo.Champion == 1 &&
+			HubsCues(P.H, ss::SoundId::FestChampion, Cues) == 0,
+		("FestTitleMoment: " + F.Name + "'s title plays once (one cue, gone after TAKE A BOW)").c_str());
+	ui_test::Expect(Mo.Still, ("FestTitleMoment: " + F.Name + "'s title is a still while previewing").c_str());
+	ui_test::Expect(Mo.Vertices <= 10000 && Mo.Runs <= 60, ("FestTitleMoment: " + F.Name + "'s title within 10k vertices and 60 runs over the page").c_str());
+	if (F.Which == ss::fest::Brand::Reign)
+	{
+		std::printf("FestReignCopy (REIGN's title moment): %d sponsor brands looked for\n", HubsSponsorScan(Mo.Settled, "REIGN's title moment"));
+	}
+}
+
+/** U36 (§2.8.5, v1.6): RCOP 2027's Main moment (a dev one, day 400) adds "2nd edition": RCOP 2026 was this world's first. */
+void FestMainEditionTwo(HubsLaptop& P)
+{
+	const ss::fest::Festival* Rcop27 = ss::fest::FestivalOf("rcop27");
+	if (!Rcop27)
+	{
+		ui_test::Expect(false, "U36: RCOP 2027 is F-net's row");
+		return;
+	}
+	P.Away();
+	const DrawList Under = P.Frame(1.0f);
+	P.S.DebugFest("moment rcop main");
+	const HubsMoment Mo = HubsPlayMoment(P, Under, nullptr, true);
+	const std::string Line = Rcop27->Name + " Main Event \xC2\xB7 2nd edition";
+	ui_test::Expect(Mo.M.Kind == 1 && Mo.M.Key == Rcop27->SeriesId && ui_test::DrewRun(Mo.Settled, Line) && Mo.Closed,
+		("U36: RCOP 2027's Main moment reads \"" + Line + "\"").c_str());
+}
+
+/** FestPinsReveal's after half (§2.8.7), career B on RCOP 2026's first day after the hero's first RCOP event: the wall shows "FESTIVAL
+ *  PINS · 2026", within 4k vertices and 30 runs, and hovering RCOP's slot prints its facts. */
+void FestPinsRevealAfter(HubsLaptop& P, const ss::fest::Festival& Rcop)
+{
+	auto Wall = [&P]() {
+		ui_test::TableMeasurer Ms;
+		DrawList L;
+		ss::ui::Canvas C(L, Ms, RiverLine::Width, RiverLine::Height, 1.0f);
+		ss::ui::rlfest_detail::HubPinsDraw(P.RL, C, P.Now);
+		return L;
+	};
+	P.Away();
+	const DrawList L = Wall();
+	const HubsCost K = HubsCostOf(L);
+	ui_test::Expect(ui_test::DrewRun(L, "FESTIVAL PINS \xC2\xB7 2026"), "FestPinsReveal: after the hero's first festival event the wall shows FESTIVAL PINS \xC2\xB7 2026");
+	ui_test::Expect(K.Vertices <= 4000 && K.Runs <= 30, "FestPinsReveal: the pin wall within 4k vertices and 30 runs (\xC2\xA7" "2.8.10)");
+	std::printf("  fest pin wall (career B, day %d): %zu vertices, %zu runs (<= 4000/30)\n", ss::net::DayOf(P.S.WorldMinutes()), K.Vertices, K.Runs);
+	P.RL.UI.Ptr.Active = true;
+	P.RL.UI.Ptr.X = 1092.0f + 12.0f + 47.0f * 8.0f + 20.0f; // RCOP's slot (calendar order: WRIT ... RCOP, FEIGN)
+	P.RL.UI.Ptr.Y = 656.0f + 44.0f + 20.0f;
+	const DrawList Hover = Wall();
+	P.Away();
+	ui_test::Expect(ui_test::Drew(Hover, Rcop.Name + " \xC2\xB7 "), ("FestPinsReveal: hovering RCOP's slot prints its facts (" + Rcop.Name + " \xC2\xB7 ...)").c_str());
+}
+
+/** FestMarkMoment (§2.15.2; PLAN_G1 item 16) on a fresh career: one world\tfest\tmark line a grade (§2.13's format: key, mark, rank,
+ *  scorers, points), the belt's too, played through the keyed path: the belt first, then TOP 25%, TOP 10%, FINALIST and PODIUM, each once
+ *  (festbelt:/festmark: keys), across a reload; a reload before the belt's dismiss plays it again. Each mark card: U8's word, the edition,
+ *  U28's rank line, the ticket line for FINALIST and PODIUM, the Bubble cue alone, a still while previewing, <= 4k vertices and 30 runs.
+ *  FINALIST is the page fest_moment_mark. Plant: the done key unwritten. Also FestPinsReveal's before half (nothing in the band on the
+ *  day-0 Career page; the wall hidden) and FestOneFrameClicks' moments half (a one-frame click on the moment's first frame fires nothing
+ *  beneath; plant: the moment drawn without blocking). */
+void FestMarkMomentHubs()
+{
+	namespace world = ss::world;
+	HubsLaptop A("u4-fest-marks");
+	A.H.Keep = true;
+	A.Away();
+	// FestPinsReveal, before: the day-0 Career page draws nothing in the wall's band, and the wall itself draws nothing.
+	A.RL.OpenPage(RiverLine::Page::Career, A.Now);
+	const DrawList Career = A.Frame(1.0f);
+	int InBand = HubsRunsIn(Career, 1092.0f, 656.0f, 1576.0f, 760.0f);
+	for (const ss::ui::Vertex& V : Career.Vertices)
+	{
+		InBand += V.X > 1092.5f && V.X < 1575.5f && V.Y > 656.5f && V.Y < 759.5f ? 1 : 0;
+	}
+	ui_test::Expect(InBand == 0, ("FestPinsReveal: nothing draws in the pin wall's band on the day-0 Career page (" + std::to_string(InBand) + " runs and vertices)").c_str());
+	{
+		ui_test::TableMeasurer Ms;
+		DrawList L;
+		ss::ui::Canvas C(L, Ms, RiverLine::Width, RiverLine::Height, 1.0f);
+		ss::ui::rlfest_detail::HubPinsDraw(A.RL, C, A.Now);
+		ui_test::Expect(L.Cmds.empty() && L.Vertices.empty(), "FestPinsReveal: the pin wall is hidden before the first festival event");
+	}
+	A.RL.OpenPage(RiverLine::Page::Lobby, A.Now);
+	A.Frame(1.0f);
+	A.Now = ui_test::Step(A.S, A.Now, 1.0); // the lobby settled (its first frame after an open is not the page beneath a moment)
+	const DrawList Under = A.Frame(1.0f);
+	ui_test::Expect(!A.S.PeekFestMoment(), "FestMarkMoment: a fresh career holds no moment");
+	const std::pair<float, float> Nav = HubsRunAt(Under, "Career");
+	const std::string Selected = A.RL.SelectedEvent();
+	struct Plant
+	{
+		const char* Key;
+		world::FestMark Mark;
+		int Rank, Scorers, Points;
+		const char* Word;
+		bool Ticket;
+	};
+	const Plant Plants[5] = {{"rcop", world::FestMark::Title, 1, 608, 1700, "PLAYER OF THE SERIES", false},
+		{"ignite.feign26", world::FestMark::Top25, 110, 500, 640, "TOP 25%", false}, {"runittwice.writ27", world::FestMark::Top10, 40, 500, 1210, "TOP 10%", false},
+		{"runittwice.grit27", world::FestMark::Finalist, 9, 500, 2380, "FINALIST", true}, {"slam27", world::FestMark::Podium, 2, 500, 3900, "PODIUM", true}};
+	for (const Plant& Pl : Plants)
+	{
+		A.S.Living().Read({"world", "fest", "mark", Pl.Key, std::to_string(static_cast<int>(Pl.Mark)), std::to_string(Pl.Rank), std::to_string(Pl.Scorers), std::to_string(Pl.Points)});
+	}
+	ui_test::Expect(world::HeroMarks(A.S.Living()).size() == 5, "FestMarkMoment: the five mark lines read into the world (World's HeroFest)");
+	// The belt first; its first frame takes a one-frame click on the nav's Career (FestOneFrameClicks).
+	ui_test::Expect(HubsMomentKey(A.S.PeekFestMoment()) == "2:rcop", "FestMarkMoment: the belt's moment comes before the marks'");
+	A.S.Save();
+	{
+		ss::SaveData Back;
+		const bool Parsed = ss::SaveData::Parse(A.H.Last.Serialize(), Back);
+		HubsLaptop R0("u4-fest-marks", &Back);
+		HubsHeld(R0);
+		R0.Now = ui_test::Step(R0.S, R0.Now, 1.0); // the title is staged from 0.4 s
+		const DrawList L0 = HubsHeld(R0);
+		std::printf("  the reload before the belt's dismiss: moment %s, screen %d, skip %d, outcome %d\n", HubsMomentKey(R0.S.PeekFestMoment()).c_str(),
+			static_cast<int>(R0.S.CurrentScreen), R0.S.TimeSkip.Active ? 1 : 0, R0.S.HasOutcome ? 1 : 0);
+		ui_test::Expect(Parsed && ui_test::DrewRun(L0, "PLAYER OF THE SERIES") && HubsMomentKey(R0.S.PeekFestMoment()) == "2:rcop",
+			"FestMarkMoment: a reload before the belt's dismiss plays the belt again (it wasn't seen)");
+	}
+	const HubsMoment Belt = HubsPlayMoment(A, Under, nullptr, true, {Nav.first + 10.0f, Nav.second - 6.0f});
+	ui_test::Expect(Nav.second > 0.0f && A.RL.CurrentPage() == RiverLine::Page::Lobby && A.RL.SelectedEvent() == Selected,
+		"FestOneFrameClicks (moments): a one-frame click on the moment's first frame, and every click while it is up, fires nothing beneath");
+	ui_test::Expect(ui_test::DrewRun(Belt.Settled, "PLAYER OF THE SERIES") && ui_test::DrewRun(Belt.Settled, "1,700 pts") && !ui_test::DrewRun(Belt.Settled, "DEV") &&
+			Belt.Champion == 1 && Belt.Applause == 1,
+		"FestMarkMoment: RCOP 2026's belt plays first, its points, no DEV, one cue");
+	ui_test::Expect(Belt.Closed && A.S.Life.Sites.Done.count("festbelt:rcop") == 1 && Belt.Next == "4:ignite.feign26", "FestMarkMoment: TAKE A BOW keys the belt (festbelt:rcop) and TOP 25% follows");
+	// The marks: two on this laptop, then a reload, then two more.
+	auto PlayMark = [&Under](HubsLaptop& P, const Plant& Pl, const char* Page, const std::string& Next) {
+		const ss::fest::Festival* F = ss::fest::FestivalOf(Pl.Key);
+		const HubsMoment Mo = HubsPlayMoment(P, Under, Page, false);
+		const std::string Rank = ss::Ordinal(Pl.Rank) + " of " + ss::Grouped(Pl.Scorers) + " in the race";
+		const std::string What = std::string("FestMarkMoment (") + Pl.Word + "): ";
+		ui_test::Expect(Mo.M.Kind == 4 && F && ui_test::DrewRun(Mo.Settled, Pl.Word) && ui_test::DrewRun(Mo.Settled, F->Name) && ui_test::DrewRun(Mo.Settled, Rank) &&
+				ui_test::DrewRun(Mo.Settled, "A seat in the next Main Event") == Pl.Ticket && !ui_test::DrewRun(Mo.Settled, "TAKE A BOW"),
+			(What + "the card shows the mark, the edition, \"" + Rank + "\" and the ticket line only when one was earned").c_str());
+		ui_test::Expect(Mo.Bubble == 1 && Mo.Champion == 0 && Mo.Applause == 0, (What + "the Bubble cue once, no sting").c_str());
+		ui_test::Expect(Mo.Still, (What + "a still while previewing").c_str());
+		ui_test::Expect(Mo.Waited, (What + "a click before 1.6 s closes nothing").c_str());
+		ui_test::Expect(Mo.Vertices <= 4000 && Mo.Runs <= 30, (What + "the mark card within 4k vertices and 30 runs over the page").c_str());
+		ui_test::Expect(Mo.Closed && Mo.Next == Next && P.S.Life.Sites.Done.count(std::string("festmark:") + Pl.Key) == 1,
+			(What + "a click closes it once, keyed festmark:" + Pl.Key + ", and the next follows (" + (Next.empty() ? std::string("none") : Next) + ")").c_str());
+	};
+	PlayMark(A, Plants[1], nullptr, "4:runittwice.writ27");
+	PlayMark(A, Plants[2], nullptr, "4:runittwice.grit27");
+	ss::SaveData Back;
+	const bool Parsed = ss::SaveData::Parse(A.H.Last.Serialize(), Back);
+	HubsLaptop B("u4-fest-marks", &Back);
+	B.H.Keep = true;
+	ui_test::Expect(Parsed && HubsMomentKey(B.S.PeekFestMoment()) == "4:runittwice.grit27",
+		"FestMarkMoment: after a reload the belt, TOP 25% and TOP 10% stay played (their keys saved); FINALIST is next");
+	PlayMark(B, Plants[3], "fest_moment_mark", "4:slam27");
+	PlayMark(B, Plants[4], nullptr, "");
+	const std::set<std::string>& Done = B.S.Life.Sites.Done;
+	ui_test::Expect(Done.count("festbelt:rcop") && Done.count("festmark:ignite.feign26") && Done.count("festmark:runittwice.writ27") &&
+			Done.count("festmark:runittwice.grit27") && Done.count("festmark:slam27"),
+		"FestMarkMoment: every grade's done key is kept");
 }
 } // namespace
 
@@ -2023,6 +2459,8 @@ void SegFest()
 	FestLockedMainWallet();
 	FestCareerIgnite();
 	FestCareerRiverLine();
+	// FH-6a: the marks through the keyed path, a third career.
+	FestMarkMomentHubs();
 	std::printf("u4_ui SegFest (F-hubs A): %.1fs\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
 }
 } // namespace u4_ui_test
