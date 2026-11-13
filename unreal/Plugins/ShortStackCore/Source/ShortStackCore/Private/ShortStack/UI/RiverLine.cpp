@@ -1301,6 +1301,13 @@ RiverLine::~RiverLine()
 
 // ------------------------------------------------------------------ frame
 
+namespace rlfest_detail
+{
+// Update 4 G1 (F-hubs FH-6a, SPEC v1.7 §2.8.5; UI/RiverLineFestival.cpp): a festival moment about to draw takes the pointer over its
+// scrim before the app's frame (SitesBlockUnder); FestivalOverlays hands it back for the moment's own clicks. Once a frame.
+void FestMomentHold(RiverLine& RL);
+} // namespace rlfest_detail
+
 void RiverLine::Draw(Canvas& Cv, double Now)
 {
 	C = &Cv;
@@ -1339,6 +1346,9 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 		UI.Ptr.Wheel = 0.0f;
 		UI.Ptr.Active = false;
 	}
+	// Update 4 G1 (F-hubs FH-6a, SPEC v1.7 §2.8.5): a festival moment on screen holds the pointer from the app's frame, its first
+	// frame included (a click there fires nothing beneath); FestivalOverlays, at the overlay stage below, hands it back.
+	rlfest_detail::FestMomentHold(*this);
 	if (AppShown == App::RiverLine)
 	{
 		const SkinScope Client(rlsites_detail::SitesSkin(Wears, World));
