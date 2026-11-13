@@ -138,6 +138,14 @@
 //   festival pin (World::HeroFestPins); "FESTIVAL PINS · {Year}" with ‹ › (`fpy-`, `fpy+`, vector marks) over the years holding a pin,
 //   ten slots of 40 at x = R.X + 12 + 47i, y R.Y + 44 in calendar order: FestPin by grade and mark, an empty socket for an edition this
 //   world holds that the hero skipped, a faint dash for one it never held (before Night One, or not founded); hover prints the facts.
+//
+// G1 FH-7 (stream A; SPEC v1.7 §2.8.10, §8.5, §2.15.2, §2.8.2's N-3; PLAN_FHUBS §4 FH-7 and its Corrections; after stream B, F-look's
+// art, FW-7 and H2): the budgets' last numbers and the streams' seam.
+// - The popover's crest at 46 is the low-detail crest drawn at 30 and scaled (kHubPopCrestLod): with F-look's full-detail crest the
+//   popover drew 4,142 vertices over the page against §2.8.10's 3k; the low-detail one keeps it near 0.5k.
+// - The Main card's Details (HubMainDetails): on RunItTwice it holds the Main through stream B's rlrit_detail::RitHoldSelection (N-3), so
+//   the Prospectus opens on the Main on a day THE BOARD's window doesn't list it; elsewhere the selection, as before.
+// - HubShownKey: the edition and the broadcast flag of the hub's last live frame, for FestHubBudgets (tests/u4_ui_fest.cpp).
 #include "ShortStack/UI/RiverLine.h"
 
 #include "../Game/SitesDetail.h"
@@ -173,6 +181,12 @@ namespace rlfest_detail
 // UI/RiverLineNet.cpp (stream B, FH-1c; LEAD_CALLS R-1): the host files' festival strings, joined to FestUiInventory below.
 std::vector<std::string> HostUiStrings();
 } // namespace rlfest_detail
+namespace rlrit_detail
+{
+// UI/RiverLineRit.cpp (stream B, FH-5a; the lead's N-3): the Main card's Details on RunItTwice selects the Main and holds it, so the
+// Prospectus opens on it while THE BOARD's window doesn't list it (FH-7 wires the hub's fsmain to it, HubMainDetails).
+void RitHoldSelection(RiverLine& RL, const std::string& InstanceId);
+} // namespace rlrit_detail
 } // namespace ui
 
 namespace fest
@@ -991,6 +1005,10 @@ struct HubUi
 	// FH-6a: this open's sting looked at (its first live frame), and when it played (the bell shares it in that frame).
 	bool StingChecked = false;
 	double StingAt = -100.0;
+	// FH-7: the last live frame's clock and whether it was the broadcast (Main Event Day and Closing: the flap row's waves and the
+	// reel), read by HubShownKey (FestHubBudgets' coverage and its warm-draw bound).
+	double DrewAt = -1.0;
+	bool DrewBroadcast = false;
 };
 
 /** FH-5b: what Main Event Day keeps per laptop across hub opens (the HubRaceBooks precedent): the opening bell rung for one Main (and
@@ -1509,6 +1527,23 @@ void HubWhoIn(HubCtx& X)
 	}
 }
 
+/** The Main card's Details (`fsmain`; FH-7 after merging stream B): the lobby's event panel on the Main. On RunItTwice through
+ *  rlrit_detail::RitHoldSelection (the lead's N-3, stream B's FH-5a): the Prospectus opens on the Main even on a day THE BOARD's 24-hour
+ *  window doesn't list it, and the Board's fallback leaves it there until the player picks a row, a filter or a sort; elsewhere the
+ *  selection alone, as before. */
+void HubMainDetails(HubCtx& X)
+{
+	if (X.H.F && X.H.F->Site == net::SiteId::RunItTwice)
+	{
+		rlrit_detail::RitHoldSelection(X.RL, X.H.Main.Id);
+	}
+	else
+	{
+		Access::SelectEvent(X.RL, X.H.Main.Id);
+	}
+	Access::OpenPage(X.RL, RiverLine::Page::Lobby, X.Now);
+}
+
 /** The Main card (§2.8.2): MAIN EVENT with the date and start, "{Gtd} GUARANTEED", the buy-in and stack, "+ {Added} ADDED" (the rival
  *  Mains), the lock line while the Main isn't joinable (§2.2.3), "{N} SEATS WON BY SATELLITE" once a seat is won, and Details
  *  (`fsmain`), which opens the lobby's event panel on the Main. The defending champion (U4) and "Last year: {Prize}." (U23) are
@@ -1560,8 +1595,7 @@ void HubMainCard(HubCtx& X)
 		}
 		if (rlsites_detail::SitesButton(X.UI, X.C, "fsmain", {M.X + M.W - 104.0f, M.Y + 36.0f, 88.0f, 28.0f}, "Details", O) && !X.Still)
 		{
-			Access::SelectEvent(X.RL, H.Main.Id);
-			Access::OpenPage(X.RL, RiverLine::Page::Lobby, X.Now);
+			HubMainDetails(X);
 		}
 		return;
 	}
@@ -1595,8 +1629,7 @@ void HubMainCard(HubCtx& X)
 	}
 	if (rlsites_detail::SitesButton(X.UI, X.C, "fsmain", {M.X + M.W - 114.0f, M.Y + M.H - 44.0f, 96.0f, 32.0f}, "Details", O) && !X.Still)
 	{
-		Access::SelectEvent(X.RL, H.Main.Id);
-		Access::OpenPage(X.RL, RiverLine::Page::Lobby, X.Now);
+		HubMainDetails(X);
 	}
 }
 
@@ -2845,6 +2878,20 @@ int HubRaceMoves(const RiverLine& RL)
 	return It == HubStates().end() ? 0 : It->second.MovesShown;
 }
 
+/** FH-7: the edition the laptop's hub drew in its live frame at Now ("" when the hub didn't draw then), and whether that frame was the
+ *  broadcast (FestHubBudgets reads the host and the phase from it; a broadcast frame takes the reveal's warm-draw bound). */
+std::string HubShownKey(const RiverLine& RL, double Now, bool& Broadcast)
+{
+	Broadcast = false;
+	const auto It = HubStates().find(&RL);
+	if (It == HubStates().end() || It->second.DrewAt != Now)
+	{
+		return std::string();
+	}
+	Broadcast = It->second.DrewBroadcast;
+	return It->second.Key;
+}
+
 /** The popover's phase line (§2.8.6, U16): "Opens {Date}." before the window, "Day {N} of {Days}." on stage, "Crowned {Date}." in
  *  the Afterglow (the crown's day, else the edition's last finish with no world). */
 std::string HubPhaseLine(const HubYearCell& Cl, int Today)
@@ -2873,6 +2920,9 @@ std::string HubPhaseLine(const HubYearCell& Cl, int Today)
  *  (the edition's hub), GO TO {SITE} for another site's edition with an account open (the site tabs' path: RiverLine::SiteShown, then
  *  that site's SERIES page on the edition); none for a rival festival without an account. The hub held the pointer under it
  *  (FestivalHub); the frame it opens in takes no input. */
+/** FH-7: the size the popover's crest is drawn at before its scale to 46 (F-look's low-detail path: 30 units or less). */
+constexpr float kHubPopCrestLod = 30.0f;
+
 void HubPopover(RiverLine& RL, Canvas& C, Ui& UI, HubUi& U, double Now)
 {
 	HubUi::Pop& P = U.Popover;
@@ -2889,7 +2939,13 @@ void HubPopover(RiverLine& RL, Canvas& C, Ui& UI, HubUi& U, double Now)
 	const bool TakesInput = !P.Fresh;
 	P.Fresh = false;
 	UI.RRect(R, 14.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, rlsites_detail::SitesTone(0x131c2b), rlsites_detail::SitesTone(0x0b1220)), NetA(pal::Accent, 0.6f));
-	eventart::SeriesCrest(C, *Cl.Series, R.X + 40.0f, R.Y + 42.0f, 46.0f, 0.0);
+	// FH-7 (§2.8.10's popover row, <= 3k vertices over the page): the crest at 46 is the low-detail crest (frame silhouette and motif,
+	// §2.7.4) drawn at 30 and scaled to 46; F-look's full-detail crest at 46 alone is about 3.6k (the popover drew 4,142 with it).
+	C.Save();
+	C.Translate(R.X + 40.0f, R.Y + 42.0f);
+	C.Scale(46.0f / kHubPopCrestLod, 46.0f / kHubPopCrestLod);
+	eventart::SeriesCrest(C, *Cl.Series, 0.0f, 0.0f, kHubPopCrestLod, 0.0);
+	C.Restore();
 	const float Tx = R.X + 76.0f;
 	const float Tw = R.W - 92.0f;
 	UI.Text(Cl.F->Name, Tx, R.Y + 36.0f, Ts(18.0f, 800, pal::Ink, Align::Left, Baseline::Alphabetic, false, Tw));
@@ -3488,6 +3544,8 @@ void RiverLine::FestivalHub(const Rect& R, const fest::Festival& F, double Now)
 	if (!X.Still)
 	{
 		U.Drew = true;
+		U.DrewAt = Now;
+		U.DrewBroadcast = H.Broadcast;
 	}
 }
 

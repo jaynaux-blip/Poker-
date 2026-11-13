@@ -39,6 +39,22 @@
 // them through the keyed path across a reload (fest_moment_mark, FINALIST). Every moment frame is drawn as RiverLine::Draw draws it
 // with the lead's FestMomentHold line (patch fhubs_to_lead_4): HubsHeld calls the hold first. Checks: FestMarkMoment, FestTitleMoment,
 // FestPinsReveal, FestOneFrameClicks' moments half and FestPreviewStill's moments, sting-once and registration-sting half.
+// G1 FH-7 (PLAN_G1 §2.1, §3.2, items 11, 16, 33, 34; PLAN_FHUBS §4 FH-7 and its Corrections; after every stream-B package, F-look's
+// FL-2/3/4/7, F-world's FW-7 and the lead's H2): FestHubBudgets. Every page this file emits and every hub state it draws without a page
+// is measured at both scales: a hub (each host's Buildup, Live, MainDay, Closing and Afterglow: the states no page shows are drawn on the
+// careers' way, Ignite's in career A, RunItTwice's Buildup, Closing and Afterglow in career B) within <= 35k vertices, 600 runs and 4
+// NetSpaced lines; under SS_PERF=1 (u4_ui_perf, RUN_SERIAL; §8.1's timing rule) its warm draw, the median of five means of 20 draws,
+// within 1.5 ms (2.0 on a broadcast frame: the flap row's waves and the reel), a moment's within 2.0 and the mark card's within 1.5; and
+// Q15's rows: the popover <= 3k vertices and 20 runs over the page, the lobby with festival crests (RCOP 2026 Live and its Afterglow)
+// inside Night One's measured lobby + 2k (29.9k + 2k at 1.0), Ignite's floor chip (chip 10's face; the shelf's two runs) <= 1k, the
+// Career page with the hero's festival pieces inside its cost before them + 4k (the moments, the mark card and the pin wall are
+// asserted where they play). Plant: the strip's crests drawn at full detail. Pages: fest_career_pins (career B's Career page at the end),
+// fest_card_defending (RCOP 2026's Main champion's card while RCOP 2027 is Live, day 395) and fest_popover_pass in its counting form
+// (career B's two rents planted on its way to day 395: FEIGN II's Pass counts, U30). FestMarkMoment's FINALIST case on F-world's
+// update4_festival.ssave (day 60, RCOP 2026's FINALIST already seen: nothing plays; the key taken out of a copy: the card plays once,
+// keyed, and a reload plays nothing). The hub's Details on RunItTwice holds the Main through rlrit_detail::RitHoldSelection (stream B's
+// FestYourStrip N-3 half, now through the hub's fsmain); X1 reads "Player of the Series" (the belt's honour, U20/U21) as a title, not a
+// count of people.
 #include "UiSeg.h"
 
 #include "CopyLint.h"
@@ -55,6 +71,7 @@
 #include "../../Source/ShortStackCore/Private/ShortStack/UI/RiverLineShared.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -89,7 +106,20 @@ std::pair<std::string, std::string> HubStepPills(int K, int Next);
 SoundId HubStingOf(const festart::FestivalLook& L, net::SiteId Site);
 void FestMomentHold(RiverLine& RL);
 void HubPinsDraw(RiverLine& RL, Canvas& Cv, double Now);
+// FH-7: the edition the hub drew in its live frame at Now ("" none) and whether that frame was the broadcast (FestHubBudgets).
+std::string HubShownKey(const RiverLine& RL, double Now, bool& Broadcast);
 } // namespace rlfest_detail
+namespace rlignite_detail
+{
+// UI/RiverLineIgnite.cpp (stream B, FH-3b): chip 10's face on Ignite's floor (FestHubBudgets' floor-chip row).
+void IgniteFestChipFace(Canvas& At, const net::SeriesInfo& Sr, const Rect& R, bool On, bool Hot, uint32_t Fill, uint32_t Coral, uint32_t RimHi);
+} // namespace rlignite_detail
+namespace rlnet_detail
+{
+// UI/RiverLineNet.cpp (stream B, FH-6b): the edition a person defends and the card's honorific line (fest_card_defending).
+const fest::Festival* NetFestDefends(const world::World& W, int Npc, double WorldMin);
+std::string NetFestHonorific(const world::World& W, int Npc, double WorldMin);
+} // namespace rlnet_detail
 } // namespace ui
 } // namespace ss
 
@@ -265,22 +295,140 @@ HubsCost HubsCostOf(const DrawList& L)
 	return K;
 }
 
-/** Emits Name (scale 1.0) and prints its cost at both scales, with the warm draw under SS_UI_BENCH=1. Returns the 1.0 list. */
-DrawList HubsPage(const std::string& Name, HubsLaptop& P)
+/** FH-7, FestHubBudgets: what the careers gather as they walk (the hosts' states drawn, emitted or not; the lobby's and the Career
+ *  page's costs), read by FestHubBudgetsSummary once every career has run. */
+struct HubsBudgetBook
 {
-	ui_test::Emit(Name, P.RL, P.Now);
+	std::map<std::pair<int, int>, std::string> States; // {host, phase} -> the first page or drawn state that showed it
+	int Measured = 0, Timed = 0;
+	double WorstMs = 0.0; // the largest warm draw over its bound (SS_PERF)
+	std::string WorstAt;
+	size_t LobbyBase[2] = {0, 0}; // Night One's lobby at 1.0 and 1.5 (the measured cost: 29.9k at 1.0)
+	std::vector<std::pair<std::string, std::pair<size_t, size_t>>> Lobbies; // the lobby with festival crests at 1.0 and 1.5
+	size_t CareerBefore[2] = {0, 0}, CareerAfter[2] = {0, 0};
+};
+
+HubsBudgetBook& HubsBook()
+{
+	static HubsBudgetBook Book;
+	return Book;
+}
+
+/** What a measured frame is (§2.8.10's rows): a hub page or a drawn hub state, a page with the popover over the hub, a moment's or the
+ *  mark card's page over the page beneath, another page (the Career page, a card). */
+enum class HubsKind
+{
+	Hub,
+	Popover,
+	Moment,
+	Mark,
+	Other
+};
+
+HubsKind HubsKindOf(const std::string& Name)
+{
+	if (Name.rfind("fest_hub_", 0) == 0 || Name == "fest_strip_night_one")
+	{
+		return HubsKind::Hub;
+	}
+	if (Name.rfind("fest_popover", 0) == 0)
+	{
+		return HubsKind::Popover;
+	}
+	if (Name == "fest_moment_mark")
+	{
+		return HubsKind::Mark;
+	}
+	return Name.rfind("fest_moment_", 0) == 0 ? HubsKind::Moment : HubsKind::Other;
+}
+
+/** SS_PERF=1 (u4_ui_perf): the warm draw at scale 1.0, the median of five means of 20 draws after a cold one (§8.1's timing rule). */
+double HubsWarmMs(HubsLaptop& P)
+{
+	P.Frame(1.0f);
+	std::array<double, 5> Means{};
+	for (double& Ms : Means)
+	{
+		const auto T0 = std::chrono::steady_clock::now();
+		for (int I = 0; I < 20; ++I)
+		{
+			P.Frame(1.0f);
+		}
+		Ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count() / 20.0;
+	}
+	std::sort(Means.begin(), Means.end());
+	return Means[2];
+}
+
+/** One frame measured at both scales (FestHubBudgets): emitted as Name first (Emit), else drawn only (a hub state no page shows). A hub
+ *  frame holds §2.8.10's hub row at each scale and records its host and phase (read back from the hub's own live frame); under SS_PERF=1
+ *  the warm draw holds its row (the hub 1.5 ms, 2.0 on a broadcast frame; a moment 2.0; the mark card 1.5), under SS_UI_BENCH=1 it
+ *  prints (100 draws after one cold). Returns the 1.0 list. */
+DrawList HubsMeasure(const std::string& Name, HubsLaptop& P, bool Emit)
+{
+	if (Emit)
+	{
+		ui_test::Emit(Name, P.RL, P.Now);
+	}
+	HubsBudgetBook& Book = HubsBook();
+	++Book.Measured;
+	const HubsKind Kind = Emit ? HubsKindOf(Name) : HubsKind::Hub;
 	DrawList One;
+	bool Broadcast = false;
+	std::string Key;
 	for (const float Scale : {1.0f, 1.5f})
 	{
 		const DrawList L = P.Frame(Scale);
 		const HubsCost K = HubsCostOf(L);
-		std::printf("  %-24s x%.1f: %6zu vertices (hub <= 35000), %3zu runs (<= 600), %d NetSpaced (<= 4), %4zu commands\n", Name.c_str(), Scale, K.Vertices, K.Runs, K.Spaced, K.Cmds);
+		if (Kind == HubsKind::Hub)
+		{
+			std::printf("  %-24s x%.1f: %6zu vertices (hub <= 35000), %3zu runs (<= 600), %d NetSpaced (<= 4), %4zu commands%s\n", Name.c_str(), Scale, K.Vertices, K.Runs, K.Spaced,
+				K.Cmds, Emit ? "" : " (drawn, no page)");
+		}
+		else
+		{
+			std::printf("  %-24s x%.1f: %6zu vertices, %3zu runs, %d NetSpaced, %4zu commands (%s)\n", Name.c_str(), Scale, K.Vertices, K.Runs, K.Spaced, K.Cmds,
+				Kind == HubsKind::Popover ? "the popover's row over the page is asserted beside it" : Kind == HubsKind::Other ? "no hub row" : "the card's row over the page beneath");
+		}
 		if (Scale == 1.0f)
 		{
 			One = L;
+			Key = ss::ui::rlfest_detail::HubShownKey(P.RL, P.Now, Broadcast);
+		}
+		if (Kind == HubsKind::Hub)
+		{
+			char Buf[256];
+			std::snprintf(Buf, sizeof(Buf), "FestHubBudgets: %s at x%.1f within the hub's row (%zu vertices <= 35000, %zu runs <= 600, %d NetSpaced <= 4)", Name.c_str(),
+				static_cast<double>(Scale), K.Vertices, K.Runs, K.Spaced);
+			ui_test::Expect(K.Vertices <= 35000 && K.Runs <= 600 && K.Spaced <= 4, Buf);
 		}
 	}
-	if (std::getenv("SS_UI_BENCH"))
+	const ss::fest::Festival* Shown = Key.empty() ? nullptr : ss::fest::FestivalOf(Key);
+	if (Kind == HubsKind::Hub)
+	{
+		ui_test::Expect(Shown != nullptr, ("FestHubBudgets: " + Name + " is a hub frame (the hub drew it)").c_str());
+	}
+	if (Shown)
+	{
+		const int Ph = static_cast<int>(ss::fest::PhaseOf(*Shown, P.S.WorldMinutes(), &P.S.Living()));
+		Book.States.emplace(std::make_pair(static_cast<int>(Shown->Site), Ph), Name);
+	}
+	const double Bound = Kind == HubsKind::Hub ? (Broadcast ? 2.0 : 1.5) : Kind == HubsKind::Moment ? 2.0 : Kind == HubsKind::Mark ? 1.5 : 0.0;
+	if (std::getenv("SS_PERF") && Bound > 0.0)
+	{
+		const double Ms = HubsWarmMs(P);
+		++Book.Timed;
+		if (Ms / Bound > Book.WorstMs)
+		{
+			Book.WorstMs = Ms / Bound;
+			Book.WorstAt = Name;
+		}
+		std::printf("  %-24s warm draw %.3f ms (SS_PERF: the median of five, <= %.1f ms)\n", Name.c_str(), Ms, Bound);
+		char Buf[200];
+		std::snprintf(Buf, sizeof(Buf), "FestHubBudgets: %s's warm draw %.3f ms within %.1f ms (SS_PERF, the median of five)", Name.c_str(), Ms, Bound);
+		ui_test::Expect(Ms <= Bound, Buf);
+	}
+	else if (std::getenv("SS_UI_BENCH"))
 	{
 		P.Frame(1.0f);
 		const auto T0 = std::chrono::steady_clock::now();
@@ -289,9 +437,45 @@ DrawList HubsPage(const std::string& Name, HubsLaptop& P)
 			P.Frame(1.0f);
 		}
 		const double Ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count() / 100.0;
-		std::printf("  %-24s warm draw %.3f ms (hub <= 1.5 ms; printed, FH-7 asserts)\n", Name.c_str(), Ms);
+		std::printf("  %-24s warm draw %.3f ms (printed; SS_PERF=1 asserts%s)\n", Name.c_str(), Ms, Bound > 0.0 ? "" : ": no ms row");
 	}
 	return One;
+}
+
+/** Emits Name (scale 1.0) and measures it at both scales (HubsMeasure). Returns the 1.0 list. */
+DrawList HubsPage(const std::string& Name, HubsLaptop& P)
+{
+	return HubsMeasure(Name, P, true);
+}
+
+/** FH-7: a hub state no page shows, drawn and measured (no page). */
+void HubsDrawn(const std::string& Tag, HubsLaptop& P)
+{
+	HubsMeasure(Tag, P, false);
+}
+
+/** FH-7: RiverLine's lobby settled (a second after it opens), its vertices at 1.0 and 1.5 (the lobby rows' row of §2.8.10). */
+std::pair<size_t, size_t> HubsLobbyCost(HubsLaptop& P)
+{
+	P.RL.SiteShown = ss::net::SiteId::RiverLine;
+	P.RL.OpenPage(RiverLine::Page::Lobby, P.Now);
+	P.Now = ui_test::Step(P.S, P.Now, 1.0);
+	P.Away();
+	const size_t One = P.Frame(1.0f).Vertices.size();
+	return {One, P.Frame(1.5f).Vertices.size()};
+}
+
+/** FH-7: RiverLine's Career page, its vertices at 1.0 and 1.5 into Out (the Career row: the page inside its cost before the hero's
+ *  festival pieces + 4k). */
+void HubsCareerCost(HubsLaptop& P, size_t (&Out)[2])
+{
+	P.RL.SiteShown = ss::net::SiteId::RiverLine;
+	P.RL.OpenPage(RiverLine::Page::Career, P.Now);
+	P.Away();
+	P.Frame(1.0f);
+	P.Now = ui_test::Step(P.S, P.Now, 1.0);
+	Out[0] = P.Frame(1.0f).Vertices.size();
+	Out[1] = P.Frame(1.5f).Vertices.size();
 }
 
 /** FestHonestLines (§2.15.2; F-hubs' A half, FH-1a: U9's empty roll): Night One's hub opens on CHAMPIONS (RCOP 2026 is Announced) and
@@ -465,8 +649,8 @@ void FestStrikeGateHubs()
 /** FH-1b's page fest_popover (RCOP's cell on Night One) and FestOneFrameClicks' popover half (§2.15.2): the click that opens the
  *  popover fires nothing beneath it and doesn't close it; a click on the popover reaches nothing under it (the Main card's Details,
  *  beneath its foot, stays shut); a click off it closes it and is swallowed (the hub stays on CHAMPIONS); OPEN THE HUB shows the cell's
- *  edition and closes it. The popover row of §2.8.10 (<= 3k vertices, <= 20 runs over the page) is printed. Plant: the popover drawn
- *  without SitesBlockUnder. */
+ *  edition and closes it. The popover row of §2.8.10 (<= 3k vertices, <= 20 runs over the page) is asserted (FH-7, FestHubBudgets).
+ *  Plant: the popover drawn without SitesBlockUnder. */
 void FestPopoverHubs()
 {
 	HubsLaptop P("u4-fest-popover");
@@ -483,8 +667,11 @@ void FestPopoverHubs()
 	const DrawList Page = HubsPage("fest_popover", P);
 	const HubsCost With = HubsCostOf(Page);
 	const HubsCost Without = HubsCostOf(Before);
-	std::printf("  fest_popover: the popover %zu vertices (<= 3000), %d runs (<= 20) over the page (printed; FH-7 asserts)\n", With.Vertices - Without.Vertices,
-		static_cast<int>(With.Runs) - static_cast<int>(Without.Runs));
+	const long long PopV = static_cast<long long>(With.Vertices) - static_cast<long long>(Without.Vertices);
+	const long long PopR = static_cast<long long>(With.Runs) - static_cast<long long>(Without.Runs);
+	std::printf("  fest_popover: the popover %lld vertices (<= 3000), %lld runs (<= 20) over the page\n", PopV, PopR);
+	ui_test::Expect(PopV <= 3000 && PopR <= 20, ("FestHubBudgets: the popover within 3k vertices and 20 runs over the page (\xC2\xA7" "2.8.10; " + std::to_string(PopV) + ", " +
+		std::to_string(PopR) + ")").c_str());
 	const std::string Picked = P.RL.SelectedEvent();
 	const DrawList OnIt = P.Click(1500.0f, 290.0f); // on the popover's foot, over the Main card's Details
 	ui_test::Expect(P.RL.CurrentPage() == RiverLine::Page::Series && P.RL.SelectedEvent() == Picked, "FestOneFrameClicks: a click on the popover reaches nothing beneath it (Details stays shut)");
@@ -611,7 +798,9 @@ std::string HubsCopyWhy(const std::string& Kind, const std::string& Text, const 
 		{
 			return "a *COOP acronym: " + W;
 		}
-		if ((W == "players" || W == "player") && I > 0 && std::isdigit(static_cast<unsigned char>(Words[I - 1].back())))
+		// FH-7: "{Festival} {Year} Player of the Series" (U20/U21, stream B's trophy case) names the belt's honour, not a count of people.
+		const bool HubsHonour = W == "player" && I + 3 < Words.size() && Words[I + 1] == "of" && Words[I + 2] == "the" && Words[I + 3] == "series";
+		if ((W == "players" || W == "player") && !HubsHonour && I > 0 && std::isdigit(static_cast<unsigned char>(Words[I - 1].back())))
 		{
 			return "X1: a count of people as players";
 		}
@@ -1375,6 +1564,35 @@ void FestPinsRevealAfter(HubsLaptop& P, const ss::fest::Festival& Rcop);
 void FestMainEditionTwo(HubsLaptop& P);
 int HubsSponsorScan(const DrawList& L, const char* What);
 
+/** FH-7, FestHubBudgets: F's hub on its host in phase Want, drawn on a career's way (no page): Buildup three days before its first day
+ *  at noon; Closing a minute after its last day ends (the crown waits for the last finish); the Afterglow from its last day + 1 at
+ *  06:00, six hours a step until the crown has come. The hub opens on F itself (ShowSeries), as the host's own SERIES page would. */
+void HubsBudgetState(HubsLaptop& P, const ss::fest::Festival& F, ss::fest::Phase Want, const std::string& Tag)
+{
+	const double Day = ss::net::MinutesPerDay;
+	const double At = Want == ss::fest::Phase::Buildup ? static_cast<double>(F.FirstDay - 3) * Day + 12.0 * 60.0
+		: Want == ss::fest::Phase::Closing             ? static_cast<double>(F.LastDay + 1) * Day + 1.0
+													   : static_cast<double>(F.LastDay + 1) * Day + 6.0 * 60.0;
+	P.At(std::max(At, P.S.WorldMinutes()));
+	for (int K = 0; Want == ss::fest::Phase::Afterglow && K < 12 && ss::fest::PhaseOf(F, P.S.WorldMinutes(), &P.S.Living()) == ss::fest::Phase::Closing; ++K)
+	{
+		P.At(P.S.WorldMinutes() + 6.0 * 60.0);
+	}
+	P.RL.SiteShown = F.Site;
+	P.RL.ShowSeries(F.SeriesId, P.Now);
+	P.RL.OpenPage(RiverLine::Page::Series, P.Now);
+	P.Now = ui_test::Step(P.S, P.Now, 1.5);
+	P.Away();
+	const ss::fest::Phase Got = ss::fest::PhaseOf(F, P.S.WorldMinutes(), &P.S.Living());
+	ui_test::Expect(Got == Want, ("FestHubBudgets: " + Tag + " is drawn in its phase (" + std::to_string(static_cast<int>(Got)) + ", want " +
+		std::to_string(static_cast<int>(Want)) + ") on day " + std::to_string(ss::net::DayOf(P.S.WorldMinutes()))).c_str());
+	if (const std::optional<ss::FestMoment> M = P.S.PeekFestMoment())
+	{
+		std::printf("  %s: a moment is up over the hub (kind %d, %s)\n", Tag.c_str(), M->Kind, M->Key.c_str());
+	}
+	HubsDrawn(Tag, P);
+}
+
 void FestCareerIgnite()
 {
 	HubsLaptop P("u4-fest-career-a");
@@ -1386,6 +1604,8 @@ void FestCareerIgnite()
 	}
 	HubsTo(P, 40, 12.0);
 	ui_test::Expect(HubsAccept(P, ss::net::SiteId::Ignite), "fest_hub_ig_live: Ignite's invitation accepted");
+	// FH-7, FestHubBudgets: FEIGN 2026's Buildup on Ignite (day 53), drawn.
+	HubsBudgetState(P, *Feign, ss::fest::Phase::Buildup, "ig_buildup (FEIGN 2026)");
 	HubsTo(P, 56, 18.0);
 	HubsOpenHost(P, ss::net::SiteId::Ignite);
 	const DrawList L = HubsPage("fest_hub_ig_live", P);
@@ -1405,6 +1625,9 @@ void FestCareerIgnite()
 	const DrawList Md = HubsPage("fest_hub_ig_mainday", P);
 	FestMainDayCommon("fest_hub_ig_mainday", Md, P, *Feign, FeignMain, 210.0f, 132.0f, 8);
 	ui_test::Expect(HubsRunsIn(Md, 24.0f, 870.0f, 1024.0f, 884.0f) == 0, "fest_hub_ig_mainday: nothing in the left column below y 870 (WHO'S IN ends above Ignite's dock)");
+	// FH-7, FestHubBudgets: FEIGN 2026's Closing (day 66, before the crown) and its Afterglow on Ignite, drawn.
+	HubsBudgetState(P, *Feign, ss::fest::Phase::Closing, "ig_closing (FEIGN 2026)");
+	HubsBudgetState(P, *Feign, ss::fest::Phase::Afterglow, "ig_afterglow (FEIGN 2026)");
 	// PENNANT 2027 (v1.6): its live hub on day 185, then its Micro and Mini rows pinned on their days.
 	const ss::fest::Festival* Pennant = ss::fest::FestivalOf("ignite.pennant27");
 	ui_test::Expect(Pennant != nullptr, "fest_hub_ig_champ_live: PENNANT 2027 is F-net's row");
@@ -1879,6 +2102,8 @@ void FestCareerRiverLine()
 	ui_test::Expect(HubsRunsIn(NightOne, 260.0f + 9.0f * 128.0f, 120.0f, 260.0f + 10.0f * 128.0f, 124.0f) == 1 && ui_test::DrewRun(NightOne, "BY INVITATION"),
 		"FestStripTen: FEIGN's cell without an Ignite account reads BY INVITATION (no Pass before F-world's FW-7)");
 	HubsStripClicks(P, HubsStripRiverLine);
+	// FH-7, FestHubBudgets: the Career page before the hero's festival pieces (Night One: no pin, no festival trophy).
+	HubsCareerCost(P, HubsBook().CareerBefore);
 	// RCOP 2026's first day: the Main card's lock line, THE RACE first.
 	HubsTo(P, Rcop->FirstDay, 12.0);
 	const ss::SoundId RlSting = ss::ui::rlfest_detail::HubStingOf(ss::ui::festart::LookOf(Rcop->Which), ss::net::SiteId::RiverLine);
@@ -1931,6 +2156,8 @@ void FestCareerRiverLine()
 	ui_test::Expect(ui_test::DrewRun(Locked, Lock), "FestLockedMain: the Main card keeps its lock line on day 19");
 	ui_test::Expect(ss::fest::YourLine(*Rcop, &P.S.Living()).Shown && ui_test::DrewRun(Locked, "PLAYER OF THE SERIES"),
 		"FestLockedMain: with the hero's RCOP pin the hub still opens on THE RACE while the Main is locked");
+	// FH-7, FestHubBudgets: the lobby with RCOP 2026's crests on its rows (Live, day 19).
+	HubsBook().Lobbies.emplace_back("RCOP 2026 Live (day 19)", HubsLobbyCost(P));
 	// FH-5b: RCOP 2026's Main Event Day, the reel before the crown, then the Afterglow on day 35.
 	FestMainDayRcop(P, *Rcop);
 	HubsTo(P, 35, 12.0);
@@ -1951,6 +2178,8 @@ void FestCareerRiverLine()
 		"fest_hub_rl_afterglow: the schedule again, the banner's COMPLETE, the champion card in the Main card's place, the roll filled");
 	// FH-4A, FestRollTitles: RCOP 2026's title lines on day 35.
 	FestRollTitlesDay35(P, *Rcop);
+	// FH-7, FestHubBudgets: the lobby in RCOP 2026's Afterglow (slide 0's U15 form and the wire's champion item, FH-5c), day 35.
+	HubsBook().Lobbies.emplace_back("RCOP 2026 Afterglow (day 35)", HubsLobbyCost(P));
 	// WRIT 2027: a RunItTwice account, then The Summons' seats (U33) on its day.
 	ss::net::EventInstance SummonsDone; // FH-5b: The Summons, read once finished in WRIT's Afterglow (below the bell)
 	ss::Chips SummonsSeat = 0;
@@ -1978,6 +2207,8 @@ void FestCareerRiverLine()
 	}
 	// FH-5b: WRIT 2027's Main at 18:00 on day 118: the opening bell.
 	FestBellWrit(P, *Writ);
+	// FH-7, FestHubBudgets: WRIT 2027's Closing on RunItTwice (a minute into its last day + 1, before the crown), drawn.
+	HubsBudgetState(P, *Writ, ss::fest::Phase::Closing, "rit_closing (WRIT 2027)");
 	// U33's finished form (FH-2's check): The Summons ends past midnight on the Main's day, where the broadcast holds the hub (no day
 	// strip, FH-5b), so its row is read in the Afterglow, the schedule back: the day strip's cell for its day brings it (fsd<day>).
 	if (!SummonsDone.Id.empty())
@@ -1985,6 +2216,7 @@ void FestCareerRiverLine()
 		const ss::net::Network& Rit = ss::net::Site(ss::net::SiteId::RunItTwice);
 		HubsTo(P, Writ->LastDay + 1, 12.0);
 		HubsOpenHost(P, ss::net::SiteId::RunItTwice);
+		HubsDrawn("rit_afterglow (WRIT 2027)", P); // FH-7, FestHubBudgets: RunItTwice's Afterglow, drawn
 		const int SumDay = ss::net::DayOf(SummonsDone.Start);
 		const float Cw = (860.0f - 4.0f * static_cast<float>(Writ->LastDay - Writ->FirstDay)) / static_cast<float>(Writ->LastDay - Writ->FirstDay + 1);
 		P.Click(232.0f + static_cast<float>(SumDay - Writ->FirstDay) * (Cw + 4.0f) + Cw / 2.0f, 378.0f);
@@ -1995,6 +2227,8 @@ void FestCareerRiverLine()
 		ui_test::Expect(ss::fest::PhaseOf(*Writ, P.S.WorldMinutes(), &P.S.Living()) == ss::fest::Phase::Afterglow && ui_test::DrewRun(Done, WonText),
 			("U33: once finished The Summons' row reads \"" + WonText + "\" (read in WRIT's Afterglow)").c_str());
 	}
+	// FH-7, FestHubBudgets: GRIT 2027's Buildup on RunItTwice (day 216), drawn.
+	HubsBudgetState(P, *Grit, ss::fest::Phase::Buildup, "rit_buildup (GRIT 2027)");
 	// GRIT 2027's second night: two runs a night.
 	HubsTo(P, Grit->FirstDay + 1, 18.0);
 	HubsOpenHost(P, ss::net::SiteId::RunItTwice);
@@ -2060,18 +2294,66 @@ void FestCareerRiverLine()
 	const std::string SlamLock = HubsMainLock(P.S, *Slam);
 	ui_test::Expect(!SlamLock.empty() && ui_test::DrewRun(SlamL, SlamLock) && ui_test::DrewRun(SlamL, "YOUR " + HubsShortOf(*Slam)),
 		("FestLockedMain: Summer Slam 2027's Main card shows the lock line (\"" + SlamLock + "\")").c_str());
-	// Day 395: FEIGN II's cell (Announced from day 391), never an Ignite account in this career.
+	// Day 395: FEIGN II's cell (Announced from day 391), never an Ignite account in this career. FH-7 (Q25, PLAN_G1 items 33 and 34):
+	// with F-world's FW-7 the Pass counts (FestivalEvents = 20). Career B pays no rent on its walk (the test never pays it), so its two
+	// rents are planted here, after Summer Slam's page and before FEIGN II's window opens on day 391: the cell reads "PASS {N}/{Need}"
+	// and the popover U30's counting sentence, N the hero's paid online events (max(OnlineEvents, Paid100)), Need fest::PassNeeds.
+	P.S.Life.RentsPaid = std::max(P.S.Life.RentsPaid, 2);
 	HubsTo(P, 395, 12.0);
 	P.OpenHub();
 	const DrawList Before = P.Frame(1.0f);
 	const ss::fest::Festival* Feign2 = ss::fest::FestivalOf("ignite.feign27");
 	ui_test::Expect(Feign2 && Feign2->Edition == 2 && ss::fest::PhaseOf(*Feign2, P.S.WorldMinutes(), nullptr) == ss::fest::Phase::Announced,
 		"fest_popover_pass: FEIGN 2027 (edition II) is Announced on day 395");
-	ui_test::Expect(HubsRunsIn(Before, 260.0f + 9.0f * 128.0f, 120.0f, 260.0f + 10.0f * 128.0f, 124.0f) == 1, "fest_popover_pass: FEIGN II's cell carries its third line");
+	const ss::net::InviteGate& IgGate = ss::net::Def(ss::net::SiteId::Ignite).Gate;
+	const auto Rec = P.S.Record();
+	const int PassNeed = Feign2 ? ss::fest::PassNeeds(*Feign2, IgGate) : 0;
+	const int PassN = std::max(0, std::min(PassNeed, std::max(Rec.OnlineEvents, Rec.Paid100)));
+	const std::string PassCell = "PASS " + std::to_string(PassN) + "/" + std::to_string(PassNeed);
+	ui_test::Expect(IgGate.FestivalEvents == 20 && PassNeed == 20 && PassN < PassNeed && ss::fest::PassFestival(ss::net::SiteId::Ignite, P.S.WorldMinutes()) == Feign2,
+		("fest_popover_pass: FEIGN II's Pass counts on day 395 (" + std::to_string(PassN) + " of " + std::to_string(PassNeed) + " paid online events; FestivalEvents " +
+			std::to_string(IgGate.FestivalEvents) + ")").c_str());
+	ui_test::Expect(HubsRunsIn(Before, 260.0f + 9.0f * 128.0f, 120.0f, 260.0f + 10.0f * 128.0f, 124.0f) == 1 && ui_test::DrewRun(Before, PassCell),
+		("fest_popover_pass: FEIGN II's cell carries its third line, " + PassCell + " (U30)").c_str());
 	P.Click(260.0f + 9.0f * 128.0f + 50.0f, 104.0f, true);
 	const DrawList Pop = HubsPage("fest_popover_pass", P);
-	ui_test::Expect(ui_test::DrewRun(Pop, "FEIGN 2027") && ui_test::DrewRun(Pop, "By invitation.") && !ui_test::DrewRun(Pop, "OPEN THE HUB"),
-		"fest_popover_pass: FEIGN II's popover reads By invitation. with no button (BY INVITATION until F-world's Pass, FW-7)");
+	const std::string Counting = "Festival Pass: " + std::to_string(PassN) + " of " + std::to_string(PassNeed) + " online events.";
+	ui_test::Expect(ui_test::DrewRun(Pop, "FEIGN 2027") && ui_test::DrewRun(Pop, Counting) && !ui_test::DrewRun(Pop, "By invitation.") && !ui_test::DrewRun(Pop, "OPEN THE HUB"),
+		("fest_popover_pass: FEIGN II's popover reads \"" + Counting + "\" with no button (U30's counting form)").c_str());
+	{
+		const long long PopV = static_cast<long long>(Pop.Vertices.size()) - static_cast<long long>(Before.Vertices.size());
+		const long long PopR = static_cast<long long>(HubsCostOf(Pop).Runs) - static_cast<long long>(HubsCostOf(Before).Runs);
+		std::printf("  fest_popover_pass: the popover %lld vertices (<= 3000), %lld runs (<= 20) over the page\n", PopV, PopR);
+		ui_test::Expect(PopV <= 3000 && PopR <= 20, ("FestHubBudgets: fest_popover_pass's popover within 3k vertices and 20 runs over the page (" + std::to_string(PopV) + ", " +
+			std::to_string(PopR) + ")").c_str());
+	}
+	// FH-7: fest_card_defending (§2.6.3, §2.6.4; PLAN_FHUBS Q16): RCOP 2026's Main champion's card on day 395, RCOP 2027 Live: the true
+	// defender's DEFENDING CHAMPION pill and the honorific line (stream B's NetFestDefends and NetFestHonorific, FH-6b).
+	{
+		const ss::world::World& W = P.S.Living();
+		const ss::fest::Festival* Rcop27 = ss::fest::FestivalOf("rcop27");
+		int Champ = -1;
+		for (const ss::world::FestRollRow& Row : ss::world::FestRoll(W, ss::fest::Brand::Rcop))
+		{
+			Champ = Row.Key == Rcop->SeriesId && Row.Main ? Row.Main->Npc : Champ;
+		}
+		const double Now = P.S.WorldMinutes();
+		const ss::fest::Festival* Defends = Champ >= 0 ? ss::ui::rlnet_detail::NetFestDefends(W, Champ, Now) : nullptr;
+		const std::string Honorific = Champ >= 0 ? ss::ui::rlnet_detail::NetFestHonorific(W, Champ, Now) : std::string();
+		ui_test::Expect(Champ >= 0 && Rcop27 && ss::fest::PhaseOf(*Rcop27, Now, &W) == ss::fest::Phase::Live && Defends == Rcop27 && !Honorific.empty(),
+			("fest_card_defending: RCOP 2026's Main champion defends the title at RCOP 2027, Live on day 395 (\"" + Honorific + "\")").c_str());
+		P.Click(1100.0f, 366.0f); // the popover closed off it (swallowed)
+		P.Away();
+		P.RL.ShowPlayer(Champ, P.Now);
+		P.Now = ui_test::Step(P.S, P.Now, 0.5);
+		P.Away();
+		const DrawList Card = HubsPage("fest_card_defending", P);
+		const ss::world::Npc* N = W.Get(Champ);
+		ui_test::Expect(P.RL.CardOpen() && N && ui_test::Drew(Card, N->Name) && ui_test::DrewRun(Card, "DEFENDING CHAMPION") && ui_test::DrewRun(Card, Honorific),
+			("fest_card_defending: " + (N ? N->Name : std::string("?")) + "'s card carries DEFENDING CHAMPION and \"" + Honorific + "\"").c_str());
+		P.RL.ShowPlayer(-1, P.Now);
+		P.Frame(1.0f);
+	}
 	// FH-5b, U4 (§2.6.3): RCOP 2027's Main Event Day (day 399, 14:30, its field registering): the Main card names RCOP 2026's champion while FieldStoriesOf lists
 	// them in the Main's field (and only then). Plant: the U4 line dropped.
 	if (const ss::fest::Festival* Rcop27 = ss::fest::FestivalOf("rcop27"))
@@ -2103,6 +2385,16 @@ void FestCareerRiverLine()
 		FestTitleMomentHubs(P, *Reign, "reign", nullptr);
 	}
 	FestMainEditionTwo(P);
+	// FH-7: fest_career_pins (§2.8.7, §2.15.2: ten slots): RiverLine's Career page at the end of career B, the pin wall shown, and the
+	// Career row of FestHubBudgets (the page with the hero's festival pieces inside its Night One cost + 4k).
+	HubsCareerCost(P, HubsBook().CareerAfter);
+	const DrawList Pins = HubsPage("fest_career_pins", P);
+	std::string Wall;
+	for (const ss::ui::DrawCmd& Cmd : Pins.Cmds)
+	{
+		Wall = Wall.empty() && Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text.rfind("FESTIVAL PINS \xC2\xB7 ", 0) == 0 ? Cmd.Text.Text : Wall;
+	}
+	ui_test::Expect(!Wall.empty(), ("fest_career_pins: the Career page shows the pin wall (" + Wall + ")").c_str());
 }
 
 // ---- FH-6a: the moments (§2.8.5), the pin wall (§2.8.7) and the stings (§2.7.6).
@@ -2371,6 +2663,9 @@ void FestMarkMomentHubs()
 	A.Frame(1.0f);
 	A.Now = ui_test::Step(A.S, A.Now, 1.0); // the lobby settled (its first frame after an open is not the page beneath a moment)
 	const DrawList Under = A.Frame(1.0f);
+	// FH-7, FestHubBudgets: Night One's lobby, the lobby row's measured cost (29.9k at 1.0), at both scales.
+	HubsBook().LobbyBase[0] = Under.Vertices.size();
+	HubsBook().LobbyBase[1] = A.Frame(1.5f).Vertices.size();
 	ui_test::Expect(!A.S.PeekFestMoment(), "FestMarkMoment: a fresh career holds no moment");
 	const std::pair<float, float> Nav = HubsRunAt(Under, "Career");
 	const std::string Selected = A.RL.SelectedEvent();
@@ -2443,6 +2738,133 @@ void FestMarkMomentHubs()
 			Done.count("festmark:runittwice.grit27") && Done.count("festmark:slam27"),
 		"FestMarkMoment: every grade's done key is kept");
 }
+
+/** FestMarkMoment's FINALIST case on F-world's fixture (PLAN_G1 item 16; FW-7's Tests/fixtures/update4_festival.ssave: day 60, the hero
+ *  RCOP 2026's FINALIST, its moment seen, festmark:rcop): loaded as it is, nothing plays (the key kept); with the key taken out of a
+ *  copy, RCOP 2026's FINALIST card plays once (U8's word, the edition, U28's rank line, the crown ticket's line, the Bubble cue alone),
+ *  keyed festmark:rcop on its close, and a save and reload plays nothing again. */
+void FestMarkMomentFixture()
+{
+	const std::string Path = std::string(SS_TESTS_DIR) + "/fixtures/update4_festival.ssave";
+	std::string Saved;
+	if (std::FILE* F = std::fopen(Path.c_str(), "rb"))
+	{
+		char Buf[65536];
+		size_t N = 0;
+		while ((N = std::fread(Buf, 1, sizeof(Buf), F)) > 0)
+		{
+			Saved.append(Buf, N);
+		}
+		std::fclose(F);
+	}
+	ss::SaveData D;
+	const bool Parsed = !Saved.empty() && ss::SaveData::Parse(Saved, D);
+	ui_test::Expect(Parsed && D.Life.Sites.Done.count("festmark:rcop") == 1, "FestMarkMoment (fixture): update4_festival.ssave reads, RCOP 2026's mark seen (festmark:rcop)");
+	if (!Parsed)
+	{
+		return;
+	}
+	// The page beneath: the fixture's lobby as it is (the key kept, so no moment draws over it), settled.
+	DrawList Under;
+	{
+		HubsLaptop Seen("u4-fest-fixture", &D);
+		const std::vector<ss::world::HeroFestMark>& Marks = ss::world::HeroMarks(Seen.S.Living());
+		ui_test::Expect(Marks.size() == 1 && Marks[0].Key == "rcop" && Marks[0].Mark == ss::world::FestMark::Finalist && HubsMomentKey(Seen.S.PeekFestMoment()).empty(),
+			("FestMarkMoment (fixture): the hero is RCOP 2026's FINALIST and, the key kept, no moment plays (" + HubsMomentKey(Seen.S.PeekFestMoment()) + ")").c_str());
+		Seen.Away();
+		Seen.RL.SiteShown = ss::net::SiteId::RiverLine;
+		Seen.RL.OpenPage(RiverLine::Page::Lobby, Seen.Now);
+		Seen.Frame(1.0f);
+		Seen.Now = ui_test::Step(Seen.S, Seen.Now, 1.0);
+		Under = Seen.Frame(1.0f);
+	}
+	ss::SaveData Unseen = D;
+	Unseen.Life.Sites.Done.erase("festmark:rcop");
+	HubsLaptop P("u4-fest-fixture", &Unseen);
+	P.H.Keep = true;
+	ui_test::Expect(HubsMomentKey(P.S.PeekFestMoment()) == "4:rcop", ("FestMarkMoment (fixture): with festmark:rcop taken out, RCOP 2026's mark is up (" +
+		HubsMomentKey(P.S.PeekFestMoment()) + ")").c_str());
+	// The lobby opened and a second on, no frame drawn: the moment's first live frame is HubsPlayMoment's.
+	P.Away();
+	P.RL.SiteShown = ss::net::SiteId::RiverLine;
+	P.RL.OpenPage(RiverLine::Page::Lobby, P.Now);
+	P.Now = ui_test::Step(P.S, P.Now, 1.0);
+	const ss::fest::Festival* Rcop = ss::fest::FestivalOf("rcop");
+	const std::vector<ss::world::HeroFestMark> Marks = ss::world::HeroMarks(P.S.Living());
+	const HubsMoment Mo = HubsPlayMoment(P, Under, nullptr, false);
+	const std::string Rank = Marks.empty() ? std::string("?") : ss::Ordinal(Marks[0].Rank) + " of " + ss::Grouped(Marks[0].Scorers) + " in the race";
+	ui_test::Expect(Mo.M.Kind == 4 && Rcop && ui_test::DrewRun(Mo.Settled, "FINALIST") && ui_test::DrewRun(Mo.Settled, Rcop->Name) && ui_test::DrewRun(Mo.Settled, Rank) &&
+			ui_test::DrewRun(Mo.Settled, "A seat in the next Main Event") && Mo.Bubble == 1 && Mo.Champion == 0 && Mo.Applause == 0 && Mo.Still,
+		("FestMarkMoment (fixture): RCOP 2026's FINALIST card, \"" + Rank + "\", the crown ticket's line, the Bubble cue once, a still while previewing").c_str());
+	ui_test::Expect(Mo.Vertices <= 4000 && Mo.Runs <= 30, ("FestMarkMoment (fixture): the mark card within 4k vertices and 30 runs over the lobby (" + std::to_string(Mo.Vertices) + ", " +
+		std::to_string(Mo.Runs) + ")").c_str());
+	ui_test::Expect(Mo.Closed && Mo.Next.empty() && P.S.Life.Sites.Done.count("festmark:rcop") == 1, "FestMarkMoment (fixture): a click closes it once, keyed festmark:rcop");
+	P.S.Save();
+	ss::SaveData Back;
+	const bool Again = ss::SaveData::Parse(P.H.Last.Serialize(), Back);
+	HubsLaptop R("u4-fest-fixture", &Back);
+	ui_test::Expect(Again && HubsMomentKey(R.S.PeekFestMoment()).empty(), "FestMarkMoment (fixture): after a save and reload FINALIST stays played");
+	std::printf("  FestMarkMoment (fixture): day %d, RCOP 2026 FINALIST, %s; card %lld vertices, %lld runs over the lobby\n", ss::net::DayOf(P.S.WorldMinutes()), Rank.c_str(),
+		Mo.Vertices, Mo.Runs);
+}
+
+/** FestHubBudgets' summary (§2.8.10, §8.5; Q15), once every career has run: every host's hub drawn in each of the five states, emitted
+ *  or not; the lobby with festival crests inside Night One's measured lobby + 2k at each scale (and 29.9k + 2k at 1.0); Ignite's floor
+ *  chip (chip 10's face, on and off, at both scales, with the shelf's label and sub-line: two runs, no vertices) <= 1k; the Career page
+ *  with the hero's festival pieces inside its cost before them + 4k. */
+void FestHubBudgetsSummary()
+{
+	const HubsBudgetBook& Book = HubsBook();
+	const ss::net::SiteId Hosts[3] = {ss::net::SiteId::RiverLine, ss::net::SiteId::Ignite, ss::net::SiteId::RunItTwice};
+	const ss::fest::Phase States[5] = {ss::fest::Phase::Buildup, ss::fest::Phase::Live, ss::fest::Phase::MainDay, ss::fest::Phase::Closing, ss::fest::Phase::Afterglow};
+	const char* StateNames[5] = {"Buildup", "Live", "MainDay", "Closing", "Afterglow"};
+	int Covered = 0;
+	for (const ss::net::SiteId H : Hosts)
+	{
+		std::string Line;
+		for (int I = 0; I < 5; ++I)
+		{
+			const auto It = Book.States.find({static_cast<int>(H), static_cast<int>(States[I])});
+			const bool Has = It != Book.States.end();
+			Covered += Has ? 1 : 0;
+			Line += std::string(" ") + StateNames[I] + "=" + (Has ? It->second : std::string("-"));
+			ui_test::Expect(Has, ("FestHubBudgets: " + ss::ui::rlsites_detail::SitesShortName(H) + "'s hub is drawn in " + StateNames[I] + " (a page or a drawn state)").c_str());
+		}
+		std::printf("  FestHubBudgets %-10s%s\n", ss::ui::rlsites_detail::SitesShortName(H).c_str(), Line.c_str());
+	}
+	std::printf("  FestHubBudgets: %d frames measured, %d of 15 host states covered, %d warm draws timed (worst %.2f of its bound, %s)\n", Book.Measured, Covered, Book.Timed,
+		Book.WorstMs, Book.WorstAt.empty() ? "none: SS_PERF unset" : Book.WorstAt.c_str());
+	// The lobby rows with festival crests.
+	ui_test::Expect(Book.LobbyBase[0] > 0 && !Book.Lobbies.empty(), "FestHubBudgets: Night One's lobby and the festival lobbies were measured");
+	for (const auto& L : Book.Lobbies)
+	{
+		std::printf("  FestHubBudgets lobby %-30s %zu / %zu vertices (Night One's %zu / %zu + 2000; 31900 at 1.0)\n", L.first.c_str(), L.second.first, L.second.second, Book.LobbyBase[0],
+			Book.LobbyBase[1]);
+		ui_test::Expect(L.second.first <= Book.LobbyBase[0] + 2000 && L.second.second <= Book.LobbyBase[1] + 2000 && L.second.first <= 31900,
+			("FestHubBudgets: the lobby with festival crests (" + L.first + ") inside its measured cost + 2k (" + std::to_string(L.second.first) + " / " +
+				std::to_string(L.second.second) + ")").c_str());
+	}
+	// Ignite's floor chip: chip 10's face (on, the busiest, and off) at both scales; the shelf's label and sub-line add two runs.
+	const ss::fest::Festival* Feign = ss::fest::FestivalOf("ignite.feign26");
+	const ss::net::SeriesInfo* Sr = Feign ? ss::net::Site(ss::net::SiteId::Ignite).FindSeries(Feign->SeriesId) : nullptr;
+	size_t Chip = 0;
+	for (int Si = 0; Si < 4 && Sr; ++Si)
+	{
+		ui_test::TableMeasurer M;
+		DrawList L;
+		ss::ui::Canvas C(L, M, RiverLine::Width, RiverLine::Height, Si % 2 == 0 ? 1.0f : 1.5f);
+		const std::string Short = Sr->Short.empty() ? std::string("FEIGN") : Sr->Short;
+		ss::ui::rlignite_detail::IgniteFestChipFace(C, *Sr, {120.0f, 440.0f, C.Measure(Short, 13.5f, 700) + 56.0f, 32.0f}, Si < 2, false, Sr->Color, 0xff6b57u, 0x5a4060u);
+		Chip = std::max(Chip, L.Vertices.size());
+	}
+	std::printf("  FestHubBudgets: Ignite's floor chip and label, %zu vertices at most (<= 1000)\n", Chip);
+	ui_test::Expect(Sr && Chip > 0 && Chip <= 1000, ("FestHubBudgets: Ignite's floor chip and label within 1k vertices (" + std::to_string(Chip) + ")").c_str());
+	// The Career page with the hero's festival pieces.
+	std::printf("  FestHubBudgets: the Career page %zu / %zu vertices before the hero's festival pieces, %zu / %zu with them (<= +4000)\n", Book.CareerBefore[0], Book.CareerBefore[1],
+		Book.CareerAfter[0], Book.CareerAfter[1]);
+	ui_test::Expect(Book.CareerBefore[0] > 0 && Book.CareerAfter[0] > 0 && Book.CareerAfter[0] <= Book.CareerBefore[0] + 4000 && Book.CareerAfter[1] <= Book.CareerBefore[1] + 4000,
+		"FestHubBudgets: the Career page with the hero's festival pieces inside its cost before them + 4k");
+}
 } // namespace
 
 namespace u4_ui_test
@@ -2461,6 +2883,9 @@ void SegFest()
 	FestCareerRiverLine();
 	// FH-6a: the marks through the keyed path, a third career.
 	FestMarkMomentHubs();
+	// FH-7: FestMarkMoment's FINALIST case on F-world's fixture, then FestHubBudgets' summary over everything measured above.
+	FestMarkMomentFixture();
+	FestHubBudgetsSummary();
 	std::printf("u4_ui SegFest (F-hubs A): %.1fs\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
 }
 } // namespace u4_ui_test
