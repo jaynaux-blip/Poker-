@@ -7,7 +7,8 @@
 // FestCrownSkipInvariant, FestCrownWaitsForHero, FestNoRecrown, FestHallScoreExcludesCrown, FestAwardRebuildIgnoresCrown,
 // FestSaveRoundTrip's final line and day-66 curve field, FestCalendarFacts' world half, with the crown's budget lines; FW-3: the titles:
 // FestRollFromHonors, FestBlankHonesty, FestDefending, FestDiscoverWidened, FestHeroPinsDerived (with HeroFestPins' budget line),
-// FestHeadline, FestTitleOrder, and FestChampTitles' and FestMajorFloor's world halves). Every helper here
+// FestHeadline, FestTitleOrder, and FestChampTitles' and FestMajorFloor's world halves; FW-4: WHO'S IN: FestFieldStories,
+// FestStoryHooks, on Honors and fields planted through the world text). Every helper here
 // is in an anonymous namespace (PLAN_G1 §1 item 8: festivals_main.cpp shares the executable); each check runs alone as "festivals_test
 // <Check>" (the kit's Only, FN-1). The race checks build one Blank world before RCOP 2026 opens and run it through the edition (about
 // 18 ms a world day), planting races through the world text; the crown's run it on through FEIGN 2026, the first rival festival, to
@@ -2533,6 +2534,428 @@ void FestMajorFloorWorld()
 		"FestMajorFloor: the hero's Micro Main Event title keeps its Honor and HallScore skips it (" + std::to_string(Before) + " -> " + std::to_string(Minor) +
 			"); the Mini Main Event, a major, adds 3.0 (-> " + std::to_string(Major) + ")");
 }
+
+// ------------------------------------------------------------------ FW-4: WHO'S IN (§4.7.3, §2.6.6, §2.6.7, §2.8.4; R-16, R-21).
+// Honors, a bond and three queued fields are planted through the world text on the day-50 world; nothing is simulated past it (§8.1).
+
+/** Text escaped as the save writes a field (backslash, tab, newline, '|' and '~'). */
+std::string FestEscWorld(const std::string& S)
+{
+	std::string Out;
+	for (const char C : S)
+	{
+		Out += C == '\\' ? std::string("\\\\")
+			: C == '\t'  ? std::string("\\t")
+			: C == '\n'  ? std::string("\\n")
+			: C == '|'   ? std::string("\\p")
+			: C == '~'   ? std::string("\\s")
+						 : std::string(1, C);
+	}
+	return Out;
+}
+
+/** A number as text that reads back exactly (%.17g). */
+std::string FestNumWorld(double V)
+{
+	char Buf[40];
+	std::snprintf(Buf, sizeof(Buf), "%.17g", V);
+	return Buf;
+}
+
+/** A world\tq line as the save writes a queued event: its fields in World::Write's order, then its registrations as
+ *  npc~ticket~staked~bullets~share~known~better records. */
+std::string FestQueueLineWorld(const ss::world::Pending& P)
+{
+	const auto Int = [](long long V) { return std::to_string(V); };
+	std::string Who;
+	for (const ss::world::Entry& E : P.Who)
+	{
+		Who += (Who.empty() ? "" : "|") + Int(E.Npc) + "~" + Int(E.Ticket ? 1 : 0) + "~" + Int(E.Staked ? 1 : 0) + "~" + Int(E.Bullets) + "~" + FestNumWorld(E.Share) +
+			   "~" + Int(E.Known) + "~" + Int(E.Better);
+	}
+	const std::string Fields[] = {FestEscWorld(P.Id), FestEscWorld(P.Name), Int(P.Online ? 1 : 0), Int(P.Template), Int(P.Kind), FestNumWorld(P.Start),
+		FestNumWorld(P.End), Int(P.Entries), Int(P.Pool), Int(P.BuyIn), Int(P.Tier), Int(P.Format), Int(P.TableSize), Int(P.Major ? 1 : 0), Int(P.Bracelet ? 1 : 0),
+		Int(P.Ring ? 1 : 0), FestEscWorld(P.Series), FestEscWorld(P.Ticket), Int(P.SeatValue), Int(P.Stakes), Int(P.HeroPlace), Int(P.HeroPrize), FestNumWorld(P.Strength),
+		FestNumWorld(P.Luck), Int(P.Kinds), Int(P.Seats), Int(P.FinalSize), Who};
+	std::string Out = "world\tq";
+	for (const std::string& F : Fields)
+	{
+		Out += "\t" + F;
+	}
+	return Out + "\n";
+}
+
+/** The belt Honor's points planted for RCOP 2026 (§2.6.7's {Points}). */
+constexpr int kFestBeltPointsWorld = 4321;
+
+/** WHO'S IN's planted world (FestStoriesWorld) and the people and fields it holds. */
+struct FestStoriesRunWorld
+{
+	std::unique_ptr<ss::world::World> W;
+	bool Found = false; // the editions, the instances and the people exist
+	std::string Missing;
+	std::string MainId, MiniId, OtherId, IdleId; // RCOP 2027's Main and Mini Main Event, a field that is no festival's, an unqueued event
+	int Rival = -1, MetP = -1, Def = -1, Belt = -1, Year = -1, Pro = -1, Streamer = -1, Qual = -1, Nobody = -1, Late = -1, Grinder = -1;
+	double Ms = 0.0; // the build: copy, plant, write, read
+};
+
+/**
+ * The skip run's day-50 world (RCOP 2026 crowned; Team RiverLine signed its first class on Nov 1) with, planted through its text: Honors
+ * first in history, so they stand on the roll before the ones RCOP 2026 made (RCOP 2026's Main to Def, its Mini and Micro Main Events
+ * to Pro, its belt to Belt with 4,321 points, PENNANT 2027's and REIGN 2027's Mains to Year, FEIGN 2026's Main to Streamer), a bond with
+ * a memory for MetP, and three queued fields as world\tq lines: RCOP 2027's Main (ten registrations, Def twice; tickets for Qual, Year
+ * and the rival), its Mini Main Event (Def not registered; a ticket for Year; Grinder, a plain person with two or more wins among their
+ * Recent finishes and no Honor) and a RiverLine event on day 75 that is no festival's (a ticket for Qual). Rival, Pro (a team pro),
+ * Streamer and Late (Kast streamers) carry their flags; the rest are people with none; nobody picked but the rival holds a festival title
+ * or a bond of their own. Built once.
+ */
+FestStoriesRunWorld& FestStoriesWorld()
+{
+	namespace world = ss::world;
+	using ss::fest::Brand;
+	static FestStoriesRunWorld Run;
+	if (Run.W)
+	{
+		return Run;
+	}
+	const auto T0 = std::chrono::steady_clock::now();
+	Run.W = std::make_unique<world::World>();
+	world::World Base = *FestSkipWorld().Skip;
+	const ss::fest::Festival* R26 = FestRcopWorld();
+	const ss::fest::Festival* R27 = FestEditionWorld(Brand::Rcop, 2027);
+	const ss::fest::Festival* Pen = FestEditionWorld(Brand::Pennant, 2027);
+	const ss::fest::Festival* Reign = FestEditionWorld(Brand::Reign, 2027);
+	const ss::fest::Festival* Feign = ss::fest::FestivalOf("ignite.feign26");
+	ss::net::EventInstance Main, Mini, Idle, Mini26, Micro26, Other;
+	const bool Editions = R26 && R27 && Pen && Reign && Feign && R26->TitleIds.size() == 3 && R27->TitleIds.size() == 3 && FestInstanceWorld(*R27, R27->MainId, Main) &&
+						  FestInstanceWorld(*R27, R27->TitleIds[1], Mini) && FestInstanceWorld(*R27, R27->TitleIds[2], Idle) &&
+						  FestInstanceWorld(*R26, R26->TitleIds[1], Mini26) && FestInstanceWorld(*R26, R26->TitleIds[2], Micro26);
+	const ss::net::Network& N = ss::net::Shared();
+	bool HaveOther = false;
+	for (const ss::net::EventInstance& E : N.Window(FestAtWorld(75), FestAtWorld(76)))
+	{
+		const ss::net::EventTemplate& T = N.TemplateOf(E);
+		if (!HaveOther && T.Series.empty() && T.Fmt != ss::net::Format::Satellite)
+		{
+			Other = E;
+			HaveOther = true;
+		}
+	}
+	std::vector<int> Titled; // anyone the skip run gave a festival title or belt
+	for (const world::Honor& H : Base.Honors())
+	{
+		if (world::TitleRank(H) > 0)
+		{
+			Titled.push_back(H.Npc);
+		}
+	}
+	std::sort(Titled.begin(), Titled.end());
+	std::vector<int> Plain;
+	for (int K = 1; K < static_cast<int>(Base.People().size()); ++K)
+	{
+		const world::Npc* P = Base.Get(K);
+		if (!P || P->Faded || (!P->Rival && (std::binary_search(Titled.begin(), Titled.end(), K) || Base.Bonds().count(K) > 0)))
+		{
+			continue;
+		}
+		if (P->Rival)
+		{
+			Run.Rival = Run.Rival < 0 ? K : Run.Rival;
+		}
+		else if (P->Pro)
+		{
+			Run.Pro = Run.Pro < 0 ? K : Run.Pro;
+		}
+		else if (P->Streams && !P->Pro && Run.Streamer < 0)
+		{
+			Run.Streamer = K;
+		}
+		else if (P->Streams && !P->Pro && Run.Late < 0)
+		{
+			Run.Late = K;
+		}
+		else if (!P->Pro && !P->Streams && Plain.size() < 6)
+		{
+			Plain.push_back(K);
+		}
+		else if (!P->Pro && !P->Streams && Run.Grinder < 0 &&
+				 std::count_if(P->Recent.begin(), P->Recent.end(), [](const world::Finish& F) { return F.Place == 1; }) >= 2)
+		{
+			Run.Grinder = K; // two or more Recent wins and no Honor: no title holder (titles are counted from Honors, §2.6.7)
+		}
+	}
+	Run.Found = Editions && HaveOther && Run.Rival >= 0 && Run.Pro >= 0 && Run.Streamer >= 0 && Run.Late >= 0 && Plain.size() == 6 && Run.Grinder >= 0;
+	if (!Run.Found)
+	{
+		Run.Missing = std::string(Editions ? "" : "editions or instances; ") + (HaveOther ? "" : "a day-75 RiverLine event with no series; ") +
+					  "rival " + std::to_string(Run.Rival) + ", pro " + std::to_string(Run.Pro) + ", streamers " + std::to_string(Run.Streamer) + "/" +
+					  std::to_string(Run.Late) + ", plain people " + std::to_string(Plain.size()) + ", grinder " + std::to_string(Run.Grinder);
+		return Run;
+	}
+	Run.Def = Plain[0];
+	Run.Belt = Plain[1];
+	Run.Year = Plain[2];
+	Run.MetP = Plain[3];
+	Run.Qual = Plain[4];
+	Run.Nobody = Plain[5];
+	Run.MainId = Main.Id;
+	Run.MiniId = Mini.Id;
+	Run.OtherId = Other.Id;
+	Run.IdleId = Idle.Id;
+	Base.Remember(Run.MetP, world::MemoryKind::Met, N.TemplateOf(Other).Name, 0, Base.Clock());
+	const auto Name = [&Base](int Id) { return Base.Get(Id)->Name; };
+	const std::string Honors =
+		FestHonorLineWorld(2026, FestTemplateNameWorld(*R26, R26->MainId), FestMainIdWorld(*R26), Run.Def, Name(Run.Def), 250000000, 4100, R26->MainStart + 600.0) +
+		FestHonorLineWorld(2026, FestTemplateNameWorld(*R26, R26->TitleIds[1]), Mini26.Id, Run.Pro, Name(Run.Pro), 4800000, Mini26.Entries, Mini26.Start + 600.0) +
+		FestHonorLineWorld(2026, FestTemplateNameWorld(*R26, R26->TitleIds[2]), Micro26.Id, Run.Pro, Name(Run.Pro), 900000, Micro26.Entries, Micro26.Start + 600.0) +
+		FestHonorLineWorld(2026, R26->Name + " Player of the Series", R26->SeriesId + "#pos", Run.Belt, Name(Run.Belt), 0, kFestBeltPointsWorld,
+			FestHourAfterWorld(ss::fest::LastEnd(*R26))) +
+		FestHonorLineWorld(2027, FestTemplateNameWorld(*Pen, Pen->MainId), FestMainIdWorld(*Pen), Run.Year, Name(Run.Year), 30000000, 2400, Pen->MainStart + 600.0) +
+		FestHonorLineWorld(2027, FestTemplateNameWorld(*Reign, Reign->MainId), FestMainIdWorld(*Reign), Run.Year, Name(Run.Year), 40000000, 2600, Reign->MainStart + 600.0) +
+		FestHonorLineWorld(2026, FestTemplateNameWorld(*Feign, Feign->MainId), FestMainIdWorld(*Feign), Run.Streamer, Name(Run.Streamer), 20000000, 1800, Feign->MainStart + 600.0);
+	const auto Queued = [&Base](const ss::net::EventInstance& E, const std::vector<std::pair<int, bool>>& Who) {
+		world::Pending P = world::Sim::OnlineEvent(Base, E);
+		P.Who.clear();
+		P.HeroPlace = 0;
+		P.HeroPrize = 0;
+		for (const std::pair<int, bool>& In : Who)
+		{
+			world::Entry X;
+			X.Npc = In.first;
+			X.Ticket = In.second;
+			P.Who.push_back(X);
+		}
+		return FestQueueLineWorld(P);
+	};
+	const std::string Queue =
+		Queued(Main, {{Run.Nobody, false}, {Run.Qual, true}, {Run.Streamer, false}, {Run.Year, true}, {Run.Pro, false}, {Run.Belt, false}, {Run.Def, false},
+						 {Run.MetP, false}, {Run.Rival, true}, {Run.Def, false}}) +
+		Queued(Mini, {{Run.Belt, false}, {Run.Pro, false}, {Run.Year, true}, {Run.Nobody, false}, {Run.Streamer, false}, {Run.Grinder, false}}) +
+		Queued(Other, {{Run.Pro, false}, {Run.Streamer, false}, {Run.Def, false}, {Run.Belt, false}, {Run.Year, false}, {Run.Nobody, false}, {Run.Rival, false},
+						  {Run.Qual, true}});
+	std::string Text = FestPlantFirstWorld(FestTextWorld(Base), Honors);
+	const size_t FirstQ = Text.find("world\tq\t");
+	Text.insert(FirstQ == std::string::npos ? Text.size() : FirstQ, Queue);
+	FestLoadWorld(*Run.W, Text);
+	Run.Ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count();
+	return Run;
+}
+
+/** A StoryWhy's name (the checks' messages). */
+const char* FestWhyNameWorld(ss::world::StoryWhy Why)
+{
+	const char* const Names[] = {"Rival", "Following", "Met", "Wake", "DefendingChampion", "DefendingSeries", "Champion", "YearChampion", "TitleHolder", "TeamPro",
+		"Streamer", "Rising", "Qualifier"};
+	const size_t K = static_cast<size_t>(Why);
+	return K < sizeof(Names) / sizeof(Names[0]) ? Names[K] : "none";
+}
+
+/** People as "npc Why" items, in order (the checks compare these). */
+std::string FestPeopleTextWorld(const std::vector<std::pair<int, ss::world::StoryWhy>>& People)
+{
+	std::string Out;
+	for (const std::pair<int, ss::world::StoryWhy>& P : People)
+	{
+		Out += (Out.empty() ? "" : ", ") + std::to_string(P.first) + " " + FestWhyNameWorld(P.second);
+	}
+	return Out;
+}
+
+std::string FestFieldTextWorld(const ss::world::FieldStories& F)
+{
+	std::vector<std::pair<int, ss::world::StoryWhy>> People;
+	for (const ss::world::StoryPerson& P : F.People)
+	{
+		People.emplace_back(P.Npc, P.Why);
+	}
+	return FestPeopleTextWorld(People);
+}
+
+/** A field's group counts, in StoryGroup's order. */
+std::string FestGroupsWorld(const ss::world::FieldStories& F)
+{
+	std::string Out;
+	for (const int G : F.Groups)
+	{
+		Out += (Out.empty() ? "" : " ") + std::to_string(G);
+	}
+	return Out;
+}
+
+/** The reason Npc is listed under in EventId's field (StoryWhy::Count: not listed). */
+ss::world::StoryWhy FestListedWorld(const ss::world::World& W, const std::string& EventId, int Npc)
+{
+	for (const ss::world::StoryPerson& P : W.FieldStoriesOf(EventId).People)
+	{
+		if (P.Npc == Npc)
+		{
+			return P.Why;
+		}
+	}
+	return ss::world::StoryWhy::Count;
+}
+
+/**
+ * FestFieldStories (§2.15.1, §4.7.3, §2.8.4): WHO'S IN over a field's queued registrations, each person once under the first reason in
+ * StoryWhy's order (registration order within one). RCOP 2027's Main lists the rival, the person met, RCOP 2026's Main champion (the
+ * defending champion, registered), its belt holder (the defending Player of the Series), the year's other champion, the two-title holder,
+ * the streamer and the qualifier, and nobody without a story; its Qualifiers group counts its three tickets. On its Mini Main Event the
+ * defender, not registered, is not listed (nobody is DefendingChampion) and the belt holder is a champion on the roll. In a field that is
+ * no festival's the Main and belt holders of any brand are champions and nobody defends. An event not queued has no stories. Kept per
+ * world state: one object for two reads with other events read between; a copy reads the same; a registration (World::Join: the revision
+ * moves) shows at once.
+ * Planted bugs: an unregistered defender listed (the SPEC's); a person listed twice; registration order kept; the field kept across a
+ * revision.
+ */
+void FestFieldStories()
+{
+	namespace world = ss::world;
+	using Why = world::StoryWhy;
+	FestStoriesRunWorld& Run = FestStoriesWorld();
+	if (!Run.Found)
+	{
+		Expect(false, "FestFieldStories: the planted world's editions, instances and people exist (" + Run.Missing + ")");
+		return;
+	}
+	const world::World& W = *Run.W;
+	const size_t Sizes[] = {W.RegisteredNow(Run.MainId).size(), W.RegisteredNow(Run.MiniId).size(), W.RegisteredNow(Run.OtherId).size()};
+	Expect(Sizes[0] == 10 && Sizes[1] == 6 && Sizes[2] == 8, "FestFieldStories: the three planted fields are queued as written (" + std::to_string(Sizes[0]) + ", " +
+																  std::to_string(Sizes[1]) + ", " + std::to_string(Sizes[2]) + " registrations)");
+	const std::string WantMain = FestPeopleTextWorld({{Run.Rival, Why::Rival}, {Run.MetP, Why::Met}, {Run.Def, Why::DefendingChampion}, {Run.Belt, Why::DefendingSeries},
+		{Run.Year, Why::YearChampion}, {Run.Pro, Why::TitleHolder}, {Run.Streamer, Why::Streamer}, {Run.Qual, Why::Qualifier}});
+	const world::FieldStories& Main = W.FieldStoriesOf(Run.MainId);
+	Expect(FestFieldTextWorld(Main) == WantMain && FestGroupsWorld(Main) == "3 0 0 0 0",
+		"FestFieldStories: RCOP 2027's Main lists each person once in StoryWhy's order, the registered defender among them, and counts 3 qualifiers (got [" +
+			FestFieldTextWorld(Main) + "] groups " + FestGroupsWorld(Main) + "; want [" + WantMain + "] groups 3 0 0 0 0)");
+	const std::string WantMini = FestPeopleTextWorld({{Run.Belt, Why::Champion}, {Run.Pro, Why::TitleHolder}, {Run.Streamer, Why::Streamer}, {Run.Year, Why::Qualifier}});
+	const world::FieldStories& Mini = W.FieldStoriesOf(Run.MiniId);
+	bool Defends = false;
+	for (const world::StoryPerson& P : Mini.People)
+	{
+		Defends = Defends || P.Npc == Run.Def || P.Why == Why::DefendingChampion;
+	}
+	Expect(!Defends && FestFieldTextWorld(Mini) == WantMini && FestGroupsWorld(Mini) == "1 0 0 0 0",
+		"FestFieldStories: on RCOP 2027's Mini Main Event the defender, not registered, is not listed and the belt holder is a champion on the roll (got [" +
+			FestFieldTextWorld(Mini) + "] groups " + FestGroupsWorld(Mini) + "; want [" + WantMini + "])");
+	const std::string WantOther = FestPeopleTextWorld({{Run.Rival, Why::Rival}, {Run.Streamer, Why::Champion}, {Run.Def, Why::Champion}, {Run.Belt, Why::Champion},
+		{Run.Year, Why::Champion}, {Run.Pro, Why::TeamPro}, {Run.Qual, Why::Qualifier}});
+	const world::FieldStories& Other = W.FieldStoriesOf(Run.OtherId);
+	const world::FieldStories& Idle = W.FieldStoriesOf(Run.IdleId);
+	Expect(FestFieldTextWorld(Other) == WantOther && FestGroupsWorld(Other) == "1 0 0 0 0" && Idle.People.empty() && FestGroupsWorld(Idle) == "0 0 0 0 0",
+		"FestFieldStories: in a field that is no festival's anyone with a festival Main or a belt (any brand) is a champion and nobody defends; an unqueued event has "
+		"no stories (got [" +
+			FestFieldTextWorld(Other) + "]; want [" + WantOther + "]; unqueued: " + std::to_string(Idle.People.size()) + " people)");
+	// Kept per world state: one object across reads of other events; a copy (its own views) reads the same; a registration shows at once.
+	const world::FieldStories* First = &W.FieldStoriesOf(Run.MainId);
+	(void)W.FieldStoriesOf(Run.MiniId);
+	(void)W.FieldStoriesOf(Run.OtherId);
+	(void)W.FieldStoriesOf(Run.IdleId);
+	const bool Kept = First == &Main && First == &W.FieldStoriesOf(Run.MainId) && FestFieldTextWorld(*First) == WantMain;
+	world::World Copy = W;
+	const auto T0 = std::chrono::steady_clock::now();
+	const std::string CopyText = FestFieldTextWorld(Copy.FieldStoriesOf(Run.MainId));
+	const auto T1 = std::chrono::steady_clock::now();
+	(void)Copy.FieldStoriesOf(Run.MainId);
+	const auto T2 = std::chrono::steady_clock::now();
+	Copy.Join(Run.MainId, Run.Late);
+	const std::string Joined = FestFieldTextWorld(Copy.FieldStoriesOf(Run.MainId));
+	const std::string WantJoined = FestPeopleTextWorld({{Run.Rival, Why::Rival}, {Run.MetP, Why::Met}, {Run.Def, Why::DefendingChampion},
+		{Run.Belt, Why::DefendingSeries}, {Run.Year, Why::YearChampion}, {Run.Pro, Why::TitleHolder}, {Run.Streamer, Why::Streamer}, {Run.Late, Why::Streamer},
+		{Run.Qual, Why::Qualifier}});
+	Expect(Kept && CopyText == WantMain && Joined == WantJoined,
+		std::string("FestFieldStories: kept per world state (one object across reads of other events: ") + (Kept ? "yes" : "no") +
+			"); a copy reads the same; a registration (World::Join) shows at once (got [" + Joined + "]; want [" + WantJoined + "])");
+	std::printf("  FestFieldStories: the planted world built in %.0f ms; RCOP 2027's Main walked in %.3f ms (10 registrations), a cached read %.4f ms\n", Run.Ms,
+		std::chrono::duration<double, std::milli>(T1 - T0).count(), std::chrono::duration<double, std::milli>(T2 - T1).count());
+}
+
+/**
+ * FestStoryHooks (§2.15.1, §2.6.7, §2.11; R-16, R-21): the championships' three storylines in WHO'S IN, from Honors planted through the
+ * world text (never simulated to day 554, §8.1). On RCOP 2027's Main RCOP 2026's belt holder is the defending Player of the Series,
+ * "DEFENDING PLAYER OF THE SERIES · {Name} · 4,321 pts" (the belt Honor's points); the holder of PENNANT 2027's and REIGN 2027's Mains is
+ * the year's champion, "{Name} · REIGN 2027 champion" (the latest); the holder of RCOP 2026's Mini and Micro Main Event titles (Honors
+ * only: no RCOP title among their Recent finishes) holds two RCOP titles, "{Name} · 2 RCOP titles", and a registrant with two or more Recent
+ * wins but no Honor holds none. On the Mini Main Event (a title event, not
+ * the Main) only the title count holds; in a field that is no festival's none does. FestWhyLine answers "" for every other reason (R-21:
+ * their labels are F-hubs', U38) and wherever a reason's fact doesn't hold. The ChampionshipPair beat is W-story's at G2.
+ * Planted bugs: a title count taken from Recent instead of Honors (the SPEC's); the defending Player of the Series on every championship
+ * event; FestWhyLine widened to the Champion reason.
+ */
+void FestStoryHooks()
+{
+	namespace world = ss::world;
+	using Why = world::StoryWhy;
+	FestStoriesRunWorld& Run = FestStoriesWorld();
+	if (!Run.Found)
+	{
+		Expect(false, "FestStoryHooks: the planted world's editions, instances and people exist (" + Run.Missing + ")");
+		return;
+	}
+	const world::World& W = *Run.W;
+	const auto Line = [&W](int Npc, Why Y, const std::string& EventId) {
+		world::StoryPerson P;
+		P.Npc = Npc;
+		P.Why = Y;
+		return world::FestWhyLine(W, P, EventId);
+	};
+	const auto NameOf = [&W](int Npc) { return W.Get(Npc)->Name; };
+	const std::string Dot = " \xC2\xB7 ";
+	// The defending Player of the Series: the championship's Main only (§2.6.7: "WHO'S IN on the championship Main").
+	const std::string Series = Line(Run.Belt, Why::DefendingSeries, Run.MainId);
+	const std::string WantSeries = "DEFENDING PLAYER OF THE SERIES" + Dot + NameOf(Run.Belt) + Dot + "4,321 pts";
+	Expect(FestListedWorld(W, Run.MainId, Run.Belt) == Why::DefendingSeries && Series == WantSeries && FestListedWorld(W, Run.MiniId, Run.Belt) == Why::Champion &&
+			   Line(Run.Belt, Why::DefendingSeries, Run.MiniId).empty(),
+		"FestStoryHooks: RCOP 2026's belt holder is the defending Player of the Series on RCOP 2027's Main only, with the belt Honor's points (\"" + Series +
+			"\"; on the Mini Main Event: " + FestWhyNameWorld(FestListedWorld(W, Run.MiniId, Run.Belt)) + ")");
+	// The year's chase: another championship's Main title from the same year, on a championship's Main; the line names the latest.
+	const std::string Year = Line(Run.Year, Why::YearChampion, Run.MainId);
+	const std::string WantYear = NameOf(Run.Year) + Dot + "REIGN 2027 champion";
+	Expect(FestListedWorld(W, Run.MainId, Run.Year) == Why::YearChampion && Year == WantYear && FestListedWorld(W, Run.MiniId, Run.Year) == Why::Qualifier &&
+			   FestListedWorld(W, Run.OtherId, Run.Year) == Why::Champion && Line(Run.Year, Why::YearChampion, Run.MiniId).empty() &&
+			   Line(Run.Year, Why::YearChampion, Run.OtherId).empty(),
+		"FestStoryHooks: PENNANT 2027's and REIGN 2027's Main champion is the year's champion on RCOP 2027's Main, the line naming the latest (\"" + Year +
+			"\"), and nowhere else");
+	// The repeat-title watch: two of the brand's titles (any of the trio, any edition), counted from Honors, on any title event.
+	bool RecentWin = false; // an RCOP title among the title holder's Recent finishes (a win at an event named as an RCOP title)
+	for (const world::Finish& F : W.Get(Run.Pro)->Recent)
+	{
+		for (const ss::fest::Festival& E : ss::fest::All())
+		{
+			for (const std::string& Id : E.TitleIds)
+			{
+				RecentWin = RecentWin || (E.Which == ss::fest::Brand::Rcop && F.Place == 1 && F.Event == FestTemplateNameWorld(E, Id));
+			}
+		}
+	}
+	const std::vector<world::Finish>& Grind = W.Get(Run.Grinder)->Recent; // two or more wins, no Honor: never a title holder
+	const long long GrindWins = std::count_if(Grind.begin(), Grind.end(), [](const world::Finish& F) { return F.Place == 1; });
+	const std::string Titles = Line(Run.Pro, Why::TitleHolder, Run.MainId);
+	const std::string WantTitles = NameOf(Run.Pro) + Dot + "2 RCOP titles";
+	Expect(!RecentWin && GrindWins >= 2 && FestListedWorld(W, Run.MiniId, Run.Grinder) == Why::Count && FestListedWorld(W, Run.MainId, Run.Pro) == Why::TitleHolder && FestListedWorld(W, Run.MiniId, Run.Pro) == Why::TitleHolder &&
+			   FestListedWorld(W, Run.OtherId, Run.Pro) == Why::TeamPro && Titles == WantTitles && Line(Run.Pro, Why::TitleHolder, Run.MiniId) == WantTitles &&
+			   Line(Run.Pro, Why::TitleHolder, Run.OtherId).empty(),
+		"FestStoryHooks: the holder of RCOP 2026's Mini and Micro Main Event titles (from Honors; an RCOP title in their Recent finishes: " + std::string(RecentWin ? "one" : "none") +
+			") holds 2 RCOP titles on its title events (\"" + Titles + "\"), a team pro elsewhere; a registrant with " + std::to_string(GrindWins) +
+			" Recent wins and no Honor is listed as " + FestWhyNameWorld(FestListedWorld(W, Run.MiniId, Run.Grinder)));
+	// Every other reason prints no festival line (R-16, R-21); the three lines leave no placeholder.
+	std::string Loud;
+	for (const std::string* Id : {&Run.MainId, &Run.MiniId, &Run.OtherId})
+	{
+		for (const world::StoryPerson& P : W.FieldStoriesOf(*Id).People)
+		{
+			const bool Hook = P.Why == Why::DefendingSeries || P.Why == Why::YearChampion || P.Why == Why::TitleHolder;
+			const std::string L = world::FestWhyLine(W, P, *Id);
+			if (Hook == L.empty())
+			{
+				Loud += (Loud.empty() ? "" : "; ") + std::to_string(P.Npc) + " " + FestWhyNameWorld(P.Why) + " \"" + L + "\"";
+			}
+		}
+	}
+	const bool Filled = (Series + Year + Titles).find('{') == std::string::npos;
+	Expect(Loud.empty() && Filled, "FestStoryHooks: only the three championship reasons print a festival line, every placeholder filled (" +
+									   (Loud.empty() ? std::string("none other") : Loud) + ")");
+	std::printf("  FestStoryHooks: \"%s\" | \"%s\" | \"%s\"\n", Series.c_str(), Year.c_str(), Titles.c_str());
+}
 } // namespace
 
 void SegWorld()
@@ -2633,6 +3056,15 @@ void SegWorld()
 	if (Only("FestMajorFloor"))
 	{
 		FestMajorFloorWorld(); // F-world's world half (F-net's in festivals_main.cpp)
+	}
+	// FW-4: WHO'S IN
+	if (Only("FestFieldStories"))
+	{
+		FestFieldStories();
+	}
+	if (Only("FestStoryHooks"))
+	{
+		FestStoryHooks();
 	}
 }
 } // namespace festivals_test

@@ -34,8 +34,19 @@
 // finds a Champion or Won post's title for World::Headline (G/WorldText.cpp). HeroFestPins walks the hero's results once per world
 // state (a pin per edition: outline played, silver cashed, gold won; satellites never count) and HeroFestResults lists one edition's,
 // newest first. The rolls and pins are kept in FestViews beside the race (one reader, PC-9). No RNG (§2.12).
+//
+// G1, FW-4 (F-world; SPEC v1.7 §4.7.3, §2.6.6, §2.6.7, §2.8.4; LEAD_CALLS R-16, R-21): WHO'S IN. World::FieldStoriesOf walks an event's
+// queued registrations (RegisteredNow's data) once per world state and lists each person once, under the first reason that holds in
+// StoryWhy's order: the rival, someone the hero has met (a bond with a memory), the festival's defending champion (its Main's, from the
+// edition before), on a championship's Main the defending Player of the Series, a champion on the brand's roll (a Main or a belt; in a
+// field that is no festival's, anyone with a festival Main or a belt, any brand), on a championship's Main the year's champion of another
+// championship, on a championship's title event a holder of two or more of the brand's titles, a team pro, a Kast streamer and a
+// satellite qualifier (the entry's ticket); Following, Wake and Rising are G2's. The Qualifiers group counts the registered qualifiers.
+// FestWhyLine composes the three championship reasons' lines from fest::TextInventory's who:fest:* templates (R-16; not widened, R-21):
+// every other reason's label is F-hubs' (U38). The fields are kept in FestViews, one per event asked, until the world state moves.
 #include "ShortStack/Game/WorldFest.h"
 
+#include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/World.h"
@@ -57,6 +68,11 @@ namespace ss
 {
 namespace fest
 {
+namespace fest_text_detail
+{
+const char* FestText(const std::string& Key); // G/SessionFest.cpp: a festival text's template by its key (§2.11; "" when it has none)
+} // namespace fest_text_detail
+
 /** World::FestViews' contents (H0, LEAD_CALLS R-10): the festival views kept per world state. Never saved; a copied World starts
  *  without them (World::FestViewBox), so a snapshot builds its own on its one reader (the host's writer, which reads none). */
 struct WorldViews
@@ -121,6 +137,17 @@ struct WorldViews
 		std::vector<world::HeroFestResult> Rows;
 	};
 	ResultsView Results;
+	/** FW-4: WHO'S IN (World::FieldStoriesOf), one field per event asked at this world state and Honors' count. The reference a read
+	 *  returns holds until the state moves (a std::map's nodes stay put while other events' fields are added). */
+	struct StoriesView
+	{
+		bool Valid = false;
+		uint64_t Serial = 0;
+		int Rev = -1, HeroRev = -1;
+		size_t Honors = 0;
+		std::map<std::string, world::FieldStories> ByEvent;
+	};
+	StoriesView Stories;
 };
 
 /** World's friend for the festival modules (§6.2): the store World keeps for them (F-world's reads and writes from G1). */
@@ -916,7 +943,7 @@ void FestTicketPaid(World& W, const std::string& Key)
 }
 
 // ---- G1's appends (the lead's pre-wave commit H0, PLAN_G1 §4.2): F-world's bodies (FestRaceKey FW-2a, HeroMarks FW-2b, HeroFestResults
-// FW-3); FestWhyLine a stub answering "none" until FW-4.
+// FW-3; FestWhyLine FW-4, below with WHO'S IN).
 
 const std::vector<HeroFestMark>& HeroMarks(const World& W)
 {
@@ -930,11 +957,6 @@ const std::string& FestRaceKey(const World& W)
 	// Afterglow (FW-2b clears FestLast after it), else none.
 	const std::string& Live = fest::WorldAccess::Race(W).Key;
 	return !Live.empty() ? Live : fest::WorldAccess::Last(W).Key;
-}
-
-std::string FestWhyLine(const World& /*W*/, const StoryPerson& /*Person*/, const std::string& /*EventId*/)
-{
-	return std::string();
 }
 
 std::vector<HeroFestResult> HeroFestResults(const World& W, const std::string& Key)
@@ -1069,13 +1091,356 @@ const Honor* FestTopTitle(const World& W, int Npc)
 	return Top;
 }
 
-// ---- WHO'S IN (§4.7.3, PA-27)
+// ---- WHO'S IN (§4.7.3, PA-27; FW-4)
 
-const FieldStories& World::FieldStoriesOf(const std::string& /*EventId*/) const
+namespace worldfest_detail
 {
-	// Phase A: nobody's story is told yet (G1: F-world's People and the Qualifiers group, cached per world revision).
-	static const FieldStories FestStoriesNone;
-	return FestStoriesNone;
+/** What WHO'S IN reads of an event id (§4.7.3): its festival (null: a field that is no festival's, a satellite's included), whether it
+ *  is the edition's Main or one of its titles (TitleIds), whether the edition is a championship's, and the event's day. */
+struct FestFieldFacts
+{
+	const fest::Festival* F = nullptr;
+	bool Main = false, Title = false, Champ = false;
+	int Day = 0;
+};
+
+FestFieldFacts FestFieldOf(const std::string& EventId)
+{
+	FestFieldFacts Out;
+	const size_t At = EventId.rfind('@');
+	if (At == std::string::npos)
+	{
+		return Out;
+	}
+	const std::string Template = EventId.substr(0, At);
+	const net::EventTemplate* T = net::ForEvent(EventId).FindTemplate(Template);
+	Out.F = T && T->Fmt != net::Format::Satellite && !T->Series.empty() ? fest::FestivalOf(T->Series) : nullptr;
+	if (Out.F)
+	{
+		Out.Main = Template == Out.F->MainId;
+		Out.Title = std::find(Out.F->TitleIds.begin(), Out.F->TitleIds.end(), Template) != Out.F->TitleIds.end();
+		Out.Champ = fest::IsChampionship(Out.F->Which);
+		Out.Day = sim::DayAt(std::atof(EventId.c_str() + At + 1));
+	}
+	return Out;
+}
+
+/** An edition's name without its year ("RCOP 2027" -> "RCOP"): the {Festival} of §2.6.7's lines, whose {Year} or count follows it. */
+std::string FestBrandName(const fest::Festival& F)
+{
+	const std::string Tail = " " + std::to_string(F.Year);
+	return FestEndsWith(F.Name, Tail.c_str()) ? F.Name.substr(0, F.Name.size() - Tail.size()) : F.Name;
+}
+
+/** The brand's titles Npc holds (§2.6.7's repeat-title watch): the roll's Mains, Minis and Micros, any edition. Honors, never a person's
+ *  Recent finishes (ten at most, gone within a year). */
+int FestTitlesHeld(const World& W, fest::Brand B, int Npc)
+{
+	int Count = 0;
+	for (const FestRollRow& R : FestRollView(W).ByBrand[static_cast<size_t>(B)])
+	{
+		for (const Honor* H : {R.Main, R.Mini, R.Micro})
+		{
+			Count += H && H->Npc == Npc ? 1 : 0;
+		}
+	}
+	return Count;
+}
+
+/** The edition of the latest Main title from Year that Npc holds at another championship than B (§2.6.7's year's chase; null: none). */
+const fest::Festival* FestYearTitle(const World& W, fest::Brand B, int Year, int Npc)
+{
+	const fest::Festival* Out = nullptr;
+	double Latest = -1.0;
+	const fest::WorldViews::RollView& V = FestRollView(W);
+	for (int K = static_cast<int>(fest::Brand::None) + 1; K < static_cast<int>(fest::Brand::Count); ++K)
+	{
+		const fest::Brand Other = static_cast<fest::Brand>(K);
+		if (Other == B || !fest::IsChampionship(Other))
+		{
+			continue;
+		}
+		for (const FestRollRow& R : V.ByBrand[static_cast<size_t>(K)])
+		{
+			if (R.Year == Year && R.Main && R.Main->Npc == Npc && R.Main->At > Latest)
+			{
+				Out = fest::FestivalOf(R.Key);
+				Latest = R.Main->At;
+			}
+		}
+	}
+	return Out;
+}
+
+/** Everyone holding a Main title from Year at another championship than B (the YearChampion reason's people on B's Main, sorted; one
+ *  roll walk a field, FestYearTitle names the edition for the line). */
+std::vector<int> FestYearChampsOf(const World& W, fest::Brand B, int Year)
+{
+	std::vector<int> Out;
+	const fest::WorldViews::RollView& V = FestRollView(W);
+	for (int K = static_cast<int>(fest::Brand::None) + 1; K < static_cast<int>(fest::Brand::Count); ++K)
+	{
+		const fest::Brand Other = static_cast<fest::Brand>(K);
+		if (Other == B || !fest::IsChampionship(Other))
+		{
+			continue;
+		}
+		for (const FestRollRow& R : V.ByBrand[static_cast<size_t>(K)])
+		{
+			if (R.Year == Year && R.Main && R.Main->Npc >= 0)
+			{
+				Out.push_back(R.Main->Npc);
+			}
+		}
+	}
+	std::sort(Out.begin(), Out.end());
+	Out.erase(std::unique(Out.begin(), Out.end()), Out.end());
+	return Out;
+}
+
+/** Everyone holding two or more of B's titles (the TitleHolder reason's people on B's title events, sorted; one roll walk a field, from
+ *  Honors as FestTitlesHeld counts them). */
+std::vector<int> FestTitleHoldersOf(const World& W, fest::Brand B)
+{
+	std::vector<int> Held;
+	for (const FestRollRow& R : FestRollView(W).ByBrand[static_cast<size_t>(B)])
+	{
+		for (const Honor* H : {R.Main, R.Mini, R.Micro})
+		{
+			if (H && H->Npc >= 0)
+			{
+				Held.push_back(H->Npc);
+			}
+		}
+	}
+	std::sort(Held.begin(), Held.end());
+	std::vector<int> Out;
+	for (size_t At = 0; At < Held.size();)
+	{
+		size_t End = At;
+		while (End < Held.size() && Held[End] == Held[At])
+		{
+			++End;
+		}
+		if (End - At >= 2)
+		{
+			Out.push_back(Held[At]);
+		}
+		At = End;
+	}
+	return Out;
+}
+
+/** The people the Champion reason holds for in a field, sorted (§4.7.3): in festival F's field the brand's roll (a Main or a belt, any
+ *  edition); in a field that is no festival's (F null) anyone with a festival Main or a belt, any brand. */
+std::vector<int> FestChampionsOf(const World& W, const fest::Festival* F)
+{
+	std::vector<int> Out;
+	const fest::WorldViews::RollView& V = FestRollView(W);
+	for (int K = static_cast<int>(fest::Brand::None) + 1; K < static_cast<int>(fest::Brand::Count); ++K)
+	{
+		if (F && static_cast<fest::Brand>(K) != F->Which)
+		{
+			continue;
+		}
+		for (const FestRollRow& R : V.ByBrand[static_cast<size_t>(K)])
+		{
+			for (const Honor* H : {R.Main, R.Crown})
+			{
+				if (H && H->Npc >= 0)
+				{
+					Out.push_back(H->Npc);
+				}
+			}
+		}
+	}
+	std::sort(Out.begin(), Out.end());
+	Out.erase(std::unique(Out.begin(), Out.end()), Out.end());
+	return Out;
+}
+
+/** One field's facts the reasons read, found once a walk: the defenders (INT_MIN: none) and each list reason's people (sorted). */
+struct FestFieldPeople
+{
+	int DefMain = INT_MIN;   // the festival's defending champion (its Main's, §2.6.3)
+	int DefSeries = INT_MIN; // on a championship's Main, the defending Player of the Series (the belt, §2.6.7)
+	std::vector<int> Champions;
+	std::vector<int> YearChamps;   // on a championship's Main: another championship's Main title from its year (§2.6.7)
+	std::vector<int> TitleHolders; // on a championship's title event: two or more of the brand's titles (§2.6.7)
+};
+
+/** The first reason in StoryWhy's order that holds for registrant E (person N) on the field Facts describe; StoryWhy::Count when none
+ *  does at G1 (Following, Wake and Rising are G2's). */
+StoryWhy FestStoryWhy(const World& W, const FestFieldPeople& Facts, const Npc& N, const Entry& E)
+{
+	if (N.Rival)
+	{
+		return StoryWhy::Rival;
+	}
+	const std::map<int, Bond>& Bonds = W.Bonds();
+	const auto Met = Bonds.find(E.Npc);
+	if (Met != Bonds.end() && !Met->second.Memories.empty())
+	{
+		return StoryWhy::Met;
+	}
+	if (E.Npc == Facts.DefMain)
+	{
+		return StoryWhy::DefendingChampion;
+	}
+	if (E.Npc == Facts.DefSeries)
+	{
+		return StoryWhy::DefendingSeries;
+	}
+	if (std::binary_search(Facts.Champions.begin(), Facts.Champions.end(), E.Npc))
+	{
+		return StoryWhy::Champion;
+	}
+	if (std::binary_search(Facts.YearChamps.begin(), Facts.YearChamps.end(), E.Npc))
+	{
+		return StoryWhy::YearChampion;
+	}
+	if (std::binary_search(Facts.TitleHolders.begin(), Facts.TitleHolders.end(), E.Npc))
+	{
+		return StoryWhy::TitleHolder;
+	}
+	if (N.Pro)
+	{
+		return StoryWhy::TeamPro;
+	}
+	if (N.Streams)
+	{
+		return StoryWhy::Streamer;
+	}
+	return E.Ticket ? StoryWhy::Qualifier : StoryWhy::Count;
+}
+
+/** EventId's WHO'S IN (§4.7.3): its queued registrations (RegisteredNow's data), each person once, in StoryWhy's order (registration
+ *  order within a reason); the Qualifiers group counts the registered people who won their seat by satellite. Empty when the event isn't
+ *  queued (played, called off, or not planned yet). */
+FieldStories FestStoriesBuild(const World& W, const std::string& EventId)
+{
+	FieldStories Out;
+	const Pending* P = nullptr;
+	for (const Pending& Q : fest::WorldAccess::Queue(W))
+	{
+		if (Q.Id == EventId)
+		{
+			P = &Q;
+			break;
+		}
+	}
+	if (!P || P->Who.empty())
+	{
+		return Out;
+	}
+	const FestFieldFacts Field = FestFieldOf(EventId);
+	FestFieldPeople Facts;
+	if (Field.F)
+	{
+		const Honor* Def = FestDefending(W, Field.F->Which, false, Field.Day);
+		Facts.DefMain = Def ? Def->Npc : INT_MIN;
+		const Honor* Belt = Field.Champ && Field.Main ? FestDefending(W, Field.F->Which, true, Field.Day) : nullptr;
+		Facts.DefSeries = Belt ? Belt->Npc : INT_MIN;
+		Facts.YearChamps = Field.Champ && Field.Main ? FestYearChampsOf(W, Field.F->Which, Field.F->Year) : std::vector<int>();
+		Facts.TitleHolders = Field.Champ && Field.Title ? FestTitleHoldersOf(W, Field.F->Which) : std::vector<int>();
+	}
+	Facts.Champions = FestChampionsOf(W, Field.F);
+	std::vector<uint8_t> Seen(W.People().size(), 0);
+	std::vector<std::pair<StoryWhy, int>> Found;
+	for (const Entry& E : P->Who)
+	{
+		const Npc* N = E.Npc >= 0 && static_cast<size_t>(E.Npc) < Seen.size() && Seen[static_cast<size_t>(E.Npc)] == 0 ? W.Get(E.Npc) : nullptr;
+		if (!N)
+		{
+			continue;
+		}
+		Seen[static_cast<size_t>(E.Npc)] = 1;
+		Out.Groups[static_cast<size_t>(StoryGroup::Qualifiers)] += E.Ticket ? 1 : 0;
+		const StoryWhy Why = FestStoryWhy(W, Facts, *N, E);
+		if (Why != StoryWhy::Count)
+		{
+			Found.emplace_back(Why, E.Npc);
+		}
+	}
+	std::stable_sort(Found.begin(), Found.end(), [](const std::pair<StoryWhy, int>& A, const std::pair<StoryWhy, int>& B) { return A.first < B.first; });
+	for (const std::pair<StoryWhy, int>& It : Found)
+	{
+		StoryPerson Person;
+		Person.Npc = It.second;
+		Person.Why = It.first;
+		Out.People.push_back(Person);
+	}
+	return Out;
+}
+
+/** Template Key (fest::TextInventory's who:fest:* lines) with each {Placeholder} filled. */
+std::string FestWhoFill(const char* Key, const std::vector<std::pair<std::string, std::string>>& Fills)
+{
+	std::string Out = fest::fest_text_detail::FestText(Key);
+	for (const std::pair<std::string, std::string>& F : Fills)
+	{
+		for (size_t At = Out.find(F.first); At != std::string::npos; At = Out.find(F.first, At + F.second.size()))
+		{
+			Out.replace(At, F.first.size(), F.second);
+		}
+	}
+	return Out;
+}
+} // namespace worldfest_detail
+
+const FieldStories& World::FieldStoriesOf(const std::string& EventId) const
+{
+	// Kept per world state (serial, Rev, HeroRev) and Honors' count, one field per event asked (§4.7.3: one walk a revision). A display
+	// read like the other festival views (no HoldGuard; the UI's one reader thread, PC-9).
+	fest::WorldViews::StoriesView& V = fest::WorldAccess::Views(*this).Stories;
+	const WorldStamp Stamp = SnapshotStamp();
+	if (!V.Valid || V.Serial != Stamp.Serial || V.Rev != Stamp.Rev || V.HeroRev != Stamp.HeroRev || V.Honors != Honors().size())
+	{
+		V = fest::WorldViews::StoriesView();
+		V.Serial = Stamp.Serial;
+		V.Rev = Stamp.Rev;
+		V.HeroRev = Stamp.HeroRev;
+		V.Honors = Honors().size();
+		V.Valid = true;
+	}
+	const auto It = V.ByEvent.find(EventId);
+	if (It != V.ByEvent.end())
+	{
+		return It->second;
+	}
+	return V.ByEvent.emplace(EventId, worldfest_detail::FestStoriesBuild(*this, EventId)).first->second;
+}
+
+std::string FestWhyLine(const World& W, const StoryPerson& Person, const std::string& EventId)
+{
+	// §2.6.7's three lines (who:fest:*, F-world's inventory), each only while its fact holds for the person on EventId, every figure from
+	// Honors; "" for every other reason (R-16, R-21: their labels are F-hubs', U38) and in a field that is no championship's.
+	const Npc* N = W.Get(Person.Npc);
+	const worldfest_detail::FestFieldFacts Field = worldfest_detail::FestFieldOf(EventId);
+	if (!N || !Field.F || !Field.Champ)
+	{
+		return std::string();
+	}
+	const fest::Brand B = Field.F->Which;
+	if (Person.Why == StoryWhy::DefendingSeries)
+	{
+		const Honor* Belt = Field.Main ? FestDefending(W, B, true, Field.Day) : nullptr;
+		return Belt && Belt->Npc == Person.Npc ? worldfest_detail::FestWhoFill("who:fest:defseries", {{"{Name}", N->Name}, {"{Points}", Grouped(Belt->Entries)}})
+											   : std::string();
+	}
+	if (Person.Why == StoryWhy::YearChampion)
+	{
+		const fest::Festival* G = Field.Main ? worldfest_detail::FestYearTitle(W, B, Field.F->Year, Person.Npc) : nullptr;
+		return G ? worldfest_detail::FestWhoFill("who:fest:yearchamp", {{"{Name}", N->Name}, {"{Festival}", worldfest_detail::FestBrandName(*G)}, {"{Year}", std::to_string(G->Year)}})
+				 : std::string();
+	}
+	if (Person.Why == StoryWhy::TitleHolder)
+	{
+		const int Held = Field.Title ? worldfest_detail::FestTitlesHeld(W, B, Person.Npc) : 0;
+		return Held >= 2 ? worldfest_detail::FestWhoFill("who:fest:titles", {{"{Name}", N->Name}, {"{N}", std::to_string(Held)}, {"{Festival}", worldfest_detail::FestBrandName(*Field.F)}})
+						 : std::string();
+	}
+	return std::string();
 }
 } // namespace world
 
