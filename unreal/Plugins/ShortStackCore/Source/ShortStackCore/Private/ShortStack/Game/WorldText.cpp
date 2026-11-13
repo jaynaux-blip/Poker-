@@ -1,9 +1,14 @@
 // The living world in words, for the debug tools: one person inside out, and the world's health at a glance.
+// Update 4 G1 (SPEC v1.7 §2.9.2, §2.11; F-world's FW-3): World::Headline's festival branch: a festival's Main and a championship's Mini
+// or Micro Main (head:fest:main, head:fest:title, tag FESTIVAL) and the crown (head:fest:crown, tag CROWN), from G/SiteMoney.cpp's rows.
 #include "ShortStack/Game/World.h"
 
 #include "ShortStack/Game/Badges.h"
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Sites.h"
+#include "SitesDetail.h"
+#include "WorldFestDetail.h"
 #include "WorldSim.h"
 
 #include <algorithm>
@@ -449,10 +454,28 @@ bool World::Headline(const WorldEvent& E, std::string& Title, std::string& Body,
 		return true;
 	}
 	// Update 4 (SPEC v1.7 §3.13, §3.15 R3, §3.19; §6 PA-20, PA-30): the story's own lines (G2, true with FlagStory only). Neither kind
-	// is posted before G2, and FestivalCrown (G1) falls to the default below: false.
+	// is posted before G2.
 	if (E.Kind == EventKind::TpiMark || E.Kind == EventKind::SceneEra)
 	{
 		return story::Headline(*this, E, Title, Body, Tag);
+	}
+	// Update 4 G1 (SPEC v1.7 §2.9.2; FW-3): a festival's crown, the Player of the Series (a person's or the player's). Its post carries
+	// the host site's bits (G/WorldFest.cpp), so a rival's crown is that site's news and stays off RiverLine's.
+	if (E.Kind == EventKind::FestivalCrown)
+	{
+		const Npc* Winner = Get(E.Npc);
+		const std::string Name = Winner ? Winner->Name : E.Npc == -1 ? HeroName : std::string();
+		if (Name.empty() || E.What.empty())
+		{
+			return false;
+		}
+		// What is the edition's name ("RCOP 2026"), Value the points, Amount the cashes; both lines read "the {Festival}".
+		const std::vector<std::pair<std::string, std::string>> Vars = {
+			{"Name", Name}, {"Festival", fest::NameAfterArticle(E.What)}, {"Points", Grouped(E.Value)}, {"Cashes", Grouped(E.Amount)}};
+		Title = site::FillCopy(site::CopyText("head:fest:crown:title"), Vars);
+		Body = site::FillCopy(site::CopyText("head:fest:crown"), Vars);
+		Tag = site::CopyText("tag:fest:crown");
+		return true;
 	}
 	const Npc* N = Get(E.Npc);
 	if (!N)
@@ -469,6 +492,20 @@ bool World::Headline(const WorldEvent& E, std::string& Title, std::string& Body,
 	case EventKind::Won:
 	case EventKind::Champion:
 	{
+		// Update 4 G1 (SPEC v1.7 §2.9.2; FW-3): a festival's Main (head:fest:main, its trophy named) or a championship's Mini or Micro Main
+		// (head:fest:title, v1.6), found through the post's Honor.
+		FestSlot Slot = FestSlot::None;
+		if (const fest::Festival* F = FestTitlePost(*this, E, Slot))
+		{
+			const bool Main = Slot == FestSlot::Main;
+			const std::vector<std::pair<std::string, std::string>> Head = {{"Name", Who}, {"Festival", fest::NameAfterArticle(F->Name)}, {"Tier", Slot == FestSlot::Mini ? "Mini" : "Micro"}};
+			const std::vector<std::pair<std::string, std::string>> Line = {
+				{"Prize", Money(E.Amount)}, {"Trophy", fest::TrophyName(F->Which, 0)}, {"Festival", F->Name}, {"Entries", Grouped(E.Value)}};
+			Title = site::FillCopy(site::CopyText(Main ? "head:fest:main:title" : "head:fest:title:title"), Head);
+			Body = site::FillCopy(site::CopyText(Main ? "head:fest:main" : "head:fest:title"), Line);
+			Tag = site::CopyText("tag:fest:festival");
+			return true;
+		}
 		const bool Qualifier = (E.Flags & FlagQualifier) != 0;
 		Title = Who + " wins " + E.What;
 		Body = Grouped(E.Value) + " entries \xC2\xB7 " + Money(E.Amount) + " to the winner.";
