@@ -244,7 +244,7 @@ set_tests_properties(golden_vectors PROPERTIES TIMEOUT 10)
 set_tests_properties(engine_invariants PROPERTIES TIMEOUT 10)
 set_tests_properties(night_one_session PROPERTIES TIMEOUT 232)
 set_tests_properties(riverline_ui PROPERTIES TIMEOUT 139)
-set_tests_properties(monkey_play PROPERTIES TIMEOUT 126)
+set_tests_properties(monkey_play PROPERTIES TIMEOUT 135)
 set_tests_properties(living_world PROPERTIES TIMEOUT 72)
 set_tests_properties(synthesized_audio PROPERTIES TIMEOUT 11)
 set_tests_properties(northside_shops PROPERTIES TIMEOUT 35)
@@ -253,7 +253,7 @@ set_tests_properties(northside_town PROPERTIES TIMEOUT 23)
 set_tests_properties(staking_backing PROPERTIES TIMEOUT 10)
 set_tests_properties(sponsor_deals PROPERTIES TIMEOUT 10)
 set_tests_properties(card_room PROPERTIES TIMEOUT 17)
-set_tests_properties(pro_badges PROPERTIES TIMEOUT 96)
+set_tests_properties(pro_badges PROPERTIES TIMEOUT 110)
 set_tests_properties(ai_styles PROPERTIES TIMEOUT 30)
 set_tests_properties(video_channel PROPERTIES TIMEOUT 20)
 set_tests_properties(rival_sites PROPERTIES TIMEOUT 30)
@@ -266,10 +266,10 @@ set_tests_properties(kast_growth PROPERTIES TIMEOUT 60)
 set_tests_properties(kast_ui PROPERTIES TIMEOUT 60)
 # Update 4 Phase A (SPEC v1.7 §6 PA-48, §8.1; the lead's P-4): the four new suites by the same rule. With empty mains their medians
 # are about 0 s, so each TIMEOUT is its cap; re-measured at every gate's integration as their checks land.
-set_tests_properties(festivals PROPERTIES TIMEOUT 30)
+set_tests_properties(festivals PROPERTIES TIMEOUT 31)
 set_tests_properties(world_u4 PROPERTIES TIMEOUT 45)
 set_tests_properties(big_field PROPERTIES TIMEOUT 30)
-set_tests_properties(u4_ui PROPERTIES TIMEOUT 60)
+set_tests_properties(u4_ui PROPERTIES TIMEOUT 94)
 # G1 (the lead's mid-wave commit H2; SPEC v1.7 §7.5, §8.1; PLAN_G1 §4.2 L8): the timing assertions' runs. A check that asserts
 # milliseconds asserts them only behind SS_PERF=1, as the median of 5 runs, and prints them otherwise; these three run the same
 # executables with SS_PERF=1, label perf and RUN_SERIAL (nothing else running beside them). The comparison tool's main run is
@@ -282,9 +282,14 @@ add_test(NAME festivals_perf COMMAND festivals_test)
 add_test(NAME rival_sites_perf COMMAND sites_test)
 add_test(NAME u4_ui_perf COMMAND u4_ui_test)
 set_tests_properties(festivals_perf rival_sites_perf u4_ui_perf PROPERTIES ENVIRONMENT "SS_PERF=1" LABELS perf RUN_SERIAL TRUE)
-set_tests_properties(festivals_perf PROPERTIES TIMEOUT 30)
+set_tests_properties(festivals_perf PROPERTIES TIMEOUT 31)
 set_tests_properties(rival_sites_perf PROPERTIES TIMEOUT 30)
-set_tests_properties(u4_ui_perf PROPERTIES TIMEOUT 60)
+set_tests_properties(u4_ui_perf PROPERTIES TIMEOUT 102)
+# G1's integration (the lead's L-I.5; P-4, PLAN_G1 §4.2 L9, RULINGS R34-26 and "after the wave's fifth run" item 3): the suites G1
+# changed and the three perf runs re-measured alone, three runs each (ctest -R, one at a time, 2026-11-13, the integrated tree), medians:
+# festivals 15.45 s (31), rival_sites 12.38 s (30), u4_ui 46.90 s (94), synthesized_audio 5.46 s (11), monkey_play 67.07 s with its
+# festival career (135), pro_badges 54.93 s (110), festivals_perf 15.41 s (31), rival_sites_perf 12.90 s (30), u4_ui_perf 50.71 s
+# (102); each within its budget, so only the TIMEOUTs move. Every other suite keeps its Phase 0 TIMEOUT (SPEC v1.7 §8.1).
 
 # Not a suite: core-styles' chart compiler (update 2 SPEC §2.4.2, §2.4.4), Tests/charts/*.txt into AI/ChartTables.cpp.
 add_executable(chartgen tools/chartgen/chartgen_main.cpp)
