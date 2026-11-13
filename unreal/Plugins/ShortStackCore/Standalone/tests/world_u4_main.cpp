@@ -16,12 +16,16 @@
 //   world_u4_test                    the checks (ctest)
 //   world_u4_test turn-session       the session-wide slice checks alone, whether or not this build wires them (see kTurnSessionWired)
 //   world_u4_test turn-actions       turn_actions alone
+//   world_u4_test w1 [seeds] [days]  S-W1 (G1, the lead's; SPEC v1.7 §6.5): who wins the flagship and festival Mains (5 x 1,095 by default)
 #include "u4_seat_harness.h"
 
+#include "ShortStack/Game/Festival.h"
+#include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Lobby.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Game/SitePlay.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Talk.h"
 #include "ShortStack/Game/Video.h"
 #include "ShortStack/Game/World.h"
@@ -34,6 +38,7 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -1429,6 +1434,207 @@ void SegTurnActions()
 		Log.c_str());
 	std::printf("  turn_actions: %.1fs\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
 }
+
+// ================================================================== S-W1 (the lead's slow mode, G1; SPEC v1.7 §6.5, §3.4 R2; LEAD_CALLS Q-16)
+//
+// world_u4_test w1 [seeds=5] [days=1095]: who wins the flagship and festival Mains in the real sim. Outside ctest (PLAN_G1 §5 item 14,
+// g1/check/LEAD_LIST.md §1.9). Per seed a Blank world from Night One runs to world day <days> through its own day loop (AdvanceTo a day
+// at a time, each call timed). Every title the world kept (Honors(), written by Sim::Resolve's winner block) that is a festival title
+// or a flagship Main is read with its winner from the world's own records, no new seam:
+//   - flagship (R2.1): the edition's SeriesInfo::Flagship (fest::Festival::Flagship: RCOP and Summer Slam at G1), the live Championship
+//     Main (its title's event id "championship-main@...", posted with FlagLive), or an online festival Main paying $1,000,000+ first;
+//   - the winner: tracked (a person the world followed), discovered (Discovered posted for this title) or anonymous (Npc -2); Identity,
+//     Professional, Came and Arrived from the roster at the end of the run; Entry::Ticket from the title's own post (Champion, Won or
+//     Discovered at the same minute with FlagQualifier);
+//   - R2.2 amateur: !Professional && (Recreational || WealthyAmateur); R2.3 a satellite seat (Ticket) or a first-year arrival
+//     (Came != None && day - Arrived <= 365). A Summer = R2.1 && R2.2 && R2.3; the cooldown (R2.4) is ignored for the chance.
+// It prints each such title's facts, the count meeting R2.1-R2.3 per Main kind, the Summer chance per seed and in all with a 95% Wilson
+// interval (the verdict is the point estimate against 5-25%, §6.5), the non-flagship festival Mains' chance as if they were flagship
+// (L2's "S-W1 may add REIGN"), and the sim's ms per world day (all days, and days 185 and 303: PENNANT I's and REIGN I's day 10). At G1
+// nobody arrives (Came is set from G2), so the first-year half reads 0 here; R-29: run it once more on a scratch merge of u4/sp-pace.
+// No check: the lead reads the numbers (L-P.1). Cost: about 17-25 ms a world day, so 5 x 1,095 days is a few minutes, single-threaded.
+namespace
+{
+/** One festival title or flagship Main's instance, known before the run (the network's schedule). */
+struct W1Title
+{
+	const ss::fest::Festival* F = nullptr;
+	int Tier = 0;          // 0 the Main, 1 a Mini, 2 a Micro (TitleIds' order)
+	std::string Kind;      // the Main kind the counts are kept by
+};
+
+/** One title the world recorded, with its winner's facts. */
+struct W1Row
+{
+	std::string Kind;
+	bool Flagship = false, Amateur = false, Ticket = false, FirstYear = false;
+};
+
+/** Counts by Main kind: titles, amateurs, satellite seats, first-years, all of R2.2-R2.3. */
+struct W1Count
+{
+	int Titles = 0, Amateur = 0, Ticket = 0, FirstYear = 0, Summer = 0;
+};
+
+/** The 95% Wilson interval of K in N, as "p% [lo%, hi%]". */
+std::string W1Wilson(int K, int N)
+{
+	if (N <= 0)
+	{
+		return "n/a (no flagship Main)";
+	}
+	const double Z = 1.96, P = static_cast<double>(K) / N, Nn = static_cast<double>(N);
+	const double Den = 1.0 + Z * Z / Nn;
+	const double Mid = (P + Z * Z / (2.0 * Nn)) / Den;
+	const double Half = Z * std::sqrt(P * (1.0 - P) / Nn + Z * Z / (4.0 * Nn * Nn)) / Den;
+	char Buf[96];
+	std::snprintf(Buf, sizeof(Buf), "%.1f%% [%.1f%%, %.1f%%] (%d of %d)", 100.0 * P, 100.0 * std::max(0.0, Mid - Half), 100.0 * std::min(1.0, Mid + Half), K, N);
+	return Buf;
+}
+
+/** Every festival title instance up to world day Days, by event id (Network::Next over each title template inside its edition). */
+std::map<std::string, W1Title> W1Titles(int Days)
+{
+	std::map<std::string, W1Title> Out;
+	for (const ss::fest::Festival& F : ss::fest::All())
+	{
+		if (F.FirstDay > Days)
+		{
+			continue;
+		}
+		const ss::net::Network& N = ss::net::Site(F.Site);
+		for (size_t K = 0; K < F.TitleIds.size(); ++K)
+		{
+			ss::net::EventInstance E;
+			double From = static_cast<double>(F.FirstDay) * ss::net::MinutesPerDay - 1.0;
+			while (N.Next(F.TitleIds[K], From, E) && E.Start < static_cast<double>(F.LastDay + 1) * ss::net::MinutesPerDay)
+			{
+				W1Title T;
+				T.F = &F;
+				T.Tier = static_cast<int>(K);
+				const std::string Brand = ss::fest::BrandKey(F.Which);
+				T.Kind = K > 0 ? Brand + (K == 1 ? " Mini" : " Micro") : Brand + " Main";
+				Out[E.Id] = T;
+				From = E.Start + 1.0;
+			}
+		}
+	}
+	return Out;
+}
+} // namespace
+
+void SegW1(int Seeds, int Days)
+{
+	namespace world = ss::world;
+	const double DayMin = ss::net::MinutesPerDay;
+	const double NightOne = static_cast<double>(ss::net::NightOneDay) * DayMin + 127.0;
+	const std::map<std::string, W1Title> Titles = W1Titles(Days);
+	std::printf("S-W1: %d seeds x %d world days, Blank worlds from Night One; %zu festival title instances in the window\n", Seeds, Days, Titles.size());
+	std::map<std::string, W1Count> ByKind;
+	int AllFlag = 0, AllSummer = 0, AllOther = 0, AllOtherSummer = 0;
+	double AllMs = 0.0;
+	int AllDays = 0;
+	for (int Seed = 1; Seed <= Seeds; ++Seed)
+	{
+		world::World W;
+		W.Create(static_cast<uint32_t>(Seed), NightOne, world::Start::Blank);
+		double Ms = 0.0, Worst = 0.0, Day185 = -1.0, Day303 = -1.0;
+		int WorstDay = 0;
+		for (int D = ss::net::NightOneDay; D < Days; ++D)
+		{
+			const auto T0 = std::chrono::steady_clock::now();
+			W.AdvanceTo(static_cast<double>(D + 1) * DayMin + 127.0);
+			const double Took = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count();
+			Ms += Took;
+			WorstDay = Took > Worst ? D : WorstDay;
+			Worst = std::max(Worst, Took);
+			Day185 = D == 185 ? Took : Day185;
+			Day303 = D == 303 ? Took : Day303;
+		}
+		const int Ran = std::max(1, Days - ss::net::NightOneDay);
+		AllMs += Ms;
+		AllDays += Ran;
+		std::printf("seed %d: %d world days in %.1f s, %.1f ms a day (worst %.0f ms, day %d); day 185 %.0f ms, day 303 %.0f ms; %zu people, %zu titles kept\n", Seed, Ran,
+			Ms / 1000.0, Ms / Ran, Worst, WorstDay, Day185, Day303, W.People().size(), W.Honors().size());
+		int Flag = 0, Summer = 0, Other = 0, OtherSummer = 0;
+		for (const world::Honor& H : W.Honors())
+		{
+			const auto It = Titles.find(H.EventId);
+			const bool LiveChamp = It == Titles.end() && H.EventId.rfind("championship-main@", 0) == 0;
+			if (It == Titles.end() && !LiveChamp)
+			{
+				continue;
+			}
+			// The title's own post: its flags (FlagQualifier: the winner's Entry::Ticket; FlagLive) and whether the world discovered them.
+			int Flags = 0;
+			bool Discovered = false;
+			for (const world::WorldEvent& Ev : W.Events())
+			{
+				if (Ev.Npc == H.Npc && H.Npc >= 0 && Ev.What == H.Title && std::fabs(Ev.At - H.At) < 1e-6 &&
+					(Ev.Kind == world::EventKind::Champion || Ev.Kind == world::EventKind::Won || Ev.Kind == world::EventKind::Discovered))
+				{
+					Flags |= Ev.Flags;
+					Discovered = Discovered || Ev.Kind == world::EventKind::Discovered;
+				}
+			}
+			if (LiveChamp && (Flags & world::FlagLive) == 0 && H.Npc >= 0)
+			{
+				continue; // not the live Championship's (its posts carry FlagLive)
+			}
+			const ss::fest::Festival* F = It != Titles.end() ? It->second.F : nullptr;
+			const bool Main = LiveChamp || It->second.Tier == 0;
+			const bool Million = F && Main && H.Prize >= 100000000;
+			W1Row R;
+			R.Kind = LiveChamp ? std::string("live Championship Main") : It->second.Kind;
+			R.Flagship = LiveChamp || (F && Main && (F->Flagship || Million));
+			const int Day = static_cast<int>(H.At / DayMin);
+			std::string Who = "anonymous";
+			if (H.Npc >= 0)
+			{
+				const world::Npc& N = W.People()[static_cast<size_t>(H.Npc)];
+				R.Amateur = !N.Professional && (N.Is == world::Identity::Recreational || N.Is == world::Identity::WealthyAmateur);
+				R.Ticket = (Flags & world::FlagQualifier) != 0;
+				R.FirstYear = N.Came != world::Arrival::None && Day - N.Arrived <= 365;
+				Who = std::string(Discovered ? "discovered" : "tracked") + " " + N.Name + ", " + world::IdentityName(N.Is) + (N.Professional ? ", pro" : ", not pro") +
+					", came " + world::ArrivalName(N.Came) + (N.Came != world::Arrival::None ? " day " + std::to_string(N.Arrived) : std::string());
+			}
+			else if (H.Npc == -1)
+			{
+				Who = "the player";
+			}
+			const bool IsSummer = R.Flagship && R.Amateur && (R.Ticket || R.FirstYear);
+			W1Count& C = ByKind[R.Kind];
+			++C.Titles;
+			C.Amateur += R.Amateur ? 1 : 0;
+			C.Ticket += R.Ticket ? 1 : 0;
+			C.FirstYear += R.FirstYear ? 1 : 0;
+			C.Summer += R.Amateur && (R.Ticket || R.FirstYear) ? 1 : 0;
+			Flag += R.Flagship ? 1 : 0;
+			Summer += IsSummer ? 1 : 0;
+			const bool OtherMain = !R.Flagship && Main && F;
+			Other += OtherMain ? 1 : 0;
+			OtherSummer += OtherMain && R.Amateur && (R.Ticket || R.FirstYear) ? 1 : 0;
+			std::printf("  seed %d day %d: %s (%s, %s) flagship %s; first %s from %d; winner %s; seat %s, first-year %s%s\n", Seed, Day, H.Title.c_str(),
+				F ? F->Name.c_str() : "The Championship", H.EventId.c_str(),
+				!R.Flagship ? "no" : LiveChamp ? "yes (the live Championship Main)" : F->Flagship ? "yes (SeriesInfo::Flagship)" : "yes ($1,000,000+ first)",
+				ss::Money(H.Prize).c_str(), H.Entries, Who.c_str(), R.Ticket ? "yes" : "no", R.FirstYear ? "yes" : "no", IsSummer ? "; a Summer" : "");
+		}
+		std::printf("seed %d: Summer chance per flagship Main %s; the non-flagship festival Mains as if flagship %s\n", Seed, W1Wilson(Summer, Flag).c_str(),
+			W1Wilson(OtherSummer, Other).c_str());
+		AllFlag += Flag;
+		AllSummer += Summer;
+		AllOther += Other;
+		AllOtherSummer += OtherSummer;
+	}
+	std::printf("S-W1 by Main kind (titles; R2.2 amateur; R2.3 seat; R2.3 first-year; R2.2 and R2.3):\n");
+	for (const std::pair<const std::string, W1Count>& K : ByKind)
+	{
+		std::printf("  %-26s %4d  %4d  %4d  %4d  %4d\n", K.first.c_str(), K.second.Titles, K.second.Amateur, K.second.Ticket, K.second.FirstYear, K.second.Summer);
+	}
+	std::printf("S-W1 in all: Summer chance per flagship Main %s (pass: the point estimate inside 5-25%%, SPEC v1.7 §6.5); the non-flagship festival Mains as if "
+				"flagship %s; the sim %.1f ms a world day over %d days\n",
+		W1Wilson(AllSummer, AllFlag).c_str(), W1Wilson(AllOtherSummer, AllOther).c_str(), AllDays > 0 ? AllMs / AllDays : 0.0, AllDays);
+}
 } // namespace world_u4_test
 
 int main(int Argc, char** Argv)
@@ -1441,6 +1647,11 @@ int main(int Argc, char** Argv)
 	else if (Argc > 1 && std::strcmp(Argv[1], "turn-actions") == 0)
 	{
 		world_u4_test::SegTurnActions();
+	}
+	else if (Argc > 1 && std::strcmp(Argv[1], "w1") == 0)
+	{
+		// S-W1 (the lead's, G1): "w1 [seeds=5] [days=1095]", outside ctest; it prints and checks nothing.
+		world_u4_test::SegW1(Argc > 2 ? std::atoi(Argv[2]) : 5, Argc > 3 ? std::atoi(Argv[3]) : 1095);
 	}
 	else
 	{
