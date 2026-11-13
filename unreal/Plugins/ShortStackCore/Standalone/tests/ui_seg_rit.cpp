@@ -1649,6 +1649,9 @@ void RitSecondRecordNight()
 	RitExpect(Sat && SkipLog, "rit: the skip path's HeroHandDone logs the same Second Boards as the watched night");
 	// Both nights to their results, as the PIE did (the watched one skipped from here): the two logs are the same, all the way.
 	const std::string EventId = P.S.T ? P.S.T->Spec.Id : std::string();
+	// Update 4 G1 (LEAD_CALLS P-1, R-6): the watched night skips one tick an update too, as its twin does above, so the Settlement's
+	// page never depends on the wall clock (rit_settlement_second_boards had two renderings, the REGISTER glow on UP NEXT).
+	P.S.SprintBudgetMs = 0.0;
 	P.S.SkipAhead(0, ss::autoplay::Target::Result);
 	K.S.SkipAhead(0, ss::autoplay::Target::Result);
 	for (int F = 0; F < 200000 && (!P.S.HasResults || !K.S.HasResults); ++F)
