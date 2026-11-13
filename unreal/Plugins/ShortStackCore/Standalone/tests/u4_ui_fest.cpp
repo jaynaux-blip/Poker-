@@ -15,6 +15,13 @@
 // (fest_hub_rl_locked), GRIT 2027's second night (fest_hub_rit_twice) and FEIGN II's popover on day 395 (fest_popover_pass, its BY
 // INVITATION form: every site's Pass is -1 until F-world's FW-7; FH-7 emits the counting form). Checks: FestStripTen, FestLockedMain,
 // FestCopyUi extended (U30, U33, U2's NIGHT form, U15's GRIT line and its drawn figures).
+// G1 FH-4A (PLAN_G1 §2.1, §3.2; PLAN_FHUBS §4 FH-4 and its Corrections): THE RACE, CHAMPIONS and YOUR <FESTIVAL>, inside career B
+// (no new career: the pages' time budget). On RCOP 2026's first day the YOUR panel invites before the hero plays, then the hero's first
+// RCOP event (a cash told through World::HeroEntered and HeroFinished, the public path, item 15) fills it: fest_hub_your_ladder; a
+// plain series result adds nothing (FestYourStrip, the hub's half). Days 14 and 15 walk THE RACE's movement (none before the hub
+// has seen a day turn); day 19 keeps THE RACE first with the pin (FestLockedMain); day 35 shows RCOP 2026's four title lines and its
+// Mini and Micro winners, and day 400 RCOP 2026 and 2027 on one roll: fest_hub_champ_roll (FestRollTitles). FestCopyUi extended (U5,
+// U7, U8, U10, U12, U27, U28's seat line, U34, U37 and the roll's figures: listed, no digit typed, U37's and U10's forms).
 #include "UiSeg.h"
 
 #include "CopyLint.h"
@@ -25,6 +32,7 @@
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/World.h"
 #include "ShortStack/UI/RiverLine.h"
+#include "../../Source/ShortStackCore/Private/ShortStack/Game/WorldFestDetail.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/UI/RiverLineShared.h"
 
 #include <algorithm>
@@ -34,6 +42,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <map>
 #include <string>
 #include <utility>
@@ -47,6 +56,11 @@ namespace rlfest_detail
 {
 // UI/RiverLineFestival.cpp (FH-2): the Festival Pass's form on a rival cell without an account, pure (FestStripTen calls it).
 int HubPassForm(const net::InviteGate& Gate, bool Open, int RentsPaid, const fest::Festival* PassFest, const fest::Festival& F, int Events, int& N, int& Need);
+// FH-4A: U10's line, U37's sentence, a roll edition's height, and the movement marks THE RACE drew in a laptop's last hub frame.
+std::string HubYourCounts(const fest::YourLineView& V, bool Race);
+std::string HubGoodOn(const std::vector<int>& Days, int Today);
+float HubRollPitch(bool Championship);
+int HubRaceMoves(const RiverLine& RL);
 } // namespace rlfest_detail
 } // namespace ui
 } // namespace ss
@@ -575,7 +589,9 @@ void FestCopyUiHubs()
 		{"LastDate", "Nov 8"}, {"Weekday", "SUN"}, {"Date", "Nov 8"}, {"Time", "3:00 PM"}, {"Gtd", "$78,203,400"}, {"BuyIn", "$5,250"}, {"Stack", "100,000"},
 		{"Added", "$2,500"}, {"FESTIVAL", "RCOP"}, {"Festival", "RCOP 2026"}, {"Year", "2026"}, {"Site", "RiverLine"}, {"SITE", "IGNITE"}, {"Event", "$5,250 Main Event"},
 		{"Overlay", "$412,600"}, {"Amount", "$1,280,000"}, {"Entries", "2,345"}, {"Countdown", "2H 10M"}, {"Clock", "0:41:12"},
-		{"Nights", "12"}, {"Show1", "7 PM"}, {"Show2", "10 PM"}, {"Need", "20"}};
+		{"Nights", "12"}, {"Show1", "7 PM"}, {"Show2", "10 PM"}, {"Need", "20"}, {"Rank", "164th"}, {"Scorers", "2,214"}, {"Points", "290"},
+		{"Events", "9"}, {"Cashes", "3"}, {"Best", "31st"}, {"Field", "1,964"}, {"MARK", "FINALIST"}, {"Dates", "Apr 7 and Apr 9"}, {"Prize", "$795.32"},
+		{"Place", "31st"}};
 	for (const auto& Kv : Extra)
 	{
 		Vars[Kv.first] = Kv.second;
@@ -667,6 +683,61 @@ void FestCopyUiHubs()
 	{
 		ui_test::Expect(std::find(Inv.begin(), Inv.end(), std::string(Line)) != Inv.end(), (std::string("FestCopyUi: FestUiInventory lists ") + Line).c_str());
 	}
+	// FH-4A: U5, U7, U10, U12, U27, U28's seat line, U37 and the roll's figures are listed with their kinds, every figure a placeholder
+	// (U8's rungs print their own numbers: "PLAY 1", "TOP 25%").
+	for (const char* Line : {"label\tEVERYONE", "label\tPEOPLE YOU KNOW", "label\tYou \xC2\xB7 {Rank} of {Scorers} in the race \xC2\xB7 {Points} pts",
+			 "label\t{Events} events \xC2\xB7 {Cashes} cashes \xC2\xB7 best {Best} of {Field} \xC2\xB7 race {Rank} of {Scorers}", "label\tGOLD \xC2\xB7 won an event",
+			 "label\tSILVER \xC2\xB7 cashed", "label\tOUTLINE \xC2\xB7 played", "label\t{N} pts to {MARK} \xC2\xB7 right now", "label\tA seat in the next Main Event",
+			 "sentence\tGood on {Dates}.", "label\t{Prize} \xC2\xB7 1st of {Entries}", "label\t{Points} pts", "label\t{Place} of {Entries}"})
+	{
+		std::string Bare;
+		for (const char* Ch = std::strchr(Line, '\t') + 1; *Ch; ++Ch)
+		{
+			if (*Ch == '{')
+			{
+				while (*Ch && *Ch != '}')
+				{
+					++Ch;
+				}
+				if (!*Ch)
+				{
+					break;
+				}
+				continue;
+			}
+			Bare += *Ch;
+		}
+		const bool Listed = std::find(Inv.begin(), Inv.end(), std::string(Line)) != Inv.end();
+		const bool Typed = Bare.find_first_of("0123456789") != std::string::npos && std::string(Line).find("1st of") == std::string::npos;
+		ui_test::Expect(Listed && !Typed, (std::string("FestCopyUi: FestUiInventory lists \"") + Line + "\" with no digit typed").c_str());
+	}
+	for (const char* Rung : {"PLAY 1", "CASH 1", "TOP 25%", "TOP 10%", "FINALIST", "PODIUM", "THE BELT", "MINI MAIN EVENT", "MICRO MAIN EVENT"})
+	{
+		ui_test::Expect(std::find(Inv.begin(), Inv.end(), std::string("label\t") + Rung) != Inv.end(), (std::string("FestCopyUi: FestUiInventory lists U8/U34's ") + Rung).c_str());
+	}
+	// U37 (SPEC v1.7 §2.16 step 8a: PENNANT 2027's Step 2 ticket on day 183, its runs on days 184 and 186): one date, two, three.
+	namespace rf = ss::ui::rlfest_detail;
+	const std::string Two = rf::HubGoodOn({184, 186}, 183);
+	ui_test::Expect(Two == "Good on Apr 7 and Apr 9.", ("FestCopyUi: U37 reads \"Good on Apr 7 and Apr 9.\" for PENNANT 2027's Step 2 runs (" + Two + ")").c_str());
+	ui_test::Expect(rf::HubGoodOn({186}, 185) == "Good on Apr 9." && rf::HubGoodOn({}, 185).empty() && rf::HubGoodOn({183, 184, 186}, 180) == "Good on Apr 6, Apr 7 and Apr 9.",
+		"FestCopyUi: U37 with one day, none and three");
+	// U10, singular at one ("1 event · 1 cash"), the race clause only while the hero scores.
+	ss::fest::YourLineView V;
+	V.Shown = true;
+	V.Events = 1;
+	V.Cashes = 1;
+	V.Best = 3;
+	V.Field = 1964;
+	const std::string One = rf::HubYourCounts(V, true);
+	V.Events = 9;
+	V.Cashes = 0;
+	V.Best = 31;
+	V.Rank = 164;
+	V.Scorers = 2214;
+	const std::string Many = rf::HubYourCounts(V, true);
+	ui_test::Expect(One == "1 event \xC2\xB7 1 cash \xC2\xB7 best 3rd of 1,964" && Many == "9 events \xC2\xB7 0 cashes \xC2\xB7 best 31st of 1,964 \xC2\xB7 race 164th of 2,214" &&
+			rf::HubYourCounts(V, false) == "9 events \xC2\xB7 0 cashes \xC2\xB7 best 31st of 1,964",
+		("FestCopyUi: U10's forms (" + One + " | " + Many + ")").c_str());
 }
 // ------------------------------------------------------------------ FH-2: the real calendar in three frames
 
@@ -954,6 +1025,209 @@ bool HubsAccept(HubsLaptop& P, ss::net::SiteId Site)
 	return Ok;
 }
 
+/** FH-4A: the right column's tab I on RiverLine's hub (fstab0..2 in {1044, 348, 532, 36}), clicked; the settled frame. */
+DrawList HubsTab(HubsLaptop& P, int I)
+{
+	const float W = (532.0f - 12.0f) / 3.0f;
+	return P.Click(1044.0f + static_cast<float>(I) * (W + 6.0f) + W / 2.0f, 366.0f);
+}
+
+/** FH-4A: the first run exactly Text whose box starts at X0 or right of it: its baseline (-1 when none). */
+float HubsBaseRight(const DrawList& L, const std::string& Text, float X0)
+{
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == Text && Cmd.Text.X >= X0)
+		{
+			return Cmd.Text.BaselineY;
+		}
+	}
+	return -1.0f;
+}
+
+/** FH-4A: a running event of edition F (a numbered event, headliner or Main; Plain: a RiverLine event of no festival instead) that
+ *  started today, still in play: its id ("" for none). */
+std::string HubsRunning(HubsLaptop& P, const ss::fest::Festival* F, bool Plain)
+{
+	const ss::net::Network& Net = ss::net::Site(ss::net::SiteId::RiverLine);
+	const double World = P.S.WorldMinutes();
+	for (const ss::net::EventInstance& E : Net.Window(static_cast<double>(ss::net::DayOf(World)) * ss::net::MinutesPerDay, World))
+	{
+		const ss::net::EventTemplate& T = Net.TemplateOf(E);
+		const ss::net::Status St = Net.Live(E, World).St;
+		const bool InPlay = St == ss::net::Status::LateReg || St == ss::net::Status::Running || St == ss::net::Status::FinalTable;
+		const bool Ours = Plain ? ss::fest::FestivalOf(T.Series) == nullptr : (F && T.Series == F->SeriesId && T.Fmt != ss::net::Format::Satellite);
+		if (InPlay && Ours && T.BuyInCents > 0)
+		{
+			return E.Id;
+		}
+	}
+	return std::string();
+}
+
+/** FH-4A: the hero plays Id to Place for Prize through the world's public calls (World::HeroEntered, HeroFinished; PLAN_FHUBS
+ *  Corrections item 15), the world drained first as the session drains it before telling a finish. */
+void HubsHeroFinish(HubsLaptop& P, const std::string& Id, int Place, ss::Chips Prize)
+{
+	P.S.DrainWorld();
+	ss::world::World& W = P.S.Living();
+	W.HeroEntered(Id, std::string());
+	W.HeroFinished(Id, Place, Prize, ss::world::World::TableReport());
+	P.Now = ui_test::Step(P.S, P.Now, 0.2);
+}
+
+/** U10's line as FestYourStrip expects it from fest::YourLine's numbers (written here, apart from the hub's HubYourCounts). */
+std::string HubsYourWant(const ss::fest::YourLineView& V)
+{
+	std::string Want = (V.Events == 1 ? std::string("1 event") : ss::Grouped(V.Events) + " events") + " \xC2\xB7 " + (V.Cashes == 1 ? std::string("1 cash") : ss::Grouped(V.Cashes) + " cashes");
+	if (V.Best > 0 && V.Field > 0)
+	{
+		Want += " \xC2\xB7 best " + ss::Ordinal(V.Best) + " of " + ss::Grouped(V.Field);
+	}
+	if (V.Rank > 0)
+	{
+		Want += " \xC2\xB7 race " + ss::Ordinal(V.Rank) + " of " + ss::Grouped(V.Scorers);
+	}
+	return Want;
+}
+
+/** FestYourStrip (§2.8.2, §2.15.2; F-hubs' hub half, FH-4A) and fest_hub_your_ladder, on RCOP 2026's first day: before the hero plays,
+ *  YOUR RCOP invites (U11) and prints no U10 line; after one cash, the panel prints fest::YourLine's numbers in U10's singular ("1 event
+ *  · 1 cash · best ... · race ..."), the seven rungs with PLAY 1 and CASH 1 reached and U27's "{N} pts to {MARK} · right now" for the
+ *  next one from fest::MarkCutoff and the hero's points, the YOU row (U7) on THE RACE and the result row; a plain series result adds
+ *  nothing. Plant: the U10 line drawn before the hero plays. */
+void FestYourStripHub(HubsLaptop& P, const ss::fest::Festival& Rcop)
+{
+	const DrawList Before = HubsTab(P, 2);
+	ui_test::Expect(ui_test::DrewRun(Before, "Play any RCOP 2026 event for your pin.") && !ui_test::Drew(Before, "0 events") && !ui_test::Drew(Before, "1 event"),
+		"FestYourStrip: before the hero plays an RCOP 2026 event, YOUR RCOP invites (U11) and prints no U10 line");
+	const std::string Id = HubsRunning(P, &Rcop, false);
+	ui_test::Expect(!Id.empty(), "FestYourStrip: an RCOP 2026 event is in play on its first day");
+	if (Id.empty())
+	{
+		return;
+	}
+	const ss::net::Network& Net = ss::net::Site(ss::net::SiteId::RiverLine);
+	const ss::net::EventInstance E = HubsInstance(Net, Id);
+	HubsHeroFinish(P, Id, 3, std::max<ss::Chips>(100, Net.TemplateOf(E).BuyInCents * 6));
+	// The page late on the first day, once the day's first events have finished and the race holds the regulars' points too.
+	HubsTo(P, Rcop.FirstDay, 23.5);
+	P.OpenHub();
+	HubsTab(P, 2);
+	const ss::world::World& W = P.S.Living();
+	const ss::fest::YourLineView V = ss::fest::YourLine(Rcop, &W);
+	const std::pair<int, int> Me = ss::world::FestStanding(W, -1);
+	ui_test::Expect(V.Shown && V.Events == 1 && V.Cashes == 1 && Me.first > 0, ("FestYourStrip: the hero's cash in " + Id + " gives RCOP 2026's pin and a place in the race").c_str());
+	const DrawList L = HubsPage("fest_hub_your_ladder", P);
+	const std::string Want = HubsYourWant(V);
+	ui_test::Expect(ui_test::DrewRun(L, Want), ("FestYourStrip: YOUR RCOP prints fest::YourLine's numbers in U10's singular (\"" + Want + "\")").c_str());
+	ui_test::Expect(Want == ss::ui::rlfest_detail::HubYourCounts(V, true), "FestYourStrip: the hub's U10 line is the expected one");
+	for (const char* Rung : {"PLAY 1", "CASH 1", "TOP 25%", "TOP 10%", "FINALIST", "PODIUM", "THE BELT"})
+	{
+		ui_test::Expect(HubsBaseRight(L, Rung, 1044.0f) > 392.0f, (std::string("YOUR RCOP: the ladder's rung ") + Rung + " is drawn").c_str());
+	}
+	// U27: the next mark the hero doesn't hold right now, its cut-off from the live race.
+	const std::vector<std::pair<int, ss::world::FestScore>> Race = ss::world::FestTop(W, Me.first);
+	const double Mine = Race.empty() ? 0.0 : Race.back().second.Points;
+	const ss::world::FestMark Marks[5] = {ss::world::FestMark::Top25, ss::world::FestMark::Top10, ss::world::FestMark::Finalist, ss::world::FestMark::Podium, ss::world::FestMark::Title};
+	const char* const Names[5] = {"TOP 25%", "TOP 10%", "FINALIST", "PODIUM", "THE BELT"};
+	std::string Line;
+	const ss::world::FestMark Held = ss::world::MarkFor(Me.first, Me.second);
+	for (int K = 0; K < 5; ++K)
+	{
+		if (Held == ss::world::FestMark::None || Held < Marks[K])
+		{
+			const long long N = std::llround(ss::fest::MarkCutoff(W, Marks[K]) - Mine) + 1;
+			Line = N > 0 ? ss::Grouped(N) + " pts to " + Names[K] + " \xC2\xB7 right now" : std::string();
+			break;
+		}
+	}
+	std::printf("  fest_hub_your_ladder: the hero %s of %d in the race with %.0f pts; U27: %s\n", ss::Ordinal(Me.first).c_str(), Me.second, Mine, Line.empty() ? "(none)" : Line.c_str());
+	ui_test::Expect(Line.empty() || ui_test::DrewRun(L, Line), ("YOUR RCOP: U27 reads \"" + Line + "\" (fest::MarkCutoff - the hero's points + 1)").c_str());
+	const std::string TName = ss::ui::rlnet_detail::NetShortName(Net.TemplateOf(E).Name);
+	ui_test::Expect(ui_test::Drew(L, TName) && ui_test::Drew(L, "3rd"), ("YOUR RCOP: the result row names " + TName + " and the place").c_str());
+	// THE RACE: the YOU row (U7).
+	const DrawList RaceTab = HubsTab(P, 0);
+	const std::string You = "You \xC2\xB7 " + ss::Ordinal(Me.first) + " of " + ss::Grouped(Me.second) + " in the race \xC2\xB7 " + ss::Grouped(static_cast<int64_t>(std::llround(Mine))) + " pts";
+	ui_test::Expect(ui_test::DrewRun(RaceTab, You) && HubsBaseRight(RaceTab, You, 1044.0f) > 856.0f, ("THE RACE: the YOU row at the body's foot reads \"" + You + "\" (U7)").c_str());
+	ui_test::Expect(ss::ui::rlfest_detail::HubRaceMoves(P.RL) == 0, "THE RACE: no movement before the hub has seen a day turn (never a guess)");
+	// PEOPLE YOU KNOW (fsrace1): world::FestKnown's people in race order with their rank in the whole race, else "No points yet.".
+	const std::pair<float, float> Known = HubsRunAt(RaceTab, "PEOPLE YOU KNOW");
+	const DrawList KnownTab = P.Click(Known.first + 20.0f, Known.second - 4.0f);
+	const std::vector<std::pair<int, int>> People = ss::world::FestKnown(W);
+	const ss::world::Npc* First = People.empty() ? nullptr : W.Get(People.front().first);
+	ui_test::Expect(Known.first > 1044.0f && (First ? ui_test::Drew(KnownTab, First->Name) && ui_test::DrewRun(KnownTab, ss::Grouped(People.front().second))
+												 : ui_test::DrewRun(KnownTab, "No points yet.")),
+		("THE RACE: PEOPLE YOU KNOW lists world::FestKnown in race order (" + std::to_string(People.size()) + " people)").c_str());
+	// None on a plain series event: a plain RiverLine result leaves the panel's numbers as they were.
+	const std::string Plain = HubsRunning(P, nullptr, true);
+	if (!Plain.empty())
+	{
+		HubsHeroFinish(P, Plain, 2, 500);
+		const ss::fest::YourLineView After = ss::fest::YourLine(Rcop, &W);
+		const DrawList Again = HubsTab(P, 2);
+		ui_test::Expect(After.Events == 1 && ui_test::Drew(Again, "1 event \xC2\xB7 1 cash"), ("FestYourStrip: a plain series result (" + Plain + ") adds nothing to YOUR RCOP").c_str());
+	}
+	else
+	{
+		std::printf("  FestYourStrip: no plain RiverLine event in play on day %d (the plain case skipped)\n", ss::net::DayOf(P.S.WorldMinutes()));
+	}
+}
+
+/** FestRollTitles (§2.6.2, §2.8.2; FH-4A), day 35: RCOP 2026's roll edition shows MAIN EVENT, MINI MAIN EVENT, MICRO MAIN EVENT and
+ *  PLAYER OF THE SERIES in that order inside its 120 units, with the rcop-mini and rcop-micro winners (world::FestRoll's Honors: the
+ *  names and "{Prize} · 1st of {Entries}" in NetMoney). Plant: a championship's edition at 88. */
+void FestRollTitlesDay35(HubsLaptop& P, const ss::fest::Festival& Rcop)
+{
+	P.RL.SiteShown = ss::net::SiteId::RiverLine;
+	P.RL.ShowSeries("rcop", P.Now);
+	P.RL.OpenPage(RiverLine::Page::Series, P.Now);
+	P.Now = ui_test::Step(P.S, P.Now, 1.5);
+	const DrawList L = HubsTab(P, 1);
+	const ss::world::World& W = P.S.Living();
+	const ss::world::FestRollRow* Row = nullptr;
+	const std::vector<ss::world::FestRollRow> Roll = ss::world::FestRoll(W, ss::fest::Brand::Rcop);
+	for (const ss::world::FestRollRow& R : Roll)
+	{
+		Row = R.Key == Rcop.SeriesId ? &R : Row;
+	}
+	ui_test::Expect(Row && Row->Mini && Row->Micro, "FestRollTitles: RCOP 2026's roll row holds its Mini and Micro winners on day 35");
+	if (!Row || !Row->Mini || !Row->Micro)
+	{
+		return;
+	}
+	const float Title = HubsBaseRight(L, "RCOP 2026", 1044.0f);
+	const float Main = HubsBaseRight(L, "MAIN EVENT", 1044.0f);
+	const float Mini = HubsBaseRight(L, "MINI MAIN EVENT", 1044.0f);
+	const float Micro = HubsBaseRight(L, "MICRO MAIN EVENT", 1044.0f);
+	const float Pos = Row->Crown ? HubsBaseRight(L, "PLAYER OF THE SERIES", 1044.0f) : Micro + 24.0f;
+	ui_test::Expect(Title > 392.0f && Title < Main && Main < Mini && Mini < Micro && Micro < Pos && Pos <= Title - 22.0f + ss::ui::rlfest_detail::HubRollPitch(true),
+		("FestRollTitles: RCOP 2026's four lines in order inside 120 units (title " + std::to_string(Title) + ", last line " + std::to_string(Pos) + ")").c_str());
+	for (const ss::world::Honor* Hn : {Row->Mini, Row->Micro})
+	{
+		const std::string Fig = ss::ui::rlnet_detail::NetMoney(Hn->Prize) + " \xC2\xB7 1st of " + ss::Grouped(Hn->Entries);
+		ui_test::Expect(ui_test::Drew(L, Hn->Name) && ui_test::DrewRun(L, Fig), ("FestRollTitles: " + Hn->EventId + "'s winner " + Hn->Name + " and \"" + Fig + "\" on the roll").c_str());
+	}
+}
+
+/** FestRollTitles' pitch and fest_hub_champ_roll, day 400: RCOP 2027's hub (CHAMPIONS) holds RCOP 2027 and RCOP 2026, newest first; the
+ *  drawn pitch between their titles is 120 and four of it fit 558 [554] and three Ignite's 478. */
+void FestRollTitlesDay400(HubsLaptop& P)
+{
+	P.RL.SiteShown = ss::net::SiteId::RiverLine;
+	P.RL.ShowSeries("rcop27", P.Now);
+	P.RL.OpenPage(RiverLine::Page::Series, P.Now);
+	P.Now = ui_test::Step(P.S, P.Now, 1.5);
+	HubsTab(P, 1);
+	const DrawList L = HubsPage("fest_hub_champ_roll", P);
+	const float New = HubsBaseRight(L, "RCOP 2027", 1044.0f);
+	const float Old = HubsBaseRight(L, "RCOP 2026", 1044.0f);
+	const float Pitch = Old - New;
+	ui_test::Expect(New > 392.0f && Old > New, "fest_hub_champ_roll: RCOP 2027 above RCOP 2026 on one roll (newest first)");
+	ui_test::Expect(Pitch == 120.0f && 4.0f * Pitch <= 554.0f && 3.0f * Pitch <= 478.0f,
+		("FestRollTitles: a championship edition's drawn pitch is 120, four fit 558 [554] and three Ignite's 478 (" + std::to_string(Pitch) + ")").c_str());
+}
+
 /** Career A (FH-2; PLAN_FHUBS FH-2's two careers): FEIGN 2026 on Ignite, day 56, an Ignite account accepted: fest_hub_ig_live. The
  *  hub in Ignite's frame (L7): the strip and banner in RiverLine's rects, the rows cut at y 870 (no row text below it; six whole and a
  *  seventh under the fade), no overlay ticker, THE RACE preselected while Live. */
@@ -1017,6 +1291,15 @@ void FestCareerRiverLine()
 	ui_test::Expect(!Lock.empty() && ui_test::DrewRun(Live, Lock), ("FestLockedMain: RCOP 2026's Main card shows the lock line (\"" + Lock + "\")").c_str());
 	ui_test::Expect(ui_test::DrewRun(Live, "PLAYER OF THE SERIES") && !ui_test::Drew(Live, "No champion yet."), "FestLockedMain: the hub opens on THE RACE while Live, never past it");
 	ui_test::Expect(ui_test::DrewRun(Live, "DAY 1 OF 22"), "fest_hub_rl_live: RCOP 2026's first day reads DAY 1 OF 22");
+	// FH-4A: the YOUR panel before and after the hero's first RCOP event (fest_hub_your_ladder), then THE RACE's movement on days 14-15.
+	FestYourStripHub(P, *Rcop);
+	for (const int Day : {14, 15})
+	{
+		HubsTo(P, Day, 12.0);
+		P.OpenHub();
+		P.Frame(1.0f);
+		std::printf("  THE RACE on day %d: %d movement marks (the hub saw the day before)\n", Day, ss::ui::rlfest_detail::HubRaceMoves(P.RL));
+	}
 	// Day 19 (a Saturday): the ladder in view.
 	HubsTo(P, 19, 12.0);
 	P.OpenHub();
@@ -1032,6 +1315,11 @@ void FestCareerRiverLine()
 	const DrawList Locked = HubsPage("fest_hub_rl_locked", P);
 	FestLockedMainRows(P, *Rcop, Locked);
 	ui_test::Expect(ui_test::DrewRun(Locked, Lock), "FestLockedMain: the Main card keeps its lock line on day 19");
+	ui_test::Expect(ss::fest::YourLine(*Rcop, &P.S.Living()).Shown && ui_test::DrewRun(Locked, "PLAYER OF THE SERIES"),
+		"FestLockedMain: with the hero's RCOP pin the hub still opens on THE RACE while the Main is locked");
+	// FH-4A, FestRollTitles: RCOP 2026's title lines on day 35.
+	HubsTo(P, 35, 12.0);
+	FestRollTitlesDay35(P, *Rcop);
 	// WRIT 2027: a RunItTwice account, then The Summons' seats (U33) on its day.
 	HubsTo(P, Writ->FirstDay, 12.0);
 	ui_test::Expect(HubsAccept(P, ss::net::SiteId::RunItTwice), "FH-2: RunItTwice's invitation accepted");
@@ -1129,6 +1417,9 @@ void FestCareerRiverLine()
 	const DrawList Pop = HubsPage("fest_popover_pass", P);
 	ui_test::Expect(ui_test::DrewRun(Pop, "FEIGN 2027") && ui_test::DrewRun(Pop, "By invitation.") && !ui_test::DrewRun(Pop, "OPEN THE HUB"),
 		"fest_popover_pass: FEIGN II's popover reads By invitation. with no button (BY INVITATION until F-world's Pass, FW-7)");
+	// FH-4A: day 400, RCOP 2026 and 2027 on one roll.
+	HubsTo(P, 400, 12.0);
+	FestRollTitlesDay400(P);
 }
 } // namespace
 
