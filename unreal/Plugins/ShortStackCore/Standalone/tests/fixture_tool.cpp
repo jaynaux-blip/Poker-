@@ -103,6 +103,12 @@
 //                              to n people (up to 3,000) at day 0, then 60 days walked a day at a time while the Scene Book is
 //                              stubbed (rev-plan minor 8); prints the §5.14 rows it can measure (G2 re-grows it; the 10,000 path
 //                              is S-scale's at G4)
+//   fixture_tool write-u4-fest <dir> [show]  writes Update 4's festival fixture, update4_festival.ssave, WITH its world (SPEC v1.7
+//                              §2.13, PLAN_FWORLD FW-7; F-world): a Blank career at day 60 with RCOP 2026 crowned and the hero a
+//                              FINALIST (its results planted through ss.Fest.Result, FW-6's dev path), the FINALIST mark line,
+//                              FEIGN 2026 (FEIGN I) live with its race in progress, and an Ignite account opened by the Festival Pass
+//                              (two rents, the Why 5 letter on the first daily check after Ignite opens, accepted); it never plays
+//                              Ignite, Kast or Rerun ("show" prints the career as it goes)
 //   fixture_tool transcript    prints every save as the careers are built and as each fixture is loaded and played on
 //                              (texts, ledgers, the whole save but the world, whose size and hash are printed), the
 //                              c09bc31 careers first, then update 2's; a build whose transcript matches the code the
@@ -188,6 +194,16 @@
 #include <chrono>
 #else
 #define SS_FIXTURE_U4SCENE 0
+#endif
+
+// Update 4 G1's festival fixture (SPEC v1.7 §2.13; write-u4-fest, F-world's FW-7): Festival Season's calendar and the world's race,
+// crown and marks (fest::FestivalOf, world::HeroMarks, world::FestCrownedAt), on a tree with G1's festival headers.
+#if SS_FIXTURE_U4SCENE && __has_include("ShortStack/Game/Festival.h") && __has_include("ShortStack/Game/WorldFest.h")
+#define SS_FIXTURE_U4FEST 1
+#include "ShortStack/Game/Festival.h"
+#include "ShortStack/Game/WorldFest.h"
+#else
+#define SS_FIXTURE_U4FEST 0
 #endif
 
 #include <algorithm>
@@ -3175,6 +3191,128 @@ bool U4Scene(int Target, const std::string& Path)
 	return true;
 }
 #endif
+#if SS_FIXTURE_U4FEST
+/** The final tables update4_festival plants in RCOP 2026, one a day from its first day (ss.Fest.Result rcop ft: fifth in the day's
+ *  next numbered event, through the world's result path): tuned once on this seed so the hero's race rank lands 4-25 (FINALIST, not
+ *  PODIUM) at the crown, then fixed. */
+constexpr int kU4FestFinalTables = 8;
+
+/** One line of the festival career for "show": the day, the clock, the hero's race and marks. */
+void U4FestLine(ss::Session& S, const std::string& What)
+{
+	if (!Transcript)
+	{
+		return;
+	}
+	const std::pair<int, int> Me = ss::world::FestStanding(S.Living(), -1);
+	std::printf("  [u4-fest] day %d %02d:%02d: %s; race %s, rank %d of %d; marks %zu; rents %d; bank %s\n", ss::net::DayOf(S.WorldMinutes()),
+		static_cast<int>(std::fmod(S.WorldMinutes(), Day) / 60.0), static_cast<int>(std::fmod(S.WorldMinutes(), 60.0)), What.c_str(), ss::world::FestRaceKey(S.Living()).c_str(),
+		Me.first, Me.second, ss::world::HeroMarks(S.Living()).size(), S.Life.RentsPaid, ss::Money(S.BankrollCents).c_str());
+}
+
+/**
+ * update4_festival (SPEC v1.7 §2.13): a Blank career, walked a day at a time (the calendar runs over each day: the rents are collected
+ * at their deadlines, the sites' daily gate check runs at each midnight, the world moves). RCOP 2026: a final table a day for its
+ * first kU4FestFinalTables days (FW-6's dev result path); the crown after its Main makes the hero a FINALIST, with its mark line, the
+ * ticket the mark pays (festticket:) and the mark's moment seen (festmark:). Act I: both rents collected (the second at Oct 31's
+ * midnight). Ignite opens on Nov 2 with FEIGN 2026 announced (from Oct 31): its Pass letter (Why 5, FEIGN I needing only the rents)
+ * comes at that midnight's gate check and is accepted that morning, with no deposit. Saved on day 60 (Fri Dec 4, 3 PM), FEIGN I's
+ * fifth day, its race running. Nothing is played: no Update 3 line (Ignite's play book, the League, Kast, Rerun).
+ */
+ss::SaveData U4Festival(bool& Ok)
+{
+	namespace fest = ss::fest;
+	namespace net = ss::net;
+	namespace world = ss::world;
+	Ok = false;
+	Hooks H;
+	std::unique_ptr<ss::Session> S(new ss::Session(H, "fixture-u4-fest"));
+	S->NewCareer(Someone(), world::Start::Blank);
+	S->CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(*S, 0.0, 0.2);
+	S->BankrollCents += 300000; // the last job's savings: both rents and a cushion (the career buys nothing)
+	const fest::Festival* Rcop = fest::FestivalOf("rcop");
+	const fest::Festival* Feign = fest::FestivalOf("ignite.feign26");
+	if (!Rcop || !Feign)
+	{
+		std::printf("fixture_tool write-u4-fest: this build has no RCOP 2026 or FEIGN 2026 (fest::All)\n");
+		return H.Last;
+	}
+	const int SaveDay = 60;
+	double InvitedAt = -1.0;
+	std::string Answer;
+	for (int DayNo = net::DayOf(S->WorldMinutes()) + 1; DayNo <= SaveDay; ++DayNo)
+	{
+		// A minute past midnight (the day's turn: the rent's deadline, the sites' daily gate check), then 9 AM: fed, the inbox read
+		// (the Pass letter accepted the morning it lands).
+		Now = At(*S, Now, static_cast<double>(DayNo) * Day + 1.0);
+		Now = At(*S, Now, static_cast<double>(DayNo) * Day + 9.0 * 60.0);
+		Fed(*S);
+		for (const ss::site::Invitation& I : S->Life.Sites.Invites)
+		{
+			if (I.Site == net::SiteId::Ignite && I.State == 0 && InvitedAt < 0.0)
+			{
+				InvitedAt = I.At;
+				Answer = S->AnswerInvite(net::SiteId::Ignite, true);
+				U4FestLine(*S, "Ignite's letter accepted" + (Answer.empty() ? std::string() : ": " + Answer));
+				break;
+			}
+		}
+		// RCOP 2026's first days: a final table each noon.
+		if (DayNo >= Rcop->FirstDay && DayNo < Rcop->FirstDay + kU4FestFinalTables)
+		{
+			Now = At(*S, Now, static_cast<double>(DayNo) * Day + 12.0 * 60.0);
+			U4FestLine(*S, S->DebugFest("result rcop ft"));
+		}
+		// The moments a crown or a mark queues are seen (their done keys kept), as a player at the laptop would.
+		for (int K = 0; K < 4 && S->PeekFestMoment(); ++K)
+		{
+			S->DoneFestMoment();
+			U4FestLine(*S, "a festival moment seen");
+		}
+		if (DayNo % 5 == 0)
+		{
+			U4FestLine(*S, "the walk");
+		}
+	}
+	// Day 60, 3 PM: fed, saved.
+	Now = At(*S, Now, static_cast<double>(SaveDay) * Day + 15.0 * 60.0);
+	Fed(*S);
+	Now = Wait(*S, Now, 0.2);
+	for (int K = 0; K < 4 && S->PeekFestMoment(); ++K)
+	{
+		S->DoneFestMoment();
+	}
+	S->Save();
+	const world::World& W = S->Living();
+	const std::pair<int, int> Me = world::FestStanding(W, -1);
+	const world::HeroFestMark* Mark = nullptr;
+	for (const world::HeroFestMark& M : world::HeroMarks(W))
+	{
+		Mark = M.Key == "rcop" ? &M : Mark;
+	}
+	const ss::site::Account* Ignite = nullptr;
+	for (const ss::site::Account& A : S->Life.Sites.Accounts)
+	{
+		Ignite = A.Site == net::SiteId::Ignite ? &A : Ignite;
+	}
+	const fest::Phase FeignNow = fest::PhaseOf(*Feign, S->WorldMinutes(), &W);
+	const double Opens = static_cast<double>(net::Def(net::SiteId::Ignite).LaunchDay) * Day;
+	std::string Letter;
+	for (const ss::life::Letter& M : S->Life.Inbox)
+	{
+		Letter = M.Source == "site" && M.Thread == net::KeyOf(net::SiteId::Ignite) && M.Kind == ss::site::LetterInvite ? M.Subject : Letter;
+	}
+	std::printf("write-u4-fest: day %d; RCOP 2026 crowned at %.0f; the hero's mark %s (grade %d, rank %d of %d, %d pts); FEIGN 2026 %s, race %s with %d scorers "
+				"(the hero rank %d); rents %d; Ignite's letter \"%s\" at %.0f (day %d; Ignite opens at %.0f), %s; Ignite account %s\n",
+		net::DayOf(S->WorldMinutes()), world::FestCrownedAt(W, "rcop"), Mark ? "rcop" : "none", Mark ? static_cast<int>(Mark->Mark) : -1, Mark ? Mark->Rank : 0, Mark ? Mark->Scorers : 0,
+		Mark ? static_cast<int>(std::llround(Mark->Points)) : 0, FeignNow == fest::Phase::Live ? "live" : "NOT live", world::FestRaceKey(W).c_str(), Me.second, Me.first,
+		S->Life.RentsPaid, Letter.c_str(), InvitedAt, InvitedAt >= 0.0 ? net::DayOf(InvitedAt) : -1, Opens, Answer.empty() ? "accepted" : Answer.c_str(), Ignite ? "open" : "NONE");
+	Ok = Mark && Mark->Mark == world::FestMark::Finalist && Mark->Rank >= 4 && Mark->Rank <= 25 && FeignNow == fest::Phase::Live && world::FestRaceKey(W) == Feign->SeriesId &&
+		Me.second > 0 && S->Life.RentsPaid == 2 && Ignite && InvitedAt >= Opens && InvitedAt < Opens + Day && Letter == "You're on the list for " + Feign->Name;
+	return H.Last;
+}
+#endif
 } // namespace fixture_tool
 
 int main(int Argc, char** Argv)
@@ -3182,11 +3320,11 @@ int main(int Argc, char** Argv)
 	using namespace fixture_tool;
 	const std::string Mode = Argc > 1 ? Argv[1] : "";
 	if (Mode != "write" && Mode != "write2" && Mode != "write-g1" && Mode != "write-g2" && Mode != "write-g3" && Mode != "write-g3k" && Mode != "g3k-dry" && Mode != "kast-worst" &&
-		Mode != "write-u3g3" && Mode != "write-u3g2" && Mode != "transcript" && Mode != "write-u4-scene")
+		Mode != "write-u3g3" && Mode != "write-u3g2" && Mode != "transcript" && Mode != "write-u4-scene" && Mode != "write-u4-fest")
 	{
 		std::printf("usage: fixture_tool write <dir> | fixture_tool write2 <dir> | fixture_tool write-g1 <dir> [show] | fixture_tool write-g2 <dir> [show] | fixture_tool write-g3 <dir> "
 					"[show] | fixture_tool write-g3k <dir> [show] | fixture_tool g3k-dry <days> | fixture_tool kast-worst | fixture_tool write-u3g3 <dir> [show] [days] | "
-					"fixture_tool write-u3g2 <dir> [show] | fixture_tool transcript | fixture_tool write-u4-scene <n> <dir>\n");
+					"fixture_tool write-u3g2 <dir> [show] | fixture_tool transcript | fixture_tool write-u4-scene <n> <dir> | fixture_tool write-u4-fest <dir> [show]\n");
 		return 2;
 	}
 	if (Mode == "write-u4-scene")
@@ -3208,6 +3346,30 @@ int main(int Argc, char** Argv)
 		return U4Scene(Target, std::string(Argv[3]) + "/u4_scene_" + std::to_string(Target) + ".ssave") ? 0 : 1;
 #else
 		std::printf("fixture_tool write-u4-scene: this tree has no Update 4 world headers (Game/WorldScene.h)\n");
+		return 2;
+#endif
+	}
+	if (Mode == "write-u4-fest")
+	{
+		// Update 4 G1 (SPEC v1.7 §2.13; FW-7): the festival fixture, written WITH its world (update2_blank_world's precedent); "show"
+		// prints the career as it goes. Nothing is written unless the career reached every fact the fixture promises.
+#if SS_FIXTURE_U4FEST
+		if (Argc < 3)
+		{
+			std::printf("usage: fixture_tool write-u4-fest <dir> [show]\n");
+			return 2;
+		}
+		Transcript = Argc > 3 && std::string(Argv[3]) == "show";
+		bool Facts = false;
+		const ss::SaveData D = U4Festival(Facts);
+		if (!Facts)
+		{
+			std::printf("fixture_tool write-u4-fest: the career missed a fact (above); nothing written\n");
+			return 1;
+		}
+		return WriteFile(std::string(Argv[2]) + "/update4_festival.ssave", D.Serialize()) ? 0 : 1;
+#else
+		std::printf("fixture_tool write-u4-fest: this tree has no Festival Season (Game/Festival.h, Game/WorldFest.h)\n");
 		return 2;
 #endif
 	}

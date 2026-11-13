@@ -11,7 +11,9 @@
 // FestStoryHooks, on Honors and fields planted through the world text; FW-5: the session's texts, moments and Rerun: FestTexts,
 // FestMoments, FestRerunStories, through SessionFestDetail.h and one session run on marks planted through its world; FW-6: FestStep's
 // tickets, refunds and letter and ss.Fest.*: FestCrownTickets (a session run into RCOP 2026's window, its marks planted), FestStepCredit
-// (FestStepCredits at any minute on a world with crowns planted), FestMainTicket's world half). Every helper here
+// (FestStepCredits at any minute on a world with crowns planted), FestMainTicket's world half; FW-7: the Pass, the agenda's skip and
+// the fixture: FestPassGate (GateMet over every rival edition to 2030, PassNeeds, the letter), FestMarks' world half (site::Marks' skip)
+// and FestSaveRoundTrip's fixture half (Tests/fixtures/update4_festival.ssave's facts)). Every helper here
 // is in an anonymous namespace (PLAN_G1 §1 item 8: festivals_main.cpp shares the executable); each check runs alone as "festivals_test
 // <Check>" (the kit's Only, FN-1). The race checks build one Blank world before RCOP 2026 opens and run it through the edition (about
 // 18 ms a world day), planting races through the world text; the crown's run it on through FEIGN 2026, the first rival festival, to
@@ -3712,6 +3714,333 @@ void FestMainTicketWorld()
 	Expect(Bad.empty(), "FestMainTicket: a championship belt's year-free Main ticket, covered after the next Main ran, registers on the one after (PENNANT and REIGN 2027's "
 						"belts on the 2029 Mains)" + Bad);
 }
+
+// ------------------------------------------------------------------ FW-7: the Pass, the agenda's skip and the fixture (§2.10, §2.9.1, §2.13)
+
+/** A record with paid online events (the tracker's count and the last hundred's), nothing else: no volume door, no title, no partner. */
+ss::rep::Public FestPassRecordWorld(int Online, int Paid100)
+{
+	ss::rep::Public P;
+	P.OnlineEvents = Online;
+	P.Paid100 = Paid100;
+	return P;
+}
+
+/** An edition of a brand by year (nullptr: none). */
+const ss::fest::Festival* FestPassEditionWorld(ss::fest::Brand B, int Year)
+{
+	for (const ss::fest::Festival& F : ss::fest::All())
+	{
+		if (F.Which == B && F.Year == Year)
+		{
+			return &F;
+		}
+	}
+	return nullptr;
+}
+
+/** The first minute a rival festival's Pass can count: its Announced phase (T-30, 00:00), or its site's opening if later. */
+double FestPassOpensWorld(const ss::fest::Festival& F)
+{
+	const double Announced = static_cast<double>(F.FirstDay - ss::fest::kAnnounceDays) * 1440.0;
+	return std::max(Announced, static_cast<double>(ss::net::Def(F.Site).LaunchDay) * 1440.0);
+}
+
+/** "met (why 5)" or "not met" for a failure message. */
+std::string FestPassAnswerWorld(bool Met, int Why)
+{
+	return Met ? "met (why " + std::to_string(Why) + ")" : std::string("not met");
+}
+
+/**
+ * FestPassGate (§2.15.1, §2.10): Ignite's and RunItTwice's gates carry the Pass (fest::kPassEvents, 20); GateMet opens on Why 5 with two
+ * rents alone for every rival festival's first edition (FEIGN, GRIT, PUSH, WRIT, PENNANT and REIGN I) and with two rents and 20 paid
+ * online events from the second (19 is not enough; the tracker's count or the last hundred's, whichever is more), only while the
+ * festival is Announced, in Buildup or Live (closed the minute before its Announced phase and once it closes), and never on one rent;
+ * PassNeeds on constructed gates gives -1 (no path: GateMet's FestivalEvents >= 0 closes it) and 0 (two rents alone) on a second
+ * edition, 0 on a first; the letter names the festival (Ignite's L1-L2 for FEIGN 2026, RunItTwice's L3-L4 for REIGN 2027: the day it
+ * opens and its Main's buy-in, nothing left unfilled); and the numbers a strip shows ("PASS {N}/{Need}") are GateMet's inputs:
+ * met exactly when N = max(OnlineEvents, Paid100) reaches Need = PassNeeds.
+ * Planted bug: the rent check skipped.
+ */
+void FestPassGate()
+{
+	namespace fest = ss::fest;
+	namespace net = ss::net;
+	namespace site = ss::site;
+	std::string Bad;
+	const net::SiteDef& Ign = net::Def(net::SiteId::Ignite);
+	const net::SiteDef& Rit = net::Def(net::SiteId::RunItTwice);
+	Expect(Ign.Gate.FestivalEvents == fest::kPassEvents && Rit.Gate.FestivalEvents == fest::kPassEvents && fest::kPassEvents == 20 && Ign.Gate.MinRentsPaid == 2 &&
+			   Rit.Gate.MinRentsPaid == 2,
+		"FestPassGate: Ignite's and RunItTwice's gates carry the Pass at 20 paid online events, after two rents (" + std::to_string(Ign.Gate.FestivalEvents) + ", " +
+			std::to_string(Rit.Gate.FestivalEvents) + ")");
+	// Every rival edition to 2030: inside its window at the first minute it counts, its Buildup, its Live days and its last day's
+	// evening; outside it the minute before and the day after it closes.
+	int Editions = 0, Firsts = 0;
+	for (const fest::Festival& F : fest::All())
+	{
+		if (F.Site == net::SiteId::RiverLine || F.Year > 2030)
+		{
+			continue;
+		}
+		++Editions;
+		Firsts += F.Edition == 1 ? 1 : 0;
+		const net::SiteDef& D = net::Def(F.Site);
+		const int Need = F.Edition == 1 ? 0 : fest::kPassEvents;
+		const double Opens = FestPassOpensWorld(F);
+		const std::vector<double> Inside = {Opens, static_cast<double>(F.FirstDay - fest::kBuildupDays) * 1440.0 + 600.0, static_cast<double>(F.FirstDay) * 1440.0 + 600.0,
+			static_cast<double>(F.LastDay) * 1440.0 + 1200.0};
+		for (const double At : Inside)
+		{
+			int Why = -1;
+			const bool Met = site::GateMet(F.Site, FestPassRecordWorld(Need, 0), 2, At, &Why);
+			int Why2 = -1;
+			const bool Met2 = site::GateMet(F.Site, FestPassRecordWorld(0, Need), 2, At, &Why2);
+			const bool Short = Need > 0 && site::GateMet(F.Site, FestPassRecordWorld(Need - 1, Need - 1), 2, At, nullptr);
+			const bool OneRent = site::GateMet(F.Site, FestPassRecordWorld(Need, Need), 1, At, nullptr);
+			const fest::Festival* Pass = fest::PassFestival(F.Site, At);
+			if (!Met || Why != 5 || !Met2 || Why2 != 5 || Short || OneRent || Pass != &F || fest::PassNeeds(F, D.Gate) != Need)
+			{
+				Bad += " " + F.Name + " at " + std::to_string(static_cast<long long>(At)) + ": " + FestPassAnswerWorld(Met, Why) + " on " + std::to_string(Need) + "/" +
+					FestPassAnswerWorld(Met2, Why2) + " on the last hundred" + (Short ? ", met one short" : "") + (OneRent ? ", met on one rent" : "") +
+					(Pass != &F ? ", PassFestival " + std::string(Pass ? Pass->Name : "none") : "");
+			}
+		}
+		const std::vector<double> Outside = {static_cast<double>(F.FirstDay - ss::fest::kAnnounceDays) * 1440.0 - 1.0, static_cast<double>(F.LastDay + 1) * 1440.0 + 600.0};
+		for (const double At : Outside)
+		{
+			const fest::Festival* Pass = fest::PassFestival(F.Site, At);
+			const bool Met = site::GateMet(F.Site, FestPassRecordWorld(Need, Need), 2, At, nullptr);
+			const bool Other = Pass && Pass != &F; // the site's next festival's own window (never at G1's ten clear days and 30-day notice)
+			if (Pass == &F || (!Other && Met))
+			{
+				Bad += " " + F.Name + " outside its window at " + std::to_string(static_cast<long long>(At)) + ": " + FestPassAnswerWorld(Met, 5) +
+					(Pass ? ", PassFestival " + Pass->Name : "");
+			}
+		}
+	}
+	Expect(Bad.empty() && Editions >= 20 && Firsts == 6,
+		"FestPassGate: every rival edition to 2030 invites on Why 5 with two rents alone for its first edition and two rents and 20 paid online events from its "
+		"second, only while Announced, in Buildup or Live, never on one rent or one event short (" +
+			std::to_string(Editions) + " editions, " + std::to_string(Firsts) + " first)" + Bad);
+	// The four editions §2.10 item 5 names, by year: FEIGN I on Nov 2 (Ignite's opening, FEIGN announced from Oct 31), PENNANT I and
+	// REIGN I on the rents, their second editions on 20.
+	const fest::Festival* Feign1 = FestPassEditionWorld(fest::Brand::Feign, 2026);
+	const fest::Festival* Pennant1 = FestPassEditionWorld(fest::Brand::Pennant, 2027);
+	const fest::Festival* Pennant2 = FestPassEditionWorld(fest::Brand::Pennant, 2028);
+	const fest::Festival* Reign1 = FestPassEditionWorld(fest::Brand::Reign, 2027);
+	const fest::Festival* Reign2 = FestPassEditionWorld(fest::Brand::Reign, 2028);
+	const bool Named = Feign1 && Pennant1 && Pennant2 && Reign1 && Reign2 && Feign1->Edition == 1 && Pennant1->Edition == 1 && Pennant2->Edition == 2 &&
+		Reign1->Edition == 1 && Reign2->Edition == 2;
+	int WhyFeign = -1;
+	const bool FeignNov2 = Named && site::GateMet(net::SiteId::Ignite, FestPassRecordWorld(0, 0), 2, 28.0 * 1440.0, &WhyFeign) && WhyFeign == 5 &&
+		!site::GateMet(net::SiteId::Ignite, FestPassRecordWorld(0, 0), 2, 28.0 * 1440.0 - 1.0, nullptr);
+	const bool Champs = Named && site::GateMet(Pennant1->Site, FestPassRecordWorld(0, 0), 2, static_cast<double>(Pennant1->FirstDay) * 1440.0, nullptr) &&
+		!site::GateMet(Pennant2->Site, FestPassRecordWorld(19, 19), 2, static_cast<double>(Pennant2->FirstDay) * 1440.0, nullptr) &&
+		site::GateMet(Pennant2->Site, FestPassRecordWorld(20, 0), 2, static_cast<double>(Pennant2->FirstDay) * 1440.0, nullptr) &&
+		site::GateMet(Reign1->Site, FestPassRecordWorld(0, 0), 2, static_cast<double>(Reign1->FirstDay) * 1440.0, nullptr) &&
+		!site::GateMet(Reign2->Site, FestPassRecordWorld(19, 19), 2, static_cast<double>(Reign2->FirstDay) * 1440.0, nullptr) &&
+		site::GateMet(Reign2->Site, FestPassRecordWorld(0, 20), 2, static_cast<double>(Reign2->FirstDay) * 1440.0, nullptr);
+	Expect(FeignNov2 && Champs,
+		"FestPassGate: FEIGN I opens Ignite's door on Nov 2 (its opening; not the minute before) on two rents; PENNANT I and REIGN I on two rents, their second editions on 20 "
+		"paid online events, not 19");
+	// PassNeeds on constructed gates (§10 Q4's other answers): -1 no path, 0 two rents alone, 20 the Pass; a first edition always 0.
+	net::InviteGate None, Rents, Pass20;
+	None.FestivalEvents = -1;
+	Rents.FestivalEvents = 0;
+	Pass20.FestivalEvents = fest::kPassEvents;
+	const bool Needs = Named && fest::PassNeeds(*Pennant2, None) == -1 && fest::PassNeeds(*Pennant2, Rents) == 0 && fest::PassNeeds(*Pennant2, Pass20) == 20 &&
+		fest::PassNeeds(*Feign1, Rents) == 0 && fest::PassNeeds(*Feign1, Pass20) == 0;
+	Expect(Needs, "FestPassGate: PassNeeds on constructed gates: -1 (no path), 0 (two rents alone) and 20 on a second edition; 0 on a first");
+	// The strip's numbers are GateMet's inputs: N = max(OnlineEvents, Paid100), Need = PassNeeds; met exactly when N reaches Need.
+	std::string Strip;
+	if (Named)
+	{
+		const double At = static_cast<double>(Pennant2->FirstDay) * 1440.0;
+		const int Need = fest::PassNeeds(*Pennant2, net::Def(Pennant2->Site).Gate);
+		for (const std::pair<int, int>& R : std::vector<std::pair<int, int>>{{7, 12}, {12, 7}, {19, 3}, {3, 20}, {20, 19}, {25, 0}})
+		{
+			const int N = std::max(R.first, R.second);
+			const bool Met = site::GateMet(Pennant2->Site, FestPassRecordWorld(R.first, R.second), 2, At, nullptr);
+			Strip += Met != (N >= Need) ? " PASS " + std::to_string(N) + "/" + std::to_string(Need) + " read " + FestPassAnswerWorld(Met, 5) : std::string();
+		}
+	}
+	Expect(Named && Strip.empty(), "FestPassGate: the strip's PASS {N}/{Need} are GateMet's inputs (N the larger of the tracker's count and the last hundred's)" + Strip);
+	// The letter names the festival: Ignite's for FEIGN 2026 (Nov 2), RunItTwice's for REIGN 2027.
+	std::string Letters;
+	if (Named)
+	{
+		const std::vector<std::pair<const fest::Festival*, double>> Cases = {{Feign1, 28.0 * 1440.0}, {Reign1, static_cast<double>(Reign1->FirstDay - 10) * 1440.0}};
+		for (const std::pair<const fest::Festival*, double>& C : Cases)
+		{
+			site::Book B;
+			ss::life::State L;
+			site::Invite(B, L, C.first->Site, C.second, 5, false);
+			const ss::net::EventTemplate* Main = net::ForEvent(C.first->MainId).FindTemplate(C.first->MainId);
+			const std::string Opens = fest::DateInSentence(C.first->FirstDay, net::DayOf(C.second));
+			const bool Ignite = C.first->Site == net::SiteId::Ignite;
+			const std::string Subject = (Ignite ? "You're on the list for " : "An invitation to ") + C.first->Name;
+			const ss::life::Letter* M = L.Inbox.empty() ? nullptr : &L.Inbox.back();
+			const bool Good = M && L.Inbox.size() == 1 && M->Subject == Subject && M->Kind == site::LetterInvite &&
+				M->Body.find(C.first->Name + " opens on " + Opens + ",") != std::string::npos && M->Body.find('{') == std::string::npos &&
+				(!Ignite || (Main && M->Body.find("The " + net::BuyIn(Main->BuyInCents) + " Main Event has money added.") != std::string::npos)) && B.Invites.size() == 1 &&
+				B.Invites[0].Site == C.first->Site && B.Invites[0].State == 0;
+			Letters += Good ? std::string() : " " + C.first->Name + ": '" + (M ? M->Subject + "' / '" + M->Body : std::string("no letter")) + "'";
+		}
+	}
+	Expect(Named && Letters.empty(), "FestPassGate: the Pass letter (Why 5) names the festival, the day it opens and (Ignite's) its Main's buy-in: L1-L2 for FEIGN 2026, L3-L4 "
+									 "for REIGN 2027" + Letters);
+}
+
+/**
+ * FestMarks, F-world's half (§2.15.1, §2.9.1; F-net's fest::Marks half is FN-7's): site::Marks gives a joined rival's series starts as
+ * SERIES, but never a festival series' (fest::Marks reads FESTIVAL and MAIN for those): with Ignite and RunItTwice joined, from Night
+ * One to the end of 2028, no SERIES mark falls on a festival series' first day under its name, and every non-festival series starting
+ * there has its SERIES mark (so the check is not empty).
+ * Planted bug: site::Marks without its if (S.Festival) continue;.
+ */
+void FestMarksWorld()
+{
+	namespace net = ss::net;
+	namespace site = ss::site;
+	site::Book B;
+	for (const net::SiteId S : {net::SiteId::Ignite, net::SiteId::RunItTwice})
+	{
+		site::Account A;
+		A.Site = S;
+		B.Accounts.push_back(A);
+	}
+	const double From = 0.0, To = static_cast<double>(ss::world::DayOn(2029, 1, 1)) * 1440.0;
+	const std::vector<ss::life::Mark> Marks = site::Marks(B, From, To);
+	std::multiset<std::pair<long long, std::string>> Series;
+	for (const ss::life::Mark& M : Marks)
+	{
+		if (M.Kind == site::MarkSeries)
+		{
+			Series.insert({std::llround(M.At), M.Label});
+		}
+	}
+	int Festivals = 0, Others = 0;
+	std::string Bad;
+	for (const net::SiteId S : {net::SiteId::Ignite, net::SiteId::RunItTwice})
+	{
+		for (const net::SeriesInfo& I : net::Site(S).Series())
+		{
+			const double Starts = static_cast<double>(I.FirstDay) * 1440.0;
+			if (Starts < From || Starts > To)
+			{
+				continue;
+			}
+			const std::string Label = site::FillCopy(site::CopyText("mark:series"), {{"Series", I.Name}});
+			const bool Has = Series.count({std::llround(Starts), Label}) > 0;
+			Festivals += I.Festival ? 1 : 0;
+			Others += I.Festival ? 0 : 1;
+			Bad += I.Festival == Has ? " " + I.Name + (Has ? " reads SERIES" : " has no SERIES mark") : std::string();
+		}
+	}
+	Expect(Bad.empty() && Festivals >= 10 && Others >= 1,
+		"FestMarks: site::Marks gives a joined rival's series SERIES but never a festival series (" + std::to_string(Festivals) + " festival series, " + std::to_string(Others) +
+			" others, to 2028)" + Bad);
+}
+
+/** The committed festival fixture's bytes (empty: not there). */
+std::string FestFixtureWorld()
+{
+	const std::string Path = std::string(SS_TESTS_DIR) + "/fixtures/update4_festival.ssave";
+	std::FILE* F = std::fopen(Path.c_str(), "rb");
+	if (!F)
+	{
+		return std::string();
+	}
+	std::string Out;
+	char Buf[65536];
+	size_t N = 0;
+	while ((N = std::fread(Buf, 1, sizeof(Buf), F)) > 0)
+	{
+		Out.append(Buf, N);
+	}
+	std::fclose(F);
+	return Out;
+}
+
+/**
+ * FestSaveRoundTrip, the fixture's facts (§2.13, §8 Q9; FW-7): Tests/fixtures/update4_festival.ssave (fixture_tool write-u4-fest) reads
+ * and writes back byte for byte, its world too; it is day 60 (Fri Dec 4, 2026) with RCOP 2026 crowned after its Main and the hero a
+ * FINALIST of it (rank 4-25), its mark line written (the mark line's bytes printed), its crown ticket paid (festticket:rcop, no t) and
+ * its moment seen (festmark:rcop); FEIGN 2026 (FEIGN I) live, its race line holding scorers; both rents paid; the Ignite account opened
+ * from Ignite's Pass letter for FEIGN 2026, sent at the first daily check after Ignite opened (Nov 2) and accepted; no recent record
+ * with a curve field (R-25: none can exist by day 60), no League line and no site play (MigrationAll3, the lead's, counts every
+ * Update 3 byte).
+ * Planted bug (FW-7's): the mark line written with its rank and scorers swapped.
+ */
+void FestSaveRoundTripFixture()
+{
+	namespace fest = ss::fest;
+	namespace net = ss::net;
+	namespace world = ss::world;
+	const auto T0 = std::chrono::steady_clock::now();
+	const std::string Saved = FestFixtureWorld();
+	ss::SaveData D;
+	const bool Parsed = !Saved.empty() && ss::SaveData::Parse(Saved, D);
+	const bool Exact = Parsed && D.Serialize() == Saved;
+	const auto T1 = std::chrono::steady_clock::now();
+	const std::string& WorldText = D.WorldText;
+	world::World W;
+	FestLoadWorld(W, WorldText);
+	const auto T2 = std::chrono::steady_clock::now();
+	const bool WorldExact = Parsed && FestTextWorld(W) == WorldText;
+	std::printf("  FestSaveRoundTrip: the fixture read and written %.0f ms, its world loaded %.0f ms and written %.0f ms\n",
+		std::chrono::duration<double, std::milli>(T1 - T0).count(), std::chrono::duration<double, std::milli>(T2 - T1).count(),
+		std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T2).count());
+	Expect(Parsed && Exact && WorldExact, "FestSaveRoundTrip: update4_festival.ssave reads and writes back byte for byte, its world too (" + std::to_string(Saved.size()) + " B)");
+	const std::string MarkLine = FestLinesWorld(WorldText, "world\tfest\tmark\t");
+	std::printf("  FestSaveRoundTrip: the fixture's mark line %zu B (%s)\n", MarkLine.empty() ? 0 : MarkLine.size() - 1, MarkLine.empty() ? "none" : MarkLine.substr(0, MarkLine.size() - 1).c_str());
+	const fest::Festival* Rcop = fest::FestivalOf("rcop");
+	const fest::Festival* Feign = fest::FestivalOf("ignite.feign26");
+	const double Now = W.Clock();
+	const std::vector<world::HeroFestMark>& Marks = world::HeroMarks(W);
+	const bool Finalist = Marks.size() == 1 && Marks[0].Key == "rcop" && Marks[0].Mark == world::FestMark::Finalist && Marks[0].Rank >= 4 && Marks[0].Rank <= 25 &&
+		!Marks[0].Ticket && Marks[0].Scorers > 0;
+	const double Crowned = world::FestCrownedAt(W, "rcop");
+	const bool Crown = Rcop && Crowned >= fest::LastEnd(*Rcop) && Crowned < static_cast<double>(Rcop->LastDay + 3) * 1440.0;
+	const bool Keys = D.Life.Sites.Done.count("festticket:rcop") > 0 && D.Life.Sites.Done.count("festmark:rcop") > 0;
+	Expect(Parsed && net::DayOf(Now) == 60 && Crown && Finalist && Keys,
+		"FestSaveRoundTrip: the fixture is day 60 with RCOP 2026 crowned after its Main, the hero its FINALIST (rank 4-25; " +
+			std::string(Marks.empty() ? "no mark" : "rank " + std::to_string(Marks[0].Rank) + " of " + std::to_string(Marks[0].Scorers)) +
+			"), the crown ticket paid and the moment seen");
+	const std::pair<int, int> Race = world::FestStanding(W, -1);
+	const bool Live = Feign && fest::PhaseOf(*Feign, Now, &W) == fest::Phase::Live && world::FestRaceKey(W) == Feign->SeriesId && Race.second > 0 &&
+		!FestLinesWorld(WorldText, "world\tfest\trace\tignite.feign26\t").empty();
+	Expect(Live, "FestSaveRoundTrip: the fixture holds FEIGN 2026 live with its race in progress (" + std::to_string(Race.second) + " scorers)");
+	const ss::site::Invitation* Invited = nullptr;
+	for (const ss::site::Invitation& I : D.Life.Sites.Invites)
+	{
+		Invited = I.Site == net::SiteId::Ignite ? &I : Invited;
+	}
+	bool Account = false;
+	for (const ss::site::Account& A : D.Life.Sites.Accounts)
+	{
+		Account = Account || A.Site == net::SiteId::Ignite;
+	}
+	std::string Letter;
+	for (const ss::life::Letter& M : D.Life.Inbox)
+	{
+		Letter = M.Source == "site" && M.Thread == "ignite" && M.Kind == ss::site::LetterInvite ? M.Subject : Letter;
+	}
+	const double Opens = static_cast<double>(net::Def(net::SiteId::Ignite).LaunchDay) * 1440.0;
+	const bool Pass = Feign && D.Life.RentsPaid == 2 && Account && Invited && Invited->State == 1 && Invited->At >= Opens && Invited->At < Opens + 1440.0 &&
+		Letter == "You're on the list for " + Feign->Name;
+	Expect(Pass, "FestSaveRoundTrip: the fixture's Ignite account came from the Pass: both rents paid, FEIGN 2026's letter at the first daily check after Ignite opened, "
+				 "accepted ('" + Letter + "')");
+	bool Curve = false;
+	for (const std::vector<std::string>& R : FestRecentWorld(WorldText))
+	{
+		Curve = Curve || R.size() > 8;
+	}
+	const bool NoU3 = FestLinesWorld(WorldText, "world\tleague\t").empty() && FestLinesWorld(Saved, "site\tplay").empty();
+	Expect(Parsed && !Curve && NoU3, "FestSaveRoundTrip: the fixture has no recent record with a curve field (R-25), no League line and no site play");
+}
 } // namespace
 
 void SegWorld()
@@ -3749,7 +4078,8 @@ void SegWorld()
 	if (Only("FestSaveRoundTrip"))
 	{
 		FestSaveRoundTrip();
-		FestSaveRoundTripCrown(); // FW-2b's part
+		FestSaveRoundTripCrown();   // FW-2b's part
+		FestSaveRoundTripFixture(); // FW-7's: the committed fixture's facts
 	}
 	// FW-2b: the crown
 	if (Only("FestCrownSkipInvariant"))
@@ -3847,6 +4177,15 @@ void SegWorld()
 	if (Only("FestMainTicket"))
 	{
 		FestMainTicketWorld(); // F-world's world half (F-net's in festivals_main.cpp)
+	}
+	// FW-7: the Pass, the agenda's skip (FestSaveRoundTrip's fixture half is above)
+	if (Only("FestPassGate"))
+	{
+		FestPassGate();
+	}
+	if (Only("FestMarks"))
+	{
+		FestMarksWorld(); // F-world's half: site::Marks' festival skip (F-net's fest::Marks half is FN-7's, in festivals_main.cpp)
 	}
 }
 } // namespace festivals_test
