@@ -385,7 +385,8 @@ std::string StoryBig(const std::string& Key)
 
 /** Update 4 G1 (SPEC v1.7 §2.9.4, §2.11's V1-V9; F-world's FW-1): a festival story's titles by the prefix of its StoryText key
  *  (fest-main-, fest-belt-, fest-ft-), in the Story, Hype and Teaching styles. The one table (PLAN_G1 §1 item 26): fest::TextInventory
- *  lists it (G/SessionFest.cpp); Rerun's story keys and Inventory() read it once the three prefixes are wired (§2.9.4). */
+ *  lists it (G/SessionFest.cpp, the copy lint's one entry); FW-5: Update 2's titles (FestStoryLines, below) and Rerun 2.0's (FestTpls,
+ *  the festival story cells) read it, filled from the facts the session packed when it noted the story (G/SessionVideo.cpp). */
 const std::vector<std::pair<std::string, std::string>>& FestStoryTitles()
 {
 	static const std::vector<std::pair<std::string, std::string>> All = {
@@ -400,6 +401,35 @@ const std::vector<std::pair<std::string, std::string>>& FestStoryTitles()
 		{"fest-ft-", "{Place} in the {Festival} Main Event"},
 	};
 	return All;
+}
+
+/** FW-5 (§2.9.4): a festival story's line for one style, filled from its packed facts (Candidate::IdeaFacts' display facts): Story
+ *  V1/V4/V7, Hype V2/V5/V8, Teaching V3/V6/V9; none for Question or Plain, for any other key, or while a fact is missing. */
+std::vector<std::string> FestStoryLines(const std::string& Event, TitleStyle T, const std::string& IdeaFacts)
+{
+	std::vector<std::string> Out;
+	int N = 0;
+	for (const std::pair<std::string, std::string>& V : FestStoryTitles())
+	{
+		if (Event.rfind(V.first, 0) != 0 || N++ != static_cast<int>(T))
+		{
+			continue;
+		}
+		std::string Line = V.second;
+		for (const auto& Kv : vcontent::DisplayFacts(IdeaFacts))
+		{
+			const std::string Slot = "{" + Kv.first + "}";
+			for (size_t At = Line.find(Slot); At != std::string::npos; At = Line.find(Slot, At + Kv.second.size()))
+			{
+				Line.replace(At, Slot.size(), Kv.second);
+			}
+		}
+		if (Line.find('{') == std::string::npos)
+		{
+			Out.push_back(Line);
+		}
+	}
+	return Out;
 }
 
 // ---------------------------------------------------------------- facts
@@ -939,6 +969,10 @@ std::string Title(const Choice& Ch, const std::vector<Candidate>& Cands, uint32_
 			{
 				Options.push_back(S.Lines[static_cast<int>(Ch.T)]);
 			}
+		}
+		for (const std::string& Line : FestStoryLines(Lead->Event, Ch.T, Lead->IdeaFacts)) // Update 4 G1 (§2.9.4; FW-5)
+		{
+			Options.push_back(Line);
 		}
 	}
 	const int For = Ch.F == Format::Vlog ? VlogKey : Ch.F == Format::Recap ? RecapKey : static_cast<int>(Lead->K);
@@ -1899,6 +1933,10 @@ const char* StyleSlug(TitleStyle T)
 	return "story";
 }
 
+/** Update 4 G1 (SPEC v1.7 §2.9.4; FW-5): the festival stories' cells, ForStory + 100 + the prefix's index (fest-main-, fest-belt-,
+ *  fest-ft-; FestStoryCellOf). */
+const int ForFestStory = ForStory + 100;
+
 std::string ForSlug(int For)
 {
 	static const char* const Kinds[] = {"badbeat", "suckout", "cooler", "bluff", "bluffcaught", "herocall", "herofold", "bigpot", "knockout", "bubble", "deeprun", "finaltable", "win",
@@ -1921,6 +1959,11 @@ std::string ForSlug(int For)
 		const IdeaDef* D = IdeaById(For - ForIdea);
 		return std::string("idea.") + (D ? LowerU3(D->Code) : std::to_string(For - ForIdea));
 	}
+	if (For >= ForFestStory && For < ForFestStory + 3)
+	{
+		static const char* const FestSlugs[] = {"story.fest-main", "story.fest-belt", "story.fest-ft"};
+		return FestSlugs[For - ForFestStory];
+	}
 	if (For >= ForStory)
 	{
 		const std::vector<std::string>& Keys = StoryKeys();
@@ -1928,6 +1971,24 @@ std::string ForSlug(int For)
 		return "story." + (I < Keys.size() ? Keys[I] : std::to_string(I));
 	}
 	return "for" + std::to_string(For);
+}
+
+/** Update 4 G1 (SPEC v1.7 §2.9.4; FW-5): a festival story's cell (fest-main- 0, fest-belt- 1, fest-ft- 2, by FestStoryTitles' order), or
+ *  -1. Its rows are FestTpls (V1-V9), never Templates3's, so the library's pinned cells and style means stay as they are. */
+int FestStoryCellOf(const std::string& Event)
+{
+	int Cell = 0;
+	std::string Last;
+	for (const std::pair<std::string, std::string>& V : video_copy::FestStoryTitles())
+	{
+		Cell += !Last.empty() && V.first != Last ? 1 : 0;
+		Last = V.first;
+		if (Event.rfind(V.first, 0) == 0)
+		{
+			return ForFestStory + Cell;
+		}
+	}
+	return -1;
 }
 
 int StoryKeyOf(const std::string& Event)
@@ -2003,6 +2064,30 @@ const std::vector<Tpl>& Templates3()
 		for (const Row& R : TitleRows())
 		{
 			Add(R.For, R.T, R.Text, R.Flags ? R.Flags : "", false);
+		}
+		return Out;
+	}();
+	return All;
+}
+
+const std::vector<Tpl>& FestTpls()
+{
+	// Update 4 G1 (SPEC v1.7 §2.9.4; FW-5): the festival stories' rows, V1-V9 from G/VideoCopy.cpp's one table (FestStoryTitles), three
+	// a prefix in the Story, Hype and Teaching styles, keyed as Templates3 keys its rows ("story.fest-main.story.1"). Kept apart from
+	// Templates3 (rerun_content's fixtures and pins cover the library as it stands).
+	static const std::vector<Tpl> All = [] {
+		std::vector<Tpl> Out;
+		std::map<int, int> N;
+		for (const std::pair<std::string, std::string>& V : video_copy::FestStoryTitles())
+		{
+			Tpl X;
+			X.For = FestStoryCellOf(V.first);
+			X.T = static_cast<TitleStyle>(N[X.For]++);
+			X.Text = V.second;
+			X.Promise = VcPromise(X.T, X.Text, "");
+			X.Flags = VcTagBits("");
+			X.Key = ForSlug(X.For) + "." + StyleSlug(X.T) + ".1";
+			Out.push_back(X);
 		}
 		return Out;
 	}();
@@ -2123,9 +2208,14 @@ std::vector<int> CellsFor(const Choice& Ch, const Candidate& Lead)
 	else if (Lead.K == Kind::Story)
 	{
 		const int Key = StoryKeyOf(Lead.Event);
+		const int Fest = FestStoryCellOf(Lead.Event);
 		if (Key >= 0)
 		{
 			Cells.push_back(ForStory + Key);
+		}
+		else if (Fest >= 0)
+		{
+			Cells.push_back(Fest);
 		}
 	}
 	else
@@ -2183,13 +2273,21 @@ std::vector<TitleOption> TitleOptions(const Choice& Ch, const std::vector<Candid
 		for (const int Cell : Cells)
 		{
 			const auto It = Index.find({Cell, static_cast<int>(T)});
-			if (It == Index.end())
+			std::vector<int> FestRows; // Update 4 G1 (§2.9.4; FW-5): FestTpls' rows as -1 - their index
+			for (size_t K = 0; Cell >= ForFestStory && Cell < ForFestStory + 3 && K < FestTpls().size(); ++K)
+			{
+				if (FestTpls()[K].For == Cell && FestTpls()[K].T == T)
+				{
+					FestRows.push_back(-1 - static_cast<int>(K));
+				}
+			}
+			if (It == Index.end() && FestRows.empty())
 			{
 				continue;
 			}
-			for (const int I : It->second)
+			for (const int I : It != Index.end() ? It->second : FestRows)
 			{
-				const Tpl& X = All[static_cast<size_t>(I)];
+				const Tpl& X = I >= 0 ? All[static_cast<size_t>(I)] : FestTpls()[static_cast<size_t>(-1 - I)];
 				if (Recent.count(X.Key) > 0)
 				{
 					continue;
@@ -2212,7 +2310,7 @@ std::vector<TitleOption> TitleOptions(const Choice& Ch, const std::vector<Candid
 		return R;
 	};
 	auto Take = [&](const Ranked& R) {
-		const Tpl& X = All[static_cast<size_t>(R.I)];
+		const Tpl& X = R.I >= 0 ? All[static_cast<size_t>(R.I)] : FestTpls()[static_cast<size_t>(-1 - R.I)];
 		for (const TitleOption& O : Out)
 		{
 			if (O.Key == X.Key || O.Text == R.Text)

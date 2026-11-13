@@ -8,12 +8,15 @@
 // FestSaveRoundTrip's final line and day-66 curve field, FestCalendarFacts' world half, with the crown's budget lines; FW-3: the titles:
 // FestRollFromHonors, FestBlankHonesty, FestDefending, FestDiscoverWidened, FestHeroPinsDerived (with HeroFestPins' budget line),
 // FestHeadline, FestTitleOrder, and FestChampTitles' and FestMajorFloor's world halves; FW-4: WHO'S IN: FestFieldStories,
-// FestStoryHooks, on Honors and fields planted through the world text). Every helper here
+// FestStoryHooks, on Honors and fields planted through the world text; FW-5: the session's texts, moments and Rerun: FestTexts,
+// FestMoments, FestRerunStories, through SessionFestDetail.h and one session run on marks planted through its world). Every helper here
 // is in an anonymous namespace (PLAN_G1 §1 item 8: festivals_main.cpp shares the executable); each check runs alone as "festivals_test
 // <Check>" (the kit's Only, FN-1). The race checks build one Blank world before RCOP 2026 opens and run it through the edition (about
 // 18 ms a world day), planting races through the world text; the crown's run it on through FEIGN 2026, the first rival festival, to
 // day 67, never past FEIGN I (§8.1: "three Blank worlds to day 65").
+#include "../../Source/ShortStackCore/Private/ShortStack/Game/SessionFestDetail.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
+#include "../../Source/ShortStackCore/Private/ShortStack/Game/VideoContentPriv.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/WorldFestDetail.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/WorldSim.h"
 
@@ -22,8 +25,11 @@
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Rep.h"
+#include "ShortStack/Game/Session.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
+#include "ShortStack/Game/Video.h"
+#include "ShortStack/Game/VideoContent.h"
 #include "ShortStack/Game/World.h"
 #include "ShortStack/Game/WorldFest.h"
 
@@ -35,9 +41,29 @@
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
+
+namespace ss
+{
+namespace fest
+{
+namespace fest_text_detail
+{
+const char* FestText(const std::string& Key); // G/SessionFest.cpp: the festival texts' one table, by key
+} // namespace fest_text_detail
+} // namespace fest
+namespace video
+{
+namespace video_copy
+{
+std::vector<std::string> FestStoryLines(const std::string& Event, TitleStyle T, const std::string& IdeaFacts); // G/VideoCopy.cpp (FW-5)
+} // namespace video_copy
+} // namespace video
+} // namespace ss
 
 namespace festivals_test
 {
@@ -2956,6 +2982,342 @@ void FestStoryHooks()
 									   (Loud.empty() ? std::string("none other") : Loud) + ")");
 	std::printf("  FestStoryHooks: \"%s\" | \"%s\" | \"%s\"\n", Series.c_str(), Year.c_str(), Titles.c_str());
 }
+
+// ------------------------------------------------------------------ FW-5: the session's texts, moments and Rerun (§2.8.5, §2.9.3, §2.9.4)
+
+/** Every text a session sends, and its last save. */
+struct FestHooksWorld : ss::SessionHooks
+{
+	std::vector<std::pair<std::string, std::string>> Texts;
+	ss::SaveData Last;
+	int Saves = 0;
+	void Text(const std::string& From, const std::string& Body) override { Texts.emplace_back(From, Body); }
+	void Save(const ss::SaveData& D) override
+	{
+		++Saves;
+		Last = D;
+	}
+};
+
+/** The festival texts among Hooks' texts from index From on (Dee's belt and mark lines, T10 and T14), "|"-joined. */
+std::string FestDeeTextsWorld(const FestHooksWorld& H, size_t From)
+{
+	std::string Out;
+	for (size_t I = From; I < H.Texts.size(); ++I)
+	{
+		const std::string& B = H.Texts[I].second;
+		if (H.Texts[I].first == "Dee" && (B.rfind("There's a belt", 0) == 0 || B.find(" in the race. I'm telling people.") != std::string::npos))
+		{
+			Out += (Out.empty() ? "" : "|") + B;
+		}
+	}
+	return Out;
+}
+
+/** A moment as one line ("2 rcop 1700 m5 1/608", "-" for none). */
+std::string FestMomentLineWorld(const std::optional<ss::FestMoment>& M)
+{
+	if (!M)
+	{
+		return "-";
+	}
+	return std::to_string(M->Kind) + " " + M->Key + " " + std::to_string(M->Prize) + " m" + std::to_string(M->Mark) + " " + std::to_string(M->Rank) + "/" +
+		std::to_string(M->Scorers) + (M->Dev ? " dev" : "");
+}
+
+/** A festival story candidate's state in a session's channel: "-" when it isn't open, else its packed facts (and " series"). */
+std::string FestStoryStateWorld(const ss::Session& S, const std::string& Key)
+{
+	for (const ss::video::Candidate& C : S.Life.Video.Open)
+	{
+		if (C.Id == "story:" + Key)
+		{
+			return C.IdeaFacts + (C.Series ? " series" : "");
+		}
+	}
+	return "-";
+}
+
+/** One mark planted into a session's world as its save line reads (world\tfest\tmark: key, grade, rank, scorers, points). */
+void FestPlantMarkWorld(ss::world::World& W, const std::string& Key, ss::world::FestMark Mark, int Rank, int Scorers, int Points)
+{
+	W.Read({"world", "fest", "mark", Key, std::to_string(static_cast<int>(Mark)), std::to_string(Rank), std::to_string(Scorers), std::to_string(Points)});
+}
+
+/** The session half of FestTexts and FestMoments, run once: a fresh career whose save already holds the Championship Online 2027 Main's
+ *  final-table line, three marks planted (RCOP 2026's belt, Ring Rush 2027's PODIUM, the Championship Online 2027's FINALIST), two
+ *  skips, a step, the belt's moment dismissed, a reload, and the rest dismissed; Rerun's channel opened before the marks (the old final
+ *  table's story marked told), and two calendar steps after the skip and after the reload (Rerun notes the belt's story). */
+struct FestSessionRunWorld
+{
+	std::string Skip1, Again, Reloaded;              // the festival texts each stretch sent
+	size_t MarksBack = 0;                            // the marks the reloaded world holds
+	std::string Peek1, Peek2, Peek3, Peek4, Peek5;   // the moments in turn (1 and 2 before the reload)
+	bool BeltKeyKept = false, MarkKeyKept = false;   // the done keys in the last save
+	std::string Story, OldStory, StoryLoaded, StoryBack; // Rerun's belt story (noted, reloaded, stepped) and the old final table's
+	bool Parsed = false;                                 // the save's text read back
+	double Ms = 0.0;
+};
+FestSessionRunWorld& FestSessionWorld()
+{
+	static std::unique_ptr<FestSessionRunWorld> Run;
+	if (Run)
+	{
+		return *Run;
+	}
+	Run = std::make_unique<FestSessionRunWorld>();
+	namespace world = ss::world;
+	const auto T0 = std::chrono::steady_clock::now();
+	FestHooksWorld H0;
+	ss::SaveData D;
+	{
+		ss::Session S0(H0, "festtexts");
+		S0.WorldSkip(1);
+		D = H0.Last;
+	}
+	D.TextsSeen.push_back("fest-ft-tco27"); // the edition's win-or-final-table line already went (the cap's second slot)
+	FestHooksWorld H1;
+	{
+		ss::Session S(H1, "festtexts", &D);
+		FestPlantMarkWorld(S.Living(), "rcop", world::FestMark::Title, 1, 608, 1700);
+		FestPlantMarkWorld(S.Living(), "ring27", world::FestMark::Podium, 2, 500, 900);
+		FestPlantMarkWorld(S.Living(), "tco27", world::FestMark::Finalist, 7, 1234, 600);
+		S.DebugVideo("fake win online"); // the channel's first state: the stories already told are marked (the old final table's)
+		size_t From = H1.Texts.size();
+		S.WorldSkip(1); // WorldSkip's FestStep: nothing else steps the planted marks
+		Run->Skip1 = FestDeeTextsWorld(H1, From);
+		From = H1.Texts.size();
+		S.Update(1000.0);
+		S.Update(1001.0); // a calendar step: Rerun notes the belt's story
+		Run->Story = FestStoryStateWorld(S, "fest-belt-rcop");
+		Run->OldStory = FestStoryStateWorld(S, "fest-ft-tco27");
+		S.WorldSkip(1);
+		S.FestStep(S.WorldMinutes(), S.WorldMinutes() + 60.0);
+		Run->Again = FestDeeTextsWorld(H1, From);
+		Run->Peek1 = FestMomentLineWorld(S.PeekFestMoment());
+		S.DoneFestMoment();
+		Run->Peek2 = FestMomentLineWorld(S.PeekFestMoment()); // not dismissed: the reload plays it again
+	}
+	FestHooksWorld H2;
+	ss::SaveData Back; // the save's own text round trip (what a reload from disk reads)
+	Run->Parsed = ss::SaveData::Parse(H1.Last.Serialize(), Back);
+	{
+		ss::Session S2(H2, "festtexts", &Back);
+		Run->MarksBack = world::HeroMarks(S2.Living()).size();
+		Run->StoryLoaded = FestStoryStateWorld(S2, "fest-belt-rcop");
+		const size_t From = H2.Texts.size();
+		S2.FestStep(S2.WorldMinutes(), S2.WorldMinutes() + 60.0);
+		S2.Update(1000.0);
+		S2.Update(1001.0);
+		Run->StoryBack = FestStoryStateWorld(S2, "fest-belt-rcop");
+		S2.WorldSkip(1);
+		Run->Reloaded = FestDeeTextsWorld(H2, From);
+		Run->Peek3 = FestMomentLineWorld(S2.PeekFestMoment());
+		S2.DoneFestMoment();
+		Run->Peek4 = FestMomentLineWorld(S2.PeekFestMoment());
+		S2.DoneFestMoment();
+		Run->Peek5 = FestMomentLineWorld(S2.PeekFestMoment());
+	}
+	const std::set<std::string> Done = H2.Last.Life.Sites.Done;
+	Run->BeltKeyKept = Done.count("festbelt:rcop") > 0;
+	Run->MarkKeyKept = Done.count("festmark:ring27") > 0 && Done.count("festmark:tco27") > 0;
+	Run->Ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count();
+	return *Run;
+}
+
+void FestTexts()
+{
+	namespace sfd = ss::session_fest_detail;
+	using ss::fest::Brand;
+	using ss::fest::Festival;
+	const Festival* Rcop = FestRcopWorld();
+	const Festival* Tco = FestEditionWorld(Brand::Tco, 2027);
+	const Festival* Pen = FestEditionWorld(Brand::Pennant, 2027);
+	const Festival* Feign = FestEditionWorld(Brand::Feign, 2026);
+	ss::net::EventInstance Numbered;
+	if (!Rcop || !Tco || !Pen || !Feign || Pen->TitleIds.size() < 3 || Rcop->TitleIds.size() < 3 || Pen->Satellites.size() < 3 || !FestHeroEventWorld(Numbered))
+	{
+		Expect(false, "FestTexts: RCOP 2026, the Championship Online 2027, PENNANT 2027 (three titles, a ladder) and FEIGN 2026 exist");
+		return;
+	}
+	const std::set<std::string> None;
+	const auto Id = [](const std::string& Template) { return Template + "@100000"; };
+
+	// The festival branch comes first (§2.9.3): a Championship Online Main win sends T8, and the branch keeps "bracelet-first" back.
+	const ss::net::EventTemplate* TcoMain = ss::net::ForEvent(Tco->MainId).FindTemplate(Tco->MainId);
+	const sfd::FestResult TcoWin = sfd::FestResultOf(Id(Tco->MainId), 1, false, 123456, None);
+	Expect(TcoWin.Branch && TcoWin.Key == "fest-main-tco27" && TcoWin.Body == "The Championship Online Main Event. A bracelet AND the title. Sit down a minute." &&
+			   TcoWin.Moment && TcoWin.Moment->Kind == 1 && TcoWin.Moment->Which == Brand::Tco && TcoWin.Moment->Key == "tco27" && TcoWin.Moment->Prize == 123456 &&
+			   TcoWin.Moment->Year == 2027,
+		"FestTexts: a Championship Online Main win sends the festival line (T8, fest-main-tco27) first, and the champion's moment (Kind 1) waits (" +
+			TcoWin.Key + ": \"" + TcoWin.Body + "\"; a bracelet event: " + (TcoMain && TcoMain->Bracelet ? "yes" : "no") + ")");
+	// An RCOP Main win: T1 alone (RCOP's Main is a big field: no "You WON it??" beside it).
+	const sfd::FestResult RcopWin = sfd::FestResultOf(Id(Rcop->MainId), 1, false, 400000000, None);
+	Expect(RcopWin.Branch && RcopWin.Key == "fest-main-rcop" && RcopWin.Body == "You won the RCOP Main?? The Cup goes on the shelf. The shelf goes in the will." &&
+			   RcopWin.Body.find("WON it") == std::string::npos && RcopWin.Moment && RcopWin.Moment->Kind == 1,
+		"FestTexts: an RCOP Main win sends T1 and no big-field line (\"" + RcopWin.Body + "\")");
+	// A championship's Mini and Micro Main: T17 (keyed fest-title-<series id>, the win line's slot) and the title moment (Kind 5).
+	const sfd::FestResult Mini = sfd::FestResultOf(Id(Pen->TitleIds[1]), 1, false, 5000, None);
+	const sfd::FestResult Micro = sfd::FestResultOf(Id(Pen->TitleIds[2]), 1, false, 500, None);
+	const sfd::FestResult RcopMicro = sfd::FestResultOf(Id(Rcop->TitleIds[2]), 1, false, 500, None);
+	const std::string PenMini = "The " + ss::fest::NameAfterArticle(Pen->Name) + " Mini Main. A title is a title, kid. Frame something.";
+	Expect(Mini.Branch && Mini.Key == "fest-title-" + Pen->SeriesId && Mini.Body == PenMini && Mini.Moment && Mini.Moment->Kind == 5 && Mini.Moment->Mark == 1 &&
+			   Micro.Key == Mini.Key && Micro.Body.find(" Micro Main. ") != std::string::npos && Micro.Moment && Micro.Moment->Kind == 5 && Micro.Moment->Mark == 2 &&
+			   RcopMicro.Key == "fest-title-rcop" && RcopMicro.Moment && RcopMicro.Moment->Kind == 5,
+		"FestTexts: a championship's Mini or Micro Main win sends T17 under fest-title-<series id> and plays the title moment (\"" + Mini.Body + "\" | \"" + Micro.Body + "\")");
+	// A Main's final table, 2nd to 9th: T9 ("the {Festival}" drops a leading "The "); 10th sends nothing.
+	const sfd::FestResult RcopFt = sfd::FestResultOf(Id(Rcop->MainId), 5, false, 1000, None);
+	const sfd::FestResult TcoFt = sfd::FestResultOf(Id(Tco->MainId), 9, false, 1000, None);
+	const sfd::FestResult Tenth = sfd::FestResultOf(Id(Rcop->MainId), 10, false, 1000, None);
+	Expect(RcopFt.Branch && RcopFt.Key == "fest-ft-rcop" && RcopFt.Body == "Final table of the RCOP 2026 Main Event. Whatever happens next, you were there." && !RcopFt.Moment &&
+			   TcoFt.Key == "fest-ft-tco27" && TcoFt.Body.find("the The") == std::string::npos && TcoFt.Body.find("Championship Online 2027 Main Event") != std::string::npos &&
+			   !Tenth.Branch && Tenth.Key.empty() && !Tenth.Moment,
+		"FestTexts: a Main's final table sends T9 (2nd-9th), 10th nothing (\"" + TcoFt.Body + "\")");
+	// Another festival event won: the champion's moment (Kind 3), no festival line (today's lines follow); a satellite: nothing.
+	const std::string Sat = Pen->Satellites[0];
+	const sfd::FestResult Num = sfd::FestResultOf(Numbered.Id, 1, false, 900, None);
+	const sfd::FestResult NumSecond = sfd::FestResultOf(Numbered.Id, 2, false, 600, None);
+	const sfd::FestResult SatWin = sfd::FestResultOf(Id(Sat), 1, false, 0, None);
+	const sfd::FestResult SatSeat = sfd::FestResultOf(Id(Sat), 1, true, 0, None);
+	Expect(!Num.Branch && Num.Moment && Num.Moment->Kind == 3 && Num.Moment->Key == "rcop" && !NumSecond.Moment && !SatWin.Branch && !SatWin.Moment && !SatSeat.Moment,
+		"FestTexts: a numbered event won plays Kind 3 with no festival line; a satellite plays nothing (" + Numbered.Id + ")");
+	// The cap (§2.9.3): one of win, final table or mark an edition; the belt's is the other slot.
+	std::set<std::string> Seen = {"fest-ft-" + Pen->SeriesId};
+	const sfd::FestResult Held = sfd::FestResultOf(Id(Pen->TitleIds[1]), 1, false, 5000, Seen);
+	const sfd::FestResult HeldFt = sfd::FestResultOf(Id(Rcop->MainId), 3, false, 1000, {"fest-mark-rcop"});
+	const sfd::FestResult BeltOnly = sfd::FestResultOf(Id(Rcop->MainId), 1, false, 1000, {"fest-belt-rcop"});
+	Expect(Held.Branch && Held.Key.empty() && Held.Body.empty() && Held.Moment && Held.Moment->Kind == 5 && HeldFt.Branch && HeldFt.Key.empty() && BeltOnly.Key == "fest-main-rcop",
+		"FestTexts: at most two festival texts an edition: a title after the final-table line and a final table after the mark line send nothing, the belt's never holds the win's back");
+	// The seat (§2.9.3, v1.6): T11 only for a seat by the edition's Main ticket; a championship's Step 1 or 2 seat sends the ladder line
+	// (FestSeatText ""); RCOP's Main ticket keeps today's line.
+	const ss::net::Network& PenNet = ss::net::ForEvent(Pen->MainId);
+	const std::string PenTicket = PenNet.TicketOf(Pen->MainId);
+	const auto SatId = [](const ss::net::EventTemplate& T) { return T.Id + "@" + std::to_string(T.OnlyDay * 1440 + T.StartMinute); };
+	std::string StepLines, MainSeat;
+	int Steps = 0;
+	for (const std::string& S : Pen->Satellites)
+	{
+		const ss::net::EventTemplate* T = PenNet.FindTemplate(S);
+		if (!T)
+		{
+			continue;
+		}
+		const std::string Line = sfd::FestSeatText(SatId(*T), T->SeatTicket, T->BuyInCents);
+		if (T->SeatTicket != PenTicket)
+		{
+			++Steps;
+			StepLines += Line;
+		}
+		else if (MainSeat.empty())
+		{
+			MainSeat = Line;
+			const ss::net::EventTemplate* M = PenNet.FindTemplate(Pen->MainId);
+			const std::string Want = "You won a seat in the " + ss::fest::NameAfterArticle(Pen->Name) + " Main Event. " + ss::net::BuyIn(M ? M->BuyInCents : 0) +
+				" of tournament for a " + ss::net::BuyIn(T->BuyInCents) + " ticket. Kid.";
+			Expect(Line == Want, "FestTexts: a PENNANT seat by its Main ticket sends T11 (\"" + Line + "\")");
+		}
+	}
+	const ss::net::EventTemplate* FeignSat = nullptr;
+	for (const std::string& S : Feign->Satellites)
+	{
+		const ss::net::EventTemplate* T = ss::net::ForEvent(S).FindTemplate(S);
+		FeignSat = !FeignSat && T && T->SeatTicket == ss::net::ForEvent(Feign->MainId).TicketOf(Feign->MainId) ? T : FeignSat;
+	}
+	const std::string FeignSeat = FeignSat ? sfd::FestSeatText(SatId(*FeignSat), FeignSat->SeatTicket, FeignSat->BuyInCents) : std::string();
+	// PENNANT's Main ticket is year-free: a 2028 satellite's seat names PENNANT 2028.
+	const Festival* Pen28 = FestEditionWorld(Brand::Pennant, 2028);
+	const ss::net::EventTemplate* Sat28 = nullptr;
+	for (size_t I = 0; Pen28 && I < Pen28->Satellites.size(); ++I)
+	{
+		const ss::net::EventTemplate* T = PenNet.FindTemplate(Pen28->Satellites[I]);
+		Sat28 = !Sat28 && T && T->SeatTicket == PenTicket ? T : Sat28;
+	}
+	const std::string Seat28 = Sat28 ? sfd::FestSeatText(SatId(*Sat28), Sat28->SeatTicket, Sat28->BuyInCents) : std::string();
+	Expect(Steps == 4 && StepLines.empty() && !MainSeat.empty() && FeignSeat.rfind("You won a seat in the FEIGN 2026 Main Event. ", 0) == 0 &&
+			   (!Pen28 || Seat28.rfind("You won a seat in the " + ss::fest::NameAfterArticle(Pen28->Name) + " Main Event. ", 0) == 0) &&
+			   sfd::FestSeatText(Id(Rcop->Satellites[0]), "rcop-main", 220).empty(),
+		"FestTexts: T11 only for a Main-ticket seat; PENNANT's Step 1 and Step 2 seats (two days each) send the ladder line, RCOP's Main seat today's (" +
+			std::to_string(Steps) + " step seats; \"" + StepLines + "\"; \"" + FeignSeat + "\"; \"" + Seat28 + "\")");
+	// T12: gh0stfold's line filled from step1's buy-in, byte for byte today's 83 characters.
+	const std::string T12 = ss::site::FillCopy(ss::fest::fest_text_detail::FestText("T12"), {{"Step1", sfd::FestStep1Fill()}});
+	Expect(T12 == "gg on the title. enjoy it. the RCOP satellites start at $2.20, see you on the steps" && T12.size() == 83,
+		"FestTexts: gh0stfold's filled line equals today's 83 characters (\"" + T12 + "\", " + std::to_string(T12.size()) + ")");
+
+	// The session (FestStep's keyed lines): a skip over the marks sends the belt's T10 and PODIUM's T14 once; the Championship Online's
+	// FINALIST is held (its final-table line went); a second skip, a step and a reload send nothing again.
+	const FestSessionRunWorld& Run = FestSessionWorld();
+	const std::string Want1 = "There's a belt. You have to wear the belt.|PODIUM at Ring Rush 2027. 2 of 500 in the race. I'm telling people.";
+	Expect(Run.Skip1 == Want1, "FestTexts: a WorldSkip steps the marks: the belt's T10 and PODIUM's T14, each once, the capped FINALIST none (\"" + Run.Skip1 + "\")");
+	Expect(Run.Parsed && Run.Again.empty() && Run.Reloaded.empty() && Run.MarksBack == 3,
+		"FestTexts: the belt and mark texts are keyed: a second skip, a step and a reload (" + std::to_string(Run.MarksBack) + " marks back) send none (\"" + Run.Again +
+			"\" | \"" + Run.Reloaded + "\")");
+	std::printf("  FestTexts: the session half in %.0f ms\n", Run.Ms);
+}
+
+void FestMoments()
+{
+	// §2.8.5: the belt's moment first, then each mark's in crown order; DoneFestMoment keys the one shown (festbelt:, festmark: in the
+	// sites' book, kept by the save); a reload before the dismiss plays it again.
+	const FestSessionRunWorld& Run = FestSessionWorld();
+	Expect(Run.Peek1 == "2 rcop 1700 m5 1/608" && Run.Peek2 == "4 ring27 900 m4 2/500",
+		"FestMoments: the belt's moment (Kind 2, the race's points) plays first, then PODIUM's (Kind 4) (" + Run.Peek1 + " | " + Run.Peek2 + ")");
+	Expect(Run.Peek3 == "4 ring27 900 m4 2/500" && Run.Peek4 == "4 tco27 600 m3 7/1234" && Run.Peek5 == "-",
+		"FestMoments: after a reload the belt stays seen and the undismissed mark plays again, then the next, then none (" + Run.Peek3 + " | " + Run.Peek4 + " | " + Run.Peek5 + ")");
+	Expect(Run.BeltKeyKept && Run.MarkKeyKept, "FestMoments: the dismissed moments' done keys are in the save (festbelt:rcop, festmark:ring27, festmark:tco27)");
+}
+
+void FestRerunStories()
+{
+	// §2.9.4: Rerun's three festival prefixes, matched with rfind(prefix, 0) == 0; the facts packed when the story is noted fill V1-V9.
+	namespace sfd = ss::session_fest_detail;
+	namespace video = ss::video;
+	const ss::fest::Festival* Pen = FestEditionWorld(ss::fest::Brand::Pennant, 2027);
+	if (!Pen)
+	{
+		Expect(false, "FestRerunStories: PENNANT 2027 exists");
+		return;
+	}
+	const std::string Key = "fest-main-" + Pen->SeriesId;
+	Expect(sfd::FestStoryPrefix(Key) == 0 && sfd::FestStoryPrefix("fest-belt-rcop") == 1 && sfd::FestStoryPrefix("fest-ft-tco27") == 2 &&
+			   sfd::FestStoryPrefix("fest-title-rcop") < 0 && sfd::FestStoryPrefix("fest-mark-rcop") < 0 && sfd::FestStoryPrefix("mm-title") < 0,
+		"FestRerunStories: fest-main-, fest-belt- and fest-ft- keys are stories; a title, a mark or any other key is not");
+	const ss::world::World Fresh = FestFreshWorld();
+	std::string Facts;
+	for (const std::pair<std::string, std::string>& F : sfd::FestStoryFacts(Fresh, Key))
+	{
+		Facts += (Facts.empty() ? "" : ";") + F.first + "=" + video::vcontent::FactEsc(F.second);
+	}
+	video::Candidate C;
+	C.Id = "story:" + Key;
+	C.K = video::Kind::Story;
+	C.Event = Key;
+	C.Source = 4;
+	C.Series = true;
+	C.IdeaFacts = Facts;
+	std::string Got;
+	bool Each = true;
+	const char* const Want[] = {"I won the PENNANT 2027 Main Event", "THE GOLD PENNANT IS MINE", "How I won PENNANT 2027 from a "};
+	for (int S = 0; S < 3; ++S)
+	{
+		video::Choice Ch;
+		Ch.Candidates = {C.Id};
+		Ch.T = static_cast<video::TitleStyle>(S);
+		const std::vector<video::TitleOption> Opts = video::TitleOptions(Ch, {C}, video::Channel(), 0, 3);
+		const std::string First = Opts.empty() ? std::string() : Opts.front().Text;
+		const std::vector<std::string> U2 = video::video_copy::FestStoryLines(Key, Ch.T, Facts);
+		Each = Each && !Opts.empty() && First.rfind(Want[S], 0) == 0 && Opts.front().Key.rfind("story.fest-main.", 0) == 0 && U2.size() == 1 && U2.front().rfind(Want[S], 0) == 0;
+		Got += (S ? " | " : "") + First;
+	}
+	Expect(Each, "FestRerunStories: a PENNANT 2027 Main win's story leads with V1-V3 in their styles, filled from its facts (" + Got + "; facts " + Facts + ")");
+	// The session: the belt's text becomes Rerun's story at the next calendar step, a series event's (x1.3) with its facts packed; a
+	// festival line sent before the channel had state is marked told; a reload reads the facts again (a story's aren't saved).
+	const FestSessionRunWorld& Run = FestSessionWorld();
+	Expect(Run.Story == "Festival=" + video::vcontent::FactEsc("RCOP 2026") + ";N=0 series" && Run.OldStory == "-",
+		"FestRerunStories: the belt's text is noted as a story (series, its facts packed) and the old final table's is not (" + Run.Story + " | " + Run.OldStory + ")");
+	Expect(Run.StoryLoaded != "-" && Run.StoryBack == Run.Story,
+		"FestRerunStories: after a reload the story's facts are read again at the next step (" + Run.StoryLoaded + " -> " + Run.StoryBack + ")");
+	std::printf("  FestRerunStories: noted \"%s\", reloaded \"%s\", stepped \"%s\"\n", Run.Story.c_str(), Run.StoryLoaded.c_str(), Run.StoryBack.c_str());
+}
 } // namespace
 
 void SegWorld()
@@ -3065,6 +3427,19 @@ void SegWorld()
 	if (Only("FestStoryHooks"))
 	{
 		FestStoryHooks();
+	}
+	// FW-5: the session's texts, moments and Rerun
+	if (Only("FestTexts"))
+	{
+		FestTexts();
+	}
+	if (Only("FestMoments"))
+	{
+		FestMoments();
+	}
+	if (Only("FestRerunStories"))
+	{
+		FestRerunStories();
 	}
 }
 } // namespace festivals_test
