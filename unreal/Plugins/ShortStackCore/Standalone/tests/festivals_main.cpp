@@ -100,6 +100,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <utility>
@@ -3512,9 +3513,23 @@ void FestCurveAgreesNet()
 		return;
 	}
 	const auto T1 = std::chrono::steady_clock::now();
-	ss::world::World Run;
-	Run.Create(7u, FestNetNightOne, ss::world::Start::Blank);
-	Run.AdvanceTo(Feign->E.Start + Feign->E.Duration + 60.0);
+	// The lead's carrier (LEAD-INT): the world simulates an online event only when someone it follows registers, and on seed 7 nobody
+	// it follows registers for FEIGN I's Main once F-world's world runs; so the world read is the first Blank world from seed 7 that
+	// played the Main (World::ResultOf), at most four (seeds 7-10; the last is read either way, so a world that never plays it fails below).
+	std::unique_ptr<ss::world::World> Played;
+	uint32_t Seed = 7u;
+	for (;;)
+	{
+		Played = std::make_unique<ss::world::World>();
+		Played->Create(Seed, FestNetNightOne, ss::world::Start::Blank);
+		Played->AdvanceTo(Feign->E.Start + Feign->E.Duration + 60.0);
+		if (Played->ResultOf(Feign->E.Id) || Seed == 10u)
+		{
+			break;
+		}
+		++Seed;
+	}
+	const ss::world::World& Run = *Played;
 	const std::vector<Chips> Pay = Feign->N->Payouts(Feign->E);
 	int Records = 0, Cashes = 0, Honors = 0;
 	std::string RecBad;
@@ -3554,8 +3569,8 @@ void FestCurveAgreesNet()
 			}
 		}
 	}
-	std::printf("festivals: a Blank world through FEIGN I's Main (day %d, %d entries) in %.2fs: %d results recorded for it (the title %d; %d followed players' records, %d cashes)\n",
-		static_cast<int>((Feign->E.Start + Feign->E.Duration) / ss::net::MinutesPerDay), Feign->E.Entries,
+	std::printf("festivals: a Blank world (seed %u) through FEIGN I's Main (day %d, %d entries) in %.2fs: %d results recorded for it (the title %d; %d followed players' records, %d cashes)\n",
+		Seed, static_cast<int>((Feign->E.Start + Feign->E.Duration) / ss::net::MinutesPerDay), Feign->E.Entries,
 		std::chrono::duration<double>(std::chrono::steady_clock::now() - T1).count(), Records, Honors, Records - Honors, Cashes);
 	Expect(Honors == 1 && RecBad.empty(), "a Blank world run through FEIGN I's Main recorded its title, final tables and finishes at Network::Payouts' prizes on the Main "
 										  "curve (" + std::to_string(Records) + " results)" + RecBad);

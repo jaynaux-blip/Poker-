@@ -266,7 +266,7 @@ set_tests_properties(kast_growth PROPERTIES TIMEOUT 60)
 set_tests_properties(kast_ui PROPERTIES TIMEOUT 60)
 # Update 4 Phase A (SPEC v1.7 §6 PA-48, §8.1; the lead's P-4): the four new suites by the same rule. With empty mains their medians
 # are about 0 s, so each TIMEOUT is its cap; re-measured at every gate's integration as their checks land.
-set_tests_properties(festivals PROPERTIES TIMEOUT 31)
+set_tests_properties(festivals PROPERTIES TIMEOUT 34)
 set_tests_properties(world_u4 PROPERTIES TIMEOUT 45)
 set_tests_properties(big_field PROPERTIES TIMEOUT 30)
 set_tests_properties(u4_ui PROPERTIES TIMEOUT 94)
@@ -282,7 +282,7 @@ add_test(NAME festivals_perf COMMAND festivals_test)
 add_test(NAME rival_sites_perf COMMAND sites_test)
 add_test(NAME u4_ui_perf COMMAND u4_ui_test)
 set_tests_properties(festivals_perf rival_sites_perf u4_ui_perf PROPERTIES ENVIRONMENT "SS_PERF=1" LABELS perf RUN_SERIAL TRUE)
-set_tests_properties(festivals_perf PROPERTIES TIMEOUT 31)
+set_tests_properties(festivals_perf PROPERTIES TIMEOUT 34)
 set_tests_properties(rival_sites_perf PROPERTIES TIMEOUT 30)
 set_tests_properties(u4_ui_perf PROPERTIES TIMEOUT 102)
 # G1's integration (the lead's L-I.5; P-4, PLAN_G1 §4.2 L9, RULINGS R34-26 and "after the wave's fifth run" item 3): the suites G1
