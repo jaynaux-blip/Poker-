@@ -32,6 +32,11 @@
 // satellites takes (Step 1 seats a Step 2 ticket, Step 2 a Step 3 ticket), in template order, which is ladder order (Step 1's two
 // templates, Step 2's, Step 3's, the Mega, the Last Chance). RCOP's recurring steps are not an edition's own: its list stays its
 // step4 and mega-rcop.
+//
+// G1, FN-4a (F-net; SPEC v1.7 §2.2.2, §2.2.3, §2.11; PLAN_G1 item 26): RiverLine's dress. The trio G/NetworkSeries.cpp appends
+// (a Main Satellite, a Mega and a Last Chance into each Ring Rush and Championship Online Main, 2027-2040) joins those editions'
+// Satellites through the same ticket walk, with no change here; Inventory adds RiverLine's four festivals (names, Shorts, taglines,
+// satellites), §2.2.2's other G1 strings and the five renamed seasonal series.
 #include "ShortStack/Game/Festival.h"
 
 #include "ShortStack/Game/Life.h"
@@ -57,6 +62,13 @@ namespace netsites_detail
 // G/NetworkFestival.cpp's (F-net's; no header): a rival festival plan row's Title flag (§2.3.1), by brand key and row stem.
 bool NetSitesFestTitle(const std::string& Brand, const std::string& Stem);
 } // namespace netsites_detail
+namespace calendar_detail
+{
+/** G1, FN-4a (G/NetworkSeries.cpp): the five RiverLine seasonal series renamed off "Festival" (§2.2.2, X2), as shipped. */
+std::vector<std::string> FestRenamedNames();
+/** G1, FN-4a (G/Network.cpp): the "RCOP 2026: the schedule" post's body, its figure read from RCOP 2026's GtdCents (§2.2.2). */
+std::string FestRcopPost(const SeriesInfo& Rcop);
+} // namespace calendar_detail
 } // namespace net
 
 namespace fest
@@ -471,7 +483,11 @@ std::vector<std::string> Inventory()
 {
 	// §2.11's core strings, kind first: every rival festival edition's name, Short, Title and tagline, and every event's printed name,
 	// blurb and seats text (the satellites through Festival::Satellites), each string once, in All()'s order. FestCopy and
-	// FestNamesScreened (festivals_test) run the lint and both trademark tiers over them.
+	// FestNamesScreened (festivals_test) run the lint and both trademark tiers over them. FN-4a (§2.2.2, §2.2.3; PLAN_G1 item 26):
+	// RiverLine's four festivals' names, Shorts and taglines (RCOP 2026's with its computed guarantee) and their satellites (RCOP's step4
+	// and Mega, the trio into Ring Rush's and the Championship Online's Mains, H11-H13), then §2.2.2's other G1 strings (the rcop-main,
+	// Mega and Sunday Showdown blurbs, the Mega's seats text, the schedule post's body) and the five renamed seasonal series.
+	// RiverLine's numbered events keep today's strings (U9), so they are not listed.
 	std::vector<std::string> Out;
 	std::set<std::string> Seen;
 	const auto Add = [&Out, &Seen](const char* Kind, const std::string& Text) {
@@ -483,10 +499,6 @@ std::vector<std::string> Inventory()
 	};
 	for (const Festival& F : All())
 	{
-		if (F.Site == net::SiteId::RiverLine)
-		{
-			continue; // RiverLine's four join at FN-4a (§2.2.2's strings, the renames, the trio)
-		}
 		const net::Network& N = net::Site(F.Site);
 		const net::SeriesInfo* Sr = N.FindSeries(F.SeriesId);
 		if (!Sr)
@@ -497,6 +509,19 @@ std::vector<std::string> Inventory()
 		Add("label", Sr->Short);
 		Add("label", Sr->Title);
 		Add("sentence", Sr->Tagline);
+		if (F.Site == net::SiteId::RiverLine)
+		{
+			for (const std::string& Id : F.Satellites)
+			{
+				if (const net::EventTemplate* T = N.FindTemplate(Id))
+				{
+					Add("label", T->Name);
+					Add("sentence", T->Blurb);
+					Add("label", T->Seats);
+				}
+			}
+			continue;
+		}
 		const std::vector<net::EventTemplate>& Temps = N.Templates();
 		for (size_t I = 0; I < Temps.size(); ++I)
 		{
@@ -517,6 +542,23 @@ std::vector<std::string> Inventory()
 			Add("sentence", T.Blurb);
 			Add("label", T.Seats);
 		}
+	}
+	const net::Network& Home = net::Site(net::SiteId::RiverLine);
+	for (const char* Id : {"rcop-main", "mega-rcop", "sunday-showdown"})
+	{
+		if (const net::EventTemplate* T = Home.FindTemplate(Id))
+		{
+			Add("sentence", T->Blurb);
+			Add("label", T->Seats);
+		}
+	}
+	if (const net::SeriesInfo* Rcop = Home.FindSeries("rcop"))
+	{
+		Add("sentence", net::calendar_detail::FestRcopPost(*Rcop));
+	}
+	for (const std::string& Name : net::calendar_detail::FestRenamedNames())
+	{
+		Add("label", Name);
 	}
 	return Out;
 }
