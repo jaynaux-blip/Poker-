@@ -21,9 +21,13 @@
 // equal the wallets' deposits, their fees the card's rate; withdrawals asked for equal transit plus arrivals plus fees, to the
 // cent; a transfer lands once; no month's Rewards or Rerun payout twice; no unanswered invitation dropped from Mail (opened,
 // and Mail filled past its keep).
+// Update 4 G1 (the lead's; SPEC v1.7 §2.15.3, §8.1): after the segment's careers, as many festival careers of Days days from
+// Tests/fixtures/update4_festival.ssave (FEIGN 2026 live, the Ignite account its Pass opened): random festival registrations, seats
+// held for festival Mains and the Festival Pass's letter answered, with every pot conserving and Added paid once an event (FestCareer).
 // Usage: monkey_test [seeds] [frames] [first seed] [segment careers] [days]
 #include "ShortStack/AI/Style.h"
 #include "ShortStack/Game/Autoplay.h"
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Live.h"
@@ -38,6 +42,7 @@
 #include "ShortStack/Rng.h"
 #include "ShortStack/UI/RiverLine.h"
 #include "ShortStack/UI/ShopScreen.h"
+#include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
 
 #include <algorithm>
 #include <array>
@@ -1190,6 +1195,398 @@ int SegmentCareer(int Seed, int Days, std::map<std::string, int>& Reached)
 		S->Life.Inbox.size(), B.MostLines, Segment, Update2);
 	return Step;
 }
+
+// ------------------------------------------------------------------ the festival career (Update 4 G1, the lead's)
+
+/** The committed festival fixture's bytes (empty when it can't be read). */
+std::string MonkeyFestFixture()
+{
+	const std::string Path = std::string(SS_TESTS_DIR) + "/fixtures/update4_festival.ssave";
+	std::FILE* F = std::fopen(Path.c_str(), "rb");
+	if (!F)
+	{
+		return std::string();
+	}
+	std::string Out;
+	char Buf[65536];
+	size_t N = 0;
+	while ((N = std::fread(Buf, 1, sizeof(Buf), F)) > 0)
+	{
+		Out.append(Buf, N);
+	}
+	std::fclose(F);
+	return Out;
+}
+
+/**
+ * Update 4 G1 (SPEC v1.7 §2.15.3's monkey_play row, §8.1; PLAN_G1 §5 item 12): a festival career of Days days from
+ * Tests/fixtures/update4_festival.ssave (day 60: FEIGN 2026 live with its race, the Ignite account its Pass opened, both rents paid, no
+ * RunItTwice account), stepped a few hours at a time while a festival is on and a day or two between, on draws of its own. At random:
+ * a festival event registered and played (any edition's titles, numbered events and satellites open on a site the career can play),
+ * the plan skipping it or Sprint playing it; a seat held for a festival Main, as a won seat is (++Life.Tickets[its ticket], R-14's way),
+ * registered the moment its Main is open; deposits to the rivals' wallets. The Festival Pass's letter (WRIT 2027's, from day 79, when the
+ * Pass is RunItTwice's only open door) is answered: accepted mostly, declined now and then. After every step SegBooks' and SegSites'
+ * money invariants, and beside them:
+ *   - every pot conserves: at every festival table the payouts sum to the pool, to the cent (a satellite's seats and what's left);
+ *   - Added is paid once an event: the table's added money is its template's (a rival festival Main's, 0 on every other event), and the
+ *     pool is max(GTD, the entries' prize shares) plus that added money, once; a Main with added money has the network's pool for its
+ *     instance (FestCurveAgrees' two sides);
+ *   - a seat registers its Main once: the ticket spent, the bank and the wallets untouched, the table open on that Main;
+ *   - a Pass letter: an invitation sent while the Pass is the site's door (GateMet's reason 5, its festival in the window) is the
+ *     festival's own letter; accepting it opens the site's account with nothing in it and moves no money; declining opens none.
+ * Planted (ssb/g1-int/mut/): the added money applied twice (scratch E/Tournament.cpp:34); the last place's payout dropped under the
+ * Main curve; a seat's ticket not spent (G/SessionBig.cpp's PayEntry); the Pass's letter written as the generic one (G/SiteMoney.cpp).
+ */
+int FestCareer(int Seed, int Days, std::map<std::string, int>& Reached)
+{
+	namespace fest = ss::fest;
+	namespace net = ss::net;
+	namespace site = ss::site;
+	const double Day = net::MinutesPerDay;
+	ss::SaveData D;
+	if (!ss::SaveData::Parse(MonkeyFestFixture(), D))
+	{
+		Fail("fest: Tests/fixtures/update4_festival.ssave doesn't read", Seed, 0);
+		return 0;
+	}
+	SegHooks H;
+	std::unique_ptr<ss::Session> S(new ss::Session(H, "monkey-fest-" + std::to_string(Seed), &D));
+	S->CurrentScreen = ss::Screen::Lobby;
+	ss::Rng R("monkey-fest-rng-" + std::to_string(Seed));
+	ss::Rng Press("monkey-fest-press-" + std::to_string(Seed));
+	double Now = 0.0;
+	auto Frames = [&](double Seconds) {
+		for (double T = 0.0; T < Seconds; T += 1.0 / 30.0)
+		{
+			Now += 1.0 / 30.0;
+			S->Update(Now);
+		}
+	};
+	auto Fed = [&]() {
+		S->Life.Hunger = 10.0;
+		S->Life.Thirst = 10.0;
+		S->Life.Energy = 90.0;
+	};
+	Frames(0.1);
+	SegBooks B;
+	B.Start(*S);
+	SegSites Books;
+	for (const site::Account& A : S->Life.Sites.Accounts)
+	{
+		Books.Wallets[static_cast<int>(A.Site)].Cents = A.Cents; // the fixture's wallets are where the books start
+		Books.Wallets[static_cast<int>(A.Site)].Lines = A.Lines;
+	}
+	for (const site::Transfer& X : S->Life.Sites.Transfers)
+	{
+		Books.Xfers[X.Id] = X.State;
+	}
+	// Every festival satellite's template (a seat into an edition's Main or ladder), and each Main's ticket.
+	std::set<std::string> Satellites;
+	for (const fest::Festival& F : fest::All())
+	{
+		Satellites.insert(F.Satellites.begin(), F.Satellites.end());
+	}
+	auto Wallets = [&]() {
+		ss::Chips Sum = 0;
+		for (const site::Account& A : S->Life.Sites.Accounts)
+		{
+			Sum += A.Cents;
+		}
+		return Sum;
+	};
+	// A seat for the edition's Main, held as a won seat is (R-14): FEIGN 2026's now (the fixture's Ignite account), WRIT 2027's once the
+	// Pass has opened RunItTwice (at random).
+	auto PlantSeat = [&](const fest::Festival* F, int At) {
+		if (F)
+		{
+			++S->Life.Tickets[net::Site(F->Site).TicketOf(F->MainId)];
+			Reached["fest:seat held"]++;
+			(void)At;
+		}
+	};
+	const fest::Festival* Feign = fest::FestivalOf("ignite.feign26");
+	PlantSeat(Feign, 0);
+	// The festival events open now on a site the career can play.
+	struct Open
+	{
+		ss::LobbyEvent L;
+		net::EventInstance E;
+		net::SiteId Site;
+	};
+	auto OpenNow = [&]() {
+		std::vector<Open> Out;
+		const double W = S->WorldMinutes();
+		for (const net::SiteId Site : {net::SiteId::RiverLine, net::SiteId::Ignite, net::SiteId::RunItTwice})
+		{
+			if (Site != net::SiteId::RiverLine && !site::WalletOf(S->Life.Sites, Site))
+			{
+				continue;
+			}
+			const net::Network& N = net::Site(Site);
+			for (const net::EventInstance& E : N.Window(W - 120.0, W + 60.0))
+			{
+				const net::EventTemplate& T = N.TemplateOf(E);
+				if (!fest::FestivalOf(T.Series) && !Satellites.count(T.Id))
+				{
+					continue;
+				}
+				const ss::LobbyEvent L = N.Listing(E, nullptr, S->Unlocks());
+				if (L.Joinable && L.Spec.Entrants <= 800 && S->CanAfford(L) && !S->IsPlaying(L.Spec.Id))
+				{
+					Out.push_back({L, E, Site});
+				}
+			}
+		}
+		return Out;
+	};
+	// The pot and the added money at the table just opened (O's instance).
+	auto PotCheck = [&](const Open& O, int At) {
+		if (!S->T || S->T->Spec.Id != O.L.Spec.Id)
+		{
+			return;
+		}
+		const ss::Tournament& T = *S->T;
+		const net::EventTemplate& Tp = net::Site(O.Site).TemplateOf(O.E);
+		ss::Chips Paid = 0;
+		for (const ss::Chips P : T.Payouts)
+		{
+			Paid += P;
+		}
+		const ss::TournamentSpec& Sp = T.Spec;
+		const ss::Chips Shares = std::max(Sp.GuaranteeCents, static_cast<ss::Chips>(Sp.Entrants) * (Sp.BuyInCents - Sp.FeeCents - Sp.BountyCents));
+		if (Paid != T.PrizePoolCents)
+		{
+			Fail("fest: a pot doesn't conserve: " + Sp.Name + " pays " + ss::Money(Paid) + " of a " + ss::Money(T.PrizePoolCents) + " pool", Seed, At);
+		}
+		const bool Once = Sp.AddedCents == Tp.AddedCents && T.PrizePoolCents - Shares == Tp.AddedCents && (Tp.AddedCents == 0 || T.PrizePoolCents == O.E.Pool);
+		if (!Once)
+		{
+			Fail("fest: added money not paid once: " + Sp.Name + "'s pool " + ss::Money(T.PrizePoolCents) + " over " + ss::Money(Shares) + " of prize shares, the template adding " +
+					ss::Money(Tp.AddedCents) + " (the table's " + ss::Money(Sp.AddedCents) + "), the network's pool " + ss::Money(O.E.Pool),
+				Seed, At);
+		}
+		Reached[Tp.AddedCents > 0 ? "fest:added main" : Sp.SeatValueCents > 0 ? "fest:satellite" : "fest:event"]++;
+	};
+	// One festival event: registered (a seat it holds spent, checked), the pot checked, then played by the plan or Sprint to its end.
+	auto Play = [&](const Open& O, int At) {
+		const int Held = S->TicketsFor(O.L);
+		const ss::Chips Bank = S->BankrollCents, Wal = Wallets();
+		const std::string Why = MonkeyRegister(*S, O.L, Press, Seed, At);
+		if (!Why.empty() || S->CurrentScreen != ss::Screen::Table)
+		{
+			Reached["fest:refused"]++;
+			return;
+		}
+		Reached["fest:registered"]++;
+		if (Held > 0)
+		{
+			if (S->TicketsFor(O.L) != Held - 1 || S->BankrollCents != Bank || Wallets() != Wal || !S->IsPlaying(O.L.Spec.Id))
+			{
+				Fail("fest: a seat didn't register its event once (" + O.L.Spec.Name + ": tickets " + std::to_string(Held) + " -> " + std::to_string(S->TicketsFor(O.L)) + ", bank " +
+						ss::Money(S->BankrollCents - Bank) + ", wallets " + ss::Money(Wallets() - Wal) + ")",
+					Seed, At);
+			}
+			Reached["fest:seat registered"]++;
+		}
+		PotCheck(O, At);
+		S->SprintBudgetMs = 1.0e9;
+		const bool Plan = R.Chance(0.7);
+		if (Plan)
+		{
+			S->SetAutoplay(0, RandomPlan(R, true));
+		}
+		for (int F = 0; F < 400000 && S->CurrentScreen == ss::Screen::Table; ++F)
+		{
+			if (!Plan || (S->TableCount() > 0 && !S->Glance(0).Busted && !S->AutoPanel(0).On))
+			{
+				S->CurrentPace = ss::Pace::Sprint;
+			}
+			else if (S->TableCount() > 0 && !S->Glance(0).Busted && !S->AutoPanel(0).Skipping && !S->HasPrompt)
+			{
+				S->SkipAhead(0, ss::autoplay::Target::Result);
+			}
+			Now += 1.0 / 30.0;
+			S->Update(Now);
+			if (S->HasPrompt && Now - S->Prompt.OpenedAt > 0.3)
+			{
+				S->HeroAct(R.Chance(0.5) ? ss::PlayerAction::Fold() : S->Prompt.CanCheck ? ss::PlayerAction::Check() : ss::PlayerAction::Call());
+			}
+		}
+		Reached[S->LastResults.SeatWon.empty() ? (Plan ? "fest:played by the plan" : "fest:played sprinted") : "fest:seat won"]++;
+		S->LeaveResults();
+	};
+	// The Pass's letters: each rival's invitation in Mail while it has no account, seen once; answered at random.
+	std::set<std::string> Seen;
+	auto Letters = [&](int At) {
+		for (const net::SiteId Site : {net::SiteId::Ignite, net::SiteId::RunItTwice})
+		{
+			if (site::WalletOf(S->Life.Sites, Site))
+			{
+				continue;
+			}
+			const std::string Key = net::KeyOf(Site);
+			const ss::life::Letter* Got = nullptr;
+			for (const ss::life::Letter& L : S->Life.Inbox)
+			{
+				Got = L.Source == "site" && L.Thread == Key && L.Kind == site::LetterInvite && !Seen.count(Key + "@" + std::to_string(L.At)) ? &L : Got;
+			}
+			if (!Got)
+			{
+				continue;
+			}
+			Seen.insert(Key + "@" + std::to_string(Got->At));
+			ss::rep::Public P = S->Record();
+			ss::rep::FromHistory(P, S->History);
+			int Why = -1;
+			const bool Gate = site::GateMet(Site, P, S->Life.RentsPaid, S->WorldMinutes(), &Why, site::IgniteLevelOf(S->Life));
+			const fest::Festival* F = fest::PassFestival(Site, Got->At);
+			const bool PassDoor = Gate && Why == 5 && F;
+			const std::string Subject = F ? site::FillCopy(site::CopyText("invite:" + Key + ":fest:subject"), {{"Festival", F->Name}}) : std::string();
+			if (PassDoor && Got->Subject != Subject)
+			{
+				Fail("fest: the Pass opened " + Key + "'s door for " + F->Name + ", but its letter is \"" + Got->Subject + "\", not \"" + Subject + "\"", Seed, At);
+			}
+			const bool Pass = PassDoor && Got->Subject == Subject;
+			Reached[Pass ? "fest:pass letter" : "fest:other invitation"]++;
+			const ss::Chips Bank = S->BankrollCents, Wal = Wallets();
+			const bool Accept = R.Chance(0.85);
+			const std::string Said = S->AnswerInvite(Site, Accept);
+			const ss::Chips* W = site::WalletOf(S->Life.Sites, Site);
+			const bool Opened = Said.empty() && Accept && W && *W == 0;
+			const bool Shut = Said.empty() && !Accept && !W;
+			if (!(Opened || Shut) || S->BankrollCents != Bank || Wallets() != Wal)
+			{
+				Fail("fest: answering " + Key + "'s " + (Pass ? "Pass letter" : "invitation") + " (" + (Accept ? "accept" : "decline") + ": \"" + Said + "\") left " +
+						(W ? "an account with " + ss::Money(*W) : std::string("no account")) + ", bank " + ss::Money(S->BankrollCents - Bank) + ", wallets " + ss::Money(Wallets() - Wal),
+					Seed, At);
+			}
+			Reached[Pass ? (Accept ? "fest:pass accepted" : "fest:pass declined") : (Accept ? "fest:invitation accepted" : "fest:invitation declined")]++;
+			if (Pass && Accept && R.Chance(0.5))
+			{
+				PlantSeat(F, At);
+			}
+		}
+	};
+	const double End = S->WorldMinutes() + static_cast<double>(Days) * Day;
+	int Step = 0;
+	// The account the Pass opened is funded first (the fixture's Ignite wallet is empty).
+	B.Give(*S, 200000);
+	Reached[S->Deposit(net::SiteId::Ignite, 10000, "card").empty() ? "fest:deposit" : "fest:no deposit"]++;
+	B.Audit(*S, Seed, 0, "the first deposit");
+	Books.Audit(*S, B.NewLines, Seed, 0, "the first deposit");
+	for (; S->WorldMinutes() < End && Step < 2000; ++Step)
+	{
+		Fed();
+		if (S->BankrollCents < 150000)
+		{
+			B.Give(*S, 200000);
+		}
+		Letters(Step);
+		B.Audit(*S, Seed, Step, "Mail");
+		Books.Audit(*S, B.NewLines, Seed, Step, "Mail");
+		// The festival events starting in the next day on a site the career can play (the next three days when none): a seat's event first.
+		const double W = S->WorldMinutes();
+		std::vector<std::pair<double, bool>> Ahead;
+		for (const double Within : {Day, 3.0 * Day})
+		{
+			for (const net::SiteId Site : {net::SiteId::RiverLine, net::SiteId::Ignite, net::SiteId::RunItTwice})
+			{
+				const net::Network& N = net::Site(Site);
+				for (const net::EventInstance& E : Site == net::SiteId::RiverLine || site::WalletOf(S->Life.Sites, Site) ? N.Window(W + 1.0, W + Within) : std::vector<net::EventInstance>())
+				{
+					const net::EventTemplate& T = N.TemplateOf(E);
+					if (Ahead.empty() || Within == Day)
+					{
+						if (fest::FestivalOf(T.Series) || Satellites.count(T.Id))
+						{
+							Ahead.push_back({E.Start, S->TicketsFor(N.Listing(E, nullptr, S->Unlocks())) > 0 && !Satellites.count(T.Id)});
+						}
+					}
+				}
+			}
+			if (!Ahead.empty())
+			{
+				break;
+			}
+		}
+		std::vector<Open> Ready = OpenNow();
+		// A seat it holds plays the moment its event is open.
+		const Open* Due = nullptr;
+		for (const Open& O : Ready)
+		{
+			Due = !Due && S->TicketsFor(O.L) > 0 && !Satellites.count(O.L.Spec.Id.substr(0, O.L.Spec.Id.find('@'))) ? &O : Due;
+		}
+		const double Pick = R.Next();
+		std::string Where;
+		if (Due)
+		{
+			Play(*Due, Step);
+			Where = "a seat";
+		}
+		else if (Pick < 0.30 || (Pick < 0.85 && Ahead.empty()))
+		{
+			// Time passes: a few hours while a festival is on somewhere, a day or two between.
+			bool On = false;
+			for (const net::SiteId Site : {net::SiteId::RiverLine, net::SiteId::Ignite, net::SiteId::RunItTwice})
+			{
+				On = On || fest::LiveOn(Site, net::DayOf(S->WorldMinutes())) != nullptr;
+			}
+			S->LobbyMinutes += On ? 60.0 + R.Next() * 11.0 * 60.0 : Day + R.Next() * Day;
+			Frames(0.05);
+			if (S->Evicted() && S->BankrollCents >= S->Life.RentDueCents + 20000)
+			{
+				S->MoveBackIn();
+			}
+			Where = "time";
+		}
+		else if (Pick < 0.85)
+		{
+			// To a festival event's start (a seat's event when one is ahead, else any of the next day's), up to 20 minutes into it, and
+			// then one of the events open there.
+			double To = -1.0;
+			for (const std::pair<double, bool>& A : Ahead)
+			{
+				To = A.second && (To < 0.0 || A.first < To) ? A.first : To;
+			}
+			To = To >= 0.0 ? To : Ahead[static_cast<size_t>(R.Int(static_cast<int>(Ahead.size())))].first;
+			S->LobbyMinutes += std::max(0.0, To - W) + R.Next() * 20.0;
+			Frames(0.05);
+			if (S->Evicted() && S->BankrollCents >= S->Life.RentDueCents + 20000)
+			{
+				S->MoveBackIn();
+			}
+			B.Audit(*S, Seed, Step, "to a festival event");
+			Books.Audit(*S, B.NewLines, Seed, Step, "to a festival event");
+			Fed();
+			Ready = OpenNow();
+			const Open* Pick2 = nullptr;
+			for (const Open& O : Ready)
+			{
+				Pick2 = !Pick2 && S->TicketsFor(O.L) > 0 ? &O : Pick2;
+			}
+			if (!Ready.empty())
+			{
+				Play(Pick2 ? *Pick2 : Ready[static_cast<size_t>(R.Int(static_cast<int>(Ready.size())))], Step);
+			}
+			Where = "a festival event";
+		}
+		else
+		{
+			// A deposit to a rival's wallet, one the career has (so its festival events are affordable: RunItTwice's WRIT is a high roller's).
+			const net::SiteId Site = site::WalletOf(S->Life.Sites, net::SiteId::RunItTwice) && R.Chance(0.5) ? net::SiteId::RunItTwice : net::SiteId::Ignite;
+			static const ss::Chips Amounts[] = {5000, 25000, 100000};
+			S->LobbyMinutes += 1.0 + R.Next() * 4.0; // a few minutes on (SegSites tells two equal deposits apart by their minute)
+			Frames(0.05);
+			Reached[site::WalletOf(S->Life.Sites, Site) && S->Deposit(Site, Amounts[R.Int(3)], "card").empty() ? "fest:deposit" : "fest:no deposit"]++;
+			Where = "a deposit";
+		}
+		B.Audit(*S, Seed, Step, Where);
+		Books.Audit(*S, B.NewLines, Seed, Step, Where);
+	}
+	std::printf("festival career %d: %d days from update4_festival.ssave (day %d to %d), %d steps, bankroll %s, %zu results online, %zu tickets held\n", Seed, Days,
+		static_cast<int>(End / Day) - Days, net::DayOf(S->WorldMinutes()), Step, ss::Money(S->BankrollCents).c_str(), S->History.size(), S->Life.Tickets.size());
+	return Step;
+}
 } // namespace
 
 int main(int Argc, char** Argv)
@@ -1874,6 +2271,14 @@ int main(int Argc, char** Argv)
 		SegSteps += SegmentCareer(First + K, CareerDays, Reached);
 	}
 	std::printf("segment phase: %d careers, %d steps, %.1f s\n", Careers, SegSteps, std::chrono::duration<double>(std::chrono::steady_clock::now() - SegStart).count());
+	// Update 4 G1 (the lead's): the festival careers, one for each segment career, from the festival fixture.
+	const auto FestStart = std::chrono::steady_clock::now();
+	int FestSteps = 0;
+	for (int K = 0; K < Careers; ++K)
+	{
+		FestSteps += FestCareer(First + K, CareerDays, Reached);
+	}
+	std::printf("festival phase: %d careers, %d steps, %.1f s\n", Careers, FestSteps, std::chrono::duration<double>(std::chrono::steady_clock::now() - FestStart).count());
 	std::printf("\nreached:");
 	for (const auto& R : Reached)
 	{
@@ -1908,6 +2313,12 @@ int main(int Argc, char** Argv)
 	{
 		std::printf("FAIL: the segment's careers never moved money to a site and back, played a rival's event, uploaded, or filled Mail past its keep with an "
 					"invitation open\n");
+		++Failures;
+	}
+	if (Careers >= 1 && CareerDays >= 60 &&
+		(Reached["fest:registered"] == 0 || Reached["fest:seat registered"] == 0 || Reached["fest:added main"] == 0 || Reached["fest:pass letter"] == 0))
+	{
+		std::printf("FAIL: the festival career never registered a festival event, played a seat, met a Main's added money or had the Pass's letter\n");
 		++Failures;
 	}
 	std::printf("%s: %d failures\n", Failures == 0 ? "monkey passed" : "MONKEY FAILED", Failures);

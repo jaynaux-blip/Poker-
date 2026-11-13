@@ -64,6 +64,8 @@ add_test(NAME riverline_ui COMMAND ui_test)
 
 add_executable(monkey_test tests/monkey_main.cpp)
 target_link_libraries(monkey_test PRIVATE ShortStackCore)
+# Update 4 G1 (the lead's): the festival careers start from Tests/fixtures/update4_festival.ssave.
+target_compile_definitions(monkey_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
 add_test(NAME monkey_play COMMAND monkey_test)
 
 add_executable(world_test tests/world_main.cpp tests/world_seg_fresh.cpp tests/world_seg_sites.cpp)
