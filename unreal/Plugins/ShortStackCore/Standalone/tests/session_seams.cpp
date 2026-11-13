@@ -721,7 +721,14 @@ void SessionSeams()
 	Expect(std::string(ss::SoundName(ss::SoundId::Mail)) == "mail", "seams: the Mail sound has a name");
 	const std::vector<std::pair<life::Funding, std::string>> Options = S.FundingOptions("embercrest-nightly@9");
 	Expect(Options.size() == 1 && life::IsOwnMoney(Options[0].first) && Options[0].second.empty(), "seams: until backing lands, the player's own money");
-	Expect(S.Marks(0.0, 60.0 * Day).empty() && S.HeroBadges().Held.empty() && S.Unseen().empty() && S.SponsorTier() == 0 && !S.TeamRiverLine(), "seams: no marks, badges or sponsors yet");
+	// Update 4 G1 (SPEC v1.7 §2.9.1, §8.4; LEAD_CALLS Q-21): a new career's first 60 days hold exactly RCOP 2026's two marks (fest::Marks,
+	// merged by Session::Marks): FESTIVAL as it opens on day 13 and MAIN at its Main's start, day 34 at 15:00, both at RiverLine.
+	// FEIGN 2026 is Announced only from day 26, so none of its marks yet.
+	const std::vector<life::Mark> Marks = S.Marks(0.0, 60.0 * Day);
+	const bool RcopMarks = Marks.size() == 2 && Marks[0].Kind == ss::fest::MarkFestival && Marks[0].At == 13.0 * Day && Marks[0].Where == "RiverLine" &&
+		Marks[1].Kind == ss::fest::MarkFestMain && Marks[1].At == 34.0 * Day + 15.0 * 60.0 && Marks[1].Where == "RiverLine";
+	Expect(RcopMarks && S.HeroBadges().Held.empty() && S.Unseen().empty() && S.SponsorTier() == 0 && !S.TeamRiverLine(),
+		"seams: RCOP 2026's two marks (FESTIVAL day 13, MAIN day 34 at 15:00), no badges or sponsors yet");
 	Expect(!S.AcceptStake("x").empty() && !S.ListAction("embercrest-nightly@9", 300, 1050).empty() && !S.SignDeal("nope").empty(), "seams: the actions are refused for now");
 	Expect(std::fabs(ss::town::Renown(S) - S.Record().Renown) < 1e-12 && S.Record().Renown < 0.1, "seams: renown is the public record's");
 	// The Burner's Embercrest row asks who'd pay the way GoToLive does; until backing lands, the player's own money, so
