@@ -14,11 +14,15 @@
 // G1 FH-5a: FestCopyUi's N-2 half (RunItTwice keeps a festival event's code on THE BOARD, the Prospectus and the table header, §2.3.2:
 // WRIT 2027's day 2 and Main day, GRIT 2027's 02-E and 02-L, a REIGN 04 table), FestYourStrip's N-3 half (the Main card's Details holds the Prospectus on
 // REIGN 2027's Main from its day 2, §2.8.2) and FestReignCopy's THE BOARD's tag half (no sponsor mark by the REIGN tag, §2.15.1).
+// G1 FH-3a: FestHonestLines' B half (RiverLine's honest copy, UI/RiverLineNet.cpp: slide 0's computed guarantee, the wire's festival
+// item from the Buildup, the boards' U25 and THE BELT, no Season prize, the Career goals' U24, the hub's RCOP Buildup panel's U23 through
+// rlfest_detail::RcopBuildupPanel; no removed claim in its claim form) with the lobby's cost printed; FestCopyUi's B half gains U23-U25.
 #include "UiSeg.h"
 
 #include "CopyLint.h"
 #include "Trademarks.h"
 #include "ShortStack/Game/Festival.h"
+#include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Sites.h"
@@ -49,6 +53,8 @@ namespace rlnet_detail
 Rect NetHubRect(net::SiteId Site);
 const fest::Festival* NetHubPick(net::SiteId Site, bool HasPick, const fest::Festival* Picked, const std::vector<std::pair<const fest::Festival*, fest::Phase>>& Near);
 const fest::Festival* NetHubEdition(net::SiteId Site, const std::string& SeriesId, double World);
+// UI/RiverLineNet.cpp (FH-3a): RiverLine's festival on the taskbar's wire.
+std::string NetTickerFest(double World, std::string& Series);
 } // namespace rlnet_detail
 namespace rlignite_detail
 {
@@ -77,6 +83,10 @@ namespace rlfest_detail
 {
 // UI/RiverLineNet.cpp (FH-1c, FH-3b): stream B's strings for fest::FestUiInventory.
 std::vector<std::string> HostUiStrings();
+// UI/RiverLineNet.cpp (FH-3a): the hub's RCOP Buildup panel, "Last year: {Prize}." from the roll, a brand's next edition.
+void RcopBuildupPanel(Canvas& Cv, Ui& UI, const Session& S, const fest::Festival& F, const Rect& Rt, double World, double Now, double Since);
+std::string FestLastYear(const world::World& W, const fest::Festival& F);
+const fest::Festival* FestNextEdition(const fest::Festival& F);
 } // namespace rlfest_detail
 } // namespace ui
 } // namespace ss
@@ -555,7 +565,8 @@ void FestCopyUiHosts()
 	const std::vector<std::string> Inv = ss::ui::rlfest_detail::HostUiStrings();
 	std::map<std::string, std::string> Vars = copylint::Samples();
 	const std::pair<const char*, const char*> Extra[] = {{"D", "12"}, {"N", "4"}, {"Days", "22"}, {"FirstDate", "Mar 30"}, {"LastDate", "Apr 11"}, {"Gtd", "$281,100"},
-		{"Added", "$2,500"}, {"FESTIVAL", "PENNANT"}, {"Time", "9:00 PM"}, {"Name", "MRS. PARK"}};
+		{"Added", "$2,500"}, {"FESTIVAL", "PENNANT"}, {"Time", "9:00 PM"}, {"Name", "MRS. PARK"}, {"Festival", "RCOP 2027"}, {"BuyIn", "$5,250"},
+		{"Prize", "$795.32"}, {"Date", "Oct 6"}};
 	for (const auto& Kv : Extra)
 	{
 		Vars[Kv.first] = Kv.second;
@@ -569,8 +580,9 @@ void FestCopyUiHosts()
 		std::string Why = HostsCopyWhy(Kind, Text, Vars);
 		for (size_t I = 0; I < Text.size() && Why.empty(); ++I)
 		{
-			// A figure is a fill: no digit typed outside a placeholder (the singular "1 event" is a count's form, not a figure).
-			if (std::isdigit(static_cast<unsigned char>(Text[I])) && Text.compare(0, 8, "1 event ") != 0)
+			// A figure is a fill: no digit typed outside a placeholder (the singular "1 event" is a count's form and U23's "Step 1" the
+			// ladder's first rung's name, not figures).
+			if (std::isdigit(static_cast<unsigned char>(Text[I])) && Text.compare(0, 8, "1 event ") != 0 && Text != "Step 1 runs every four hours.")
 			{
 				Why = "a digit typed in the format";
 			}
@@ -1150,6 +1162,243 @@ void FestRitCodesAndHeld()
 	std::printf("FestRitCodesAndHeld: WRIT from day %d, GRIT from day %d, REIGN from day %d; %.2f s\n", Writ->FirstDay, Grit->FirstDay, Reign->FirstDay,
 		std::chrono::duration<double>(std::chrono::steady_clock::now() - Began).count());
 }
+/** A whole-dollar figure as RiverLine prints a pool or a guarantee (NetMoney's whole form: the test's own, from the cents). */
+std::string HostsWhole(int64_t Cents)
+{
+	return "$" + ss::Grouped((Cents + 50) / 100);
+}
+
+/** Every text run of a frame joined by single spaces (a wrapped paragraph reads back as its sentence). */
+std::string HostsText(const ss::ui::DrawList& L)
+{
+	std::string Out;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text)
+		{
+			Out += (Out.empty() ? "" : " ") + Cmd.Text.Text;
+		}
+	}
+	return Out;
+}
+
+/** The first run holding a removed or typed money claim in its claim form (§2.2.2, §2.8.8, §2.8.9; PLAN_G1 item 29: "7,412 entries",
+ *  never a bare "7,412", which Phase 0's "$7,412.30" mail prints), "" when none. Boards adds the boards' never-paid prizes. */
+std::string HostsClaim(const ss::ui::DrawList& L, bool Boards)
+{
+	static const char* const Forms[] = {"4,108,220", "4.1M", "$100,000,000", "7,412 entries", "Last year's champion won"};
+	static const char* const BoardForms[] = {"Platinum Pass", "$6,500", "RCOP Main package", "Main Event packages", "worth $25,000"};
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type != ss::ui::DrawCmd::Kind::Text)
+		{
+			continue;
+		}
+		for (const char* F : Forms)
+		{
+			if (Cmd.Text.Text.find(F) != std::string::npos)
+			{
+				return Cmd.Text.Text;
+			}
+		}
+		for (const char* F : BoardForms)
+		{
+			if (Boards && Cmd.Text.Text.find(F) != std::string::npos)
+			{
+				return Cmd.Text.Text;
+			}
+		}
+	}
+	return std::string();
+}
+
+/** RiverLine's own lobby (or another of its pages) on the laptop (FH-3a): RiverLine in front, the page open, eased in. */
+void HostsOpenRiverLine(HostsLaptop& P, ss::ui::RiverLine::Page Pg)
+{
+	P.S.Life.Update2LinesRead |= ss::life::U2Sites;
+	P.RL.SiteShown = ss::net::SiteId::RiverLine;
+	P.RL.OpenApp(ss::ui::RiverLine::App::RiverLine, P.Now);
+	P.S.ShowLobby();
+	P.RL.OpenPage(Pg, P.Now);
+	P.Now = ui_test::Step(P.S, P.Now, 1.5);
+}
+
+/** The wire's festival item worked out from the edition's dates alone (U15, R-32): the Buildup counts down, Live counts the days. */
+std::string HostsWantWire(const ss::fest::Festival& F, const std::string& Short, int Day)
+{
+	if (Day >= F.FirstDay - ss::fest::kBuildupDays && Day < F.FirstDay)
+	{
+		return Short + " \xC2\xB7 OPENS IN " + std::to_string(F.FirstDay - Day) + "D";
+	}
+	if (Day >= F.FirstDay && Day <= F.LastDay)
+	{
+		return Short + " \xC2\xB7 DAY " + std::to_string(Day - F.FirstDay + 1) + " OF " + std::to_string(F.LastDay - F.FirstDay + 1);
+	}
+	return std::string();
+}
+
+/**
+ * FestHonestLines (§2.15.2; F-hubs' stream B half, FH-3a; PLAN_G1 items 9 and 29): RiverLine's copy reads the sim and types no past.
+ * Slide 0 prints RCOP 2026's $78,203,400 from SeriesInfo::GtdCents and the Main's buy-in and guarantee from its template
+ * (FestRcopGtdSum's slide half); the taskbar's wire carries the festival from its Buildup, never on Night One (R-32); the Series board
+ * says what scores (U25) with THE BELT for a festival and no prize panel for a plain series, the Season board claims no Platinum Pass
+ * (FD-4); the Career goals read U24; the hub's RCOP Buildup panel prints U23 from step1..4 and the Main, its "Last year" only from the
+ * roll. No frame drawn here holds a removed claim in its claim form. The lobby's cost on RCOP's day 8 against Night One's is printed
+ * (PLAN_FHUBS FH-3's budget row: the lobby inside 29.9k + 2k; asserted at FH-7).
+ * Plants: the old goal restored; Cents(1.0e8) kept on the slide.
+ */
+void FestHonestLines()
+{
+	namespace rn = ss::ui::rlnet_detail;
+	namespace rf = ss::ui::rlfest_detail;
+	const auto Began = std::chrono::steady_clock::now();
+	const ss::net::Network& Net = ss::net::Site(ss::net::SiteId::RiverLine);
+	const ss::net::SeriesInfo* Rc = Net.FindSeries("rcop");
+	const ss::fest::Festival* Rcop = ss::fest::FestivalOf("rcop");
+	ui_test::Expect(Rc && Rcop && Rcop->Which == ss::fest::Brand::Rcop && Rcop->Site == ss::net::SiteId::RiverLine, "FestHonestLines: RCOP 2026 is F-net's row on RiverLine");
+	const ss::net::EventTemplate* Main = Rc ? Net.FindTemplate(Rc->MainEvent) : nullptr;
+	const ss::net::EventTemplate* Step1 = Net.FindTemplate("step1");
+	if (!Rc || !Rcop || !Main || !Step1)
+	{
+		ui_test::Expect(false, "FestHonestLines: RCOP 2026's series, Main and step 1 are RiverLine's");
+		return;
+	}
+	const std::string Gtd = HostsWhole(Rc->GtdCents);
+	ui_test::Expect(Gtd == "$78,203,400", ("FestHonestLines: RCOP 2026's guarantee is the sum of its templates' ($78,203,400), not " + Gtd).c_str());
+	const std::string Sub = std::to_string(Rc->Events) + " events \xC2\xB7 " + ss::net::BuyIn(Main->BuyInCents) + " Main Event with " + HostsWhole(Main->GtdCents) + " guaranteed";
+
+	// Night One (day 0): slide 0 over the carousel's turns; the wire keeps today's items.
+	HostsLaptop P("u4-fest-hosts-rl");
+	HostsOpenRiverLine(P, ss::ui::RiverLine::Page::Lobby);
+	const ss::ui::DrawList Night = P.Settled();
+	bool SlideGtd = false;
+	bool SlideSub = false;
+	std::string Claim;
+	for (int Turn = 0; Turn < 12; ++Turn)
+	{
+		const ss::ui::DrawList L = Turn == 0 ? Night : (P.Now += 8.0, P.Frame());
+		SlideGtd = SlideGtd || ui_test::DrewRun(L, Gtd);
+		SlideSub = SlideSub || ui_test::DrewRun(L, Sub);
+		Claim = Claim.empty() ? HostsClaim(L, false) : Claim;
+	}
+	ui_test::Expect(SlideGtd, ("FestHonestLines: slide 0 prints RCOP 2026's " + Gtd + " from SeriesInfo::GtdCents").c_str());
+	ui_test::Expect(SlideSub, ("FestHonestLines: slide 0's line reads the Main's template: " + Sub).c_str());
+	ui_test::Expect(Claim.empty(), ("FestHonestLines: Night One's lobby holds no removed claim (" + Claim + ")").c_str());
+	ui_test::Expect(ss::net::DayOf(P.S.WorldMinutes()) < Rcop->FirstDay - ss::fest::kBuildupDays && !ui_test::Drew(Night, Rc->Short + " \xC2\xB7 "),
+		"FestHonestLines: Night One's wire carries no festival item (the Buildup starts it, R-32)");
+
+	// The wire's festival item on every day from Night One to the day after RCOP 2026 (U15's forms).
+	int WireBad = 0;
+	for (int Day = 0; Day <= Rcop->LastDay + 1; ++Day)
+	{
+		const double World = static_cast<double>(Day) * ss::net::MinutesPerDay + 12.0 * 60.0;
+		std::string Series;
+		const std::string Got = rn::NetTickerFest(World, Series);
+		const std::string Want = HostsWantWire(*Rcop, Rc->Short, Day);
+		if (Got != Want || (!Want.empty() && Series != Rcop->SeriesId))
+		{
+			++WireBad;
+			ui_test::Expect(false, ("FestHonestLines: day " + std::to_string(Day) + "'s wire reads \"" + Got + "\", not \"" + Want + "\"").c_str());
+		}
+	}
+	ui_test::Expect(WireBad == 0, "FestHonestLines: the wire counts RCOP 2026 down through its Buildup and its days while Live");
+
+	// RCOP's Buildup (day FirstDay - 4): the wire's item drawn; the hub's RCOP Buildup panel (U23).
+	const int BuildDay = Rcop->FirstDay - 4;
+	P.At(static_cast<double>(BuildDay) * ss::net::MinutesPerDay + 12.0 * 60.0);
+	HostsOpenRiverLine(P, ss::ui::RiverLine::Page::Lobby);
+	const ss::ui::DrawList Soon = P.Settled();
+	ui_test::Expect(ui_test::DrewRun(Soon, HostsWantWire(*Rcop, Rc->Short, BuildDay)), ("FestHonestLines: RCOP's Buildup puts " + HostsWantWire(*Rcop, Rc->Short, BuildDay) + " on the wire").c_str());
+	ui_test::Expect(!ui_test::Drew(Soon, Rc->Name + " starts"), "FestHonestLines: the festival's item stands in for its series' own (no second RCOP item)");
+	{
+		ui_test::TableMeasurer M;
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+		ss::ui::Ui U;
+		U.Begin(C, P.Now);
+		rf::RcopBuildupPanel(C, U, P.S, *Rcop, {1044.0f, 392.0f, 532.0f, 478.0f}, P.S.WorldMinutes(), P.Now, 5.0);
+		U.End();
+		const std::string Text = HostsText(L);
+		const bool Sats = (P.S.Unlocks() & ss::net::UnlockSatellite) != 0;
+		const std::string Lead = ss::net::BuyIn(Step1->BuyInCents) + " to a " + ss::net::BuyIn(Main->BuyInCents) + " seat.";
+		const std::string Five = "Five steps to the Main Event and its " + HostsWhole(Main->GtdCents) + " guarantee." + (Sats ? " Step 1 runs every four hours." : " Make a final table to unlock satellites.");
+		ui_test::Expect(ui_test::DrewRun(L, Lead), ("FestHonestLines: the RCOP Buildup panel reads " + Lead + " from step1 and the Main").c_str());
+		ui_test::Expect(Text.find(Five) != std::string::npos, ("FestHonestLines: the RCOP Buildup panel reads \"" + Five + "\"").c_str());
+		bool Buys = true;
+		for (const char* Id : {"step1", "step2", "step3", "step4"})
+		{
+			const ss::net::EventTemplate* T = Net.FindTemplate(Id);
+			Buys = Buys && T && ui_test::DrewRun(L, ss::net::BuyIn(T->BuyInCents));
+		}
+		ui_test::Expect(Buys && ui_test::DrewRun(L, ss::net::BuyIn(Main->BuyInCents)), "FestHonestLines: the ladder's buy-ins are step1..4's and the Main's");
+		const bool Roll = !rf::FestLastYear(P.S.Living(), *Rcop).empty();
+		ui_test::Expect(Roll == (Text.find("Last year") != std::string::npos), "FestHonestLines: the panel's \"Last year\" appears exactly when the roll holds last year's Main");
+		ui_test::Expect(HostsClaim(L, true).empty(), ("FestHonestLines: the RCOP Buildup panel holds no typed past (" + HostsClaim(L, true) + ")").c_str());
+	}
+
+	// RCOP Live (day FirstDay + 7): the wire's day; the boards; the Career goals; the lobby's cost against Night One's.
+	const int LiveDay = Rcop->FirstDay + 7;
+	P.At(static_cast<double>(LiveDay) * ss::net::MinutesPerDay + 12.0 * 60.0);
+	HostsOpenRiverLine(P, ss::ui::RiverLine::Page::Lobby);
+	const ss::ui::DrawList Live = P.Settled();
+	ui_test::Expect(ui_test::DrewRun(Live, HostsWantWire(*Rcop, Rc->Short, LiveDay)), ("FestHonestLines: RCOP Live puts " + HostsWantWire(*Rcop, Rc->Short, LiveDay) + " on the wire").c_str());
+	ui_test::Expect(HostsClaim(Live, false).empty(), ("FestHonestLines: RCOP's lobby holds no removed claim (" + HostsClaim(Live, false) + ")").c_str());
+	HostsOpenRiverLine(P, ss::ui::RiverLine::Page::Leaderboards);
+	P.RL.ShowBoard(ss::net::Board::Series, P.Now);
+	const ss::ui::DrawList SeriesBoard = P.Settled();
+	const ss::fest::Festival* NextRcop = rf::FestNextEdition(*Rcop);
+	const std::string Belt = "Points from every cash at " + Rc->Name + "." +
+		(ss::fest::kCrownTickets && NextRcop ? " The leader takes the belt and a seat in the next " + ss::fest::NameAfterArticle(NextRcop->Name) + " Main Event." : std::string(" The leader takes the belt."));
+	ui_test::Expect(HostsText(SeriesBoard).find(Belt) != std::string::npos, ("FestHonestLines: RCOP's Series board reads \"" + Belt + "\" (U25)").c_str());
+	int SeatLines = 0;
+	for (const ss::ui::DrawCmd& Cmd : SeriesBoard.Cmds)
+	{
+		SeatLines += Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == "A seat in the next Main Event" ? 1 : 0;
+	}
+	ui_test::Expect(SeatLines == (NextRcop ? 3 : 0), "FestHonestLines: THE BELT puts the crown's seat beside the belt, the podium and FINALIST");
+	ui_test::Expect(HostsClaim(SeriesBoard, true).empty(), ("FestHonestLines: RCOP's Series board claims no prize (" + HostsClaim(SeriesBoard, true) + ")").c_str());
+	P.RL.ShowBoard(ss::net::Board::Season, P.Now);
+	const ss::ui::DrawList Season = P.Settled();
+	ui_test::Expect(HostsClaim(Season, true).empty() && !ui_test::Drew(Season, "A seat in the next"), ("FestHonestLines: the Season board claims no Platinum Pass or prize (" + HostsClaim(Season, true) + ")").c_str());
+	HostsOpenRiverLine(P, ss::ui::RiverLine::Page::Career);
+	const ss::ui::DrawList Career = P.Settled();
+	const std::string CareerText = HostsText(Career);
+	const std::string SeatGoal = "Win a " + ss::net::BuyIn(Main->BuyInCents) + " seat to the RCOP Main Event.";
+	const std::string WinGoal = "Win the RCOP Main Event." + (rf::FestLastYear(P.S.Living(), *Rcop).empty() ? std::string() : " " + rf::FestLastYear(P.S.Living(), *Rcop));
+	ui_test::Expect(CareerText.find(SeatGoal) != std::string::npos, ("FestHonestLines: the Career goal reads \"" + SeatGoal + "\" (U24)").c_str());
+	ui_test::Expect(CareerText.find(WinGoal) != std::string::npos && (WinGoal.size() > 24 || CareerText.find("Last year") == std::string::npos),
+		("FestHonestLines: the Career goal reads \"" + WinGoal + "\" (U24, \"Last year\" only from the roll)").c_str());
+	ui_test::Expect(HostsClaim(Career, false).empty(), ("FestHonestLines: the Career page holds no typed past (" + HostsClaim(Career, false) + ")").c_str());
+
+	// A plain series after RCOP: its Series board says what scores and draws no prize panel.
+	const ss::net::SeriesInfo* Plain = nullptr;
+	for (const ss::net::SeriesInfo& Sr : Net.Series())
+	{
+		if (!Sr.Festival && Sr.FirstDay > Rcop->LastDay + 1 && Sr.FirstDay < Rcop->LastDay + 120 && (!Plain || Sr.FirstDay < Plain->FirstDay))
+		{
+			Plain = &Sr;
+		}
+	}
+	ui_test::Expect(Plain != nullptr, "FestHonestLines: RiverLine runs a plain series after RCOP 2026");
+	if (Plain)
+	{
+		P.At(static_cast<double>(Plain->FirstDay) * ss::net::MinutesPerDay + 12.0 * 60.0);
+		HostsOpenRiverLine(P, ss::ui::RiverLine::Page::Leaderboards);
+		P.RL.ShowBoard(ss::net::Board::Series, P.Now);
+		const ss::ui::DrawList PlainBoard = P.Settled();
+		const ss::net::SeriesInfo* Shown = Net.CurrentSeries(P.S.WorldMinutes());
+		const std::string Want = "Points from every cash at " + (Shown ? Shown->Name : Plain->Name) + ".";
+		const std::string Text = HostsText(PlainBoard);
+		ui_test::Expect(Shown && !Shown->Festival && Text.find(Want) != std::string::npos && Text.find("The leader takes the belt") == std::string::npos,
+			("FestHonestLines: a plain series' board reads \"" + Want + "\" (U25) and nothing more").c_str());
+		ui_test::Expect(!ui_test::Drew(PlainBoard, "A seat in the next") && HostsClaim(PlainBoard, true).empty(), "FestHonestLines: a plain series' board draws no prize panel");
+	}
+	std::printf("FestHonestLines: slide 0 %s; the lobby %zu vertices / %zu runs on Night One, %zu / %zu on RCOP's day %d (%+lld; the lobby inside 29.9k + 2k, FH-7); "
+				"plain series %s; %.2f s\n",
+		Gtd.c_str(), Night.Vertices.size(), HostsRuns(Night), Live.Vertices.size(), HostsRuns(Live), LiveDay - Rcop->FirstDay + 1,
+		static_cast<long long>(Live.Vertices.size()) - static_cast<long long>(Night.Vertices.size()), Plain ? Plain->Name.c_str() : "none",
+		std::chrono::duration<double>(std::chrono::steady_clock::now() - Began).count());
+}
 } // namespace
 
 namespace u4_ui_test
@@ -1160,5 +1409,6 @@ void SegFestHosts()
 	FestBandstandPick();
 	FestCopyUiHosts();
 	FestRitCodesAndHeld();
+	FestHonestLines();
 }
 } // namespace u4_ui_test

@@ -15,9 +15,11 @@
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Stake.h"
+#include "ShortStack/Game/WorldFest.h"
 #include "ShortStack/Rng.h"
 #include "ShortStack/Structure.h"
 #include "ShortStack/UI/BadgeArt.h"
+#include "ShortStack/UI/FestivalArt.h"
 
 #include <algorithm>
 #include <cmath>
@@ -709,8 +711,11 @@ const std::vector<RiverLine::FeatureSlide>& RiverLine::FeatureSlides()
 			F.Col2 = Rc->Color2;
 			F.Kicker = NetUpper(net::DateLabel(Rc->FirstDay)) + " \xE2\x80\x93 " + NetUpper(net::DateLabel(Rc->LastDay));
 			F.Title = Rc->Name;
-			F.Sub = std::to_string(Rc->Events) + " events \xC2\xB7 $5,250 Main Event with $25,000,000 guaranteed";
-			F.Big = "$100,000,000";
+			// Update 4 G1 (SPEC v1.7 §2.2.2, §2.8.8; F-hubs FH-3a): the sim's figures, never typed. The edition's guarantee is the sum of its
+			// templates' (SeriesInfo::GtdCents, $78,203,400 for RCOP 2026, F-net's FN-4a); the Main's buy-in and guarantee are its template's.
+			const net::EventTemplate* RcMain = Net.FindTemplate(Rc->MainEvent);
+			F.Sub = std::to_string(Rc->Events) + " events" + (RcMain ? " \xC2\xB7 " + net::BuyIn(RcMain->BuyInCents) + " Main Event with " + NetMoney(RcMain->GtdCents) + " guaranteed" : std::string());
+			F.Big = NetMoney(Rc->GtdCents);
 			F.BigLabel = "GUARANTEED";
 			F.ClockLabel = net::DayOf(World) < Rc->FirstDay ? "SERIES STARTS IN" : "SERIES ENDS IN";
 			F.ClockAt = net::DayOf(World) < Rc->FirstDay ? static_cast<double>(Rc->FirstDay) * net::MinutesPerDay + 11.0 * 60.0 : static_cast<double>(Rc->LastDay + 1) * net::MinutesPerDay;
@@ -1213,7 +1218,19 @@ void RiverLine::ScheduleRow(const ListRow& Row, const Rect& R, double Now, int I
 	if (!T.Series.empty())
 	{
 		const net::SeriesInfo* Sr = Net.FindSeries(T.Series);
-		Bx += NetPill(*C, Look, Sr ? Sr->Short : T.Series, Bx, By, Edge, true, 9.5f) + 5.0f;
+		if (Sr && Sr->Festival && Site == net::SiteId::RiverLine)
+		{
+			// Update 4 G1 (SPEC v1.7 §2.7.4; F-hubs FH-3a): a RiverLine festival row's pill reads the festival's Short in its Accent (its
+			// series colour until F-look's looks land), its crest at 14 before it (F-look's low-detail path at 30 units or less).
+			const festart::FestivalLook* FestLook = festart::LookFor(*Sr);
+			eventart::SeriesCrest(*C, *Sr, Bx + 7.0f, By + 8.75f, 14.0f, Now);
+			Bx += 17.0f;
+			Bx += NetPill(*C, Look, Sr->Short, Bx, By, FestLook && FestLook->Accent ? Hex(FestLook->Accent) : Edge, true, 9.5f) + 5.0f;
+		}
+		else
+		{
+			Bx += NetPill(*C, Look, Sr ? Sr->Short : T.Series, Bx, By, Edge, true, 9.5f) + 5.0f;
+		}
 	}
 	if (T.Bracelet || T.Ring)
 	{
@@ -1717,6 +1734,47 @@ void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState&
 	}
 }
 
+namespace rlnet_detail
+{
+/** Update 4 G1 (SPEC v1.7 §2.7.4, §2.1.4, U15; LEAD_CALLS R-32; F-hubs FH-3a): RiverLine's festival on the taskbar's wire from its
+ *  Buildup: "{SHORT} · OPENS IN {D}D" through the Buildup, "{SHORT} · DAY {N} OF {M}" while Live (its Main day included); "" before
+ *  the Buildup (the Announced weeks keep today's wire, so Night One's lobby stays still) and after LastDay (the Afterglow's item is
+ *  FH-5c's). Series is set to the edition's series id (the wire's own series item gives way to it). Every figure from the edition's
+ *  dates and the clock. */
+std::string NetTickerFest(double World, std::string& Series)
+{
+	Series.clear();
+	const net::SiteId Site = net::SiteId::RiverLine;
+	const net::Network& Net = net::Site(Site);
+	const int Today = net::DayOf(World);
+	const fest::Festival* F = fest::LiveOn(Site, Today);
+	const bool Live = F != nullptr;
+	if (!F)
+	{
+		for (const fest::Festival* Next : fest::Festivals(Today, Today + fest::kBuildupDays + 1))
+		{
+			if (Next->Site == Site && fest::PhaseOf(*Next, World, Net.Attached()) == fest::Phase::Buildup)
+			{
+				F = Next;
+				break;
+			}
+		}
+	}
+	const net::SeriesInfo* Sr = F ? Net.FindSeries(F->SeriesId) : nullptr;
+	if (!Sr || Sr->Short.empty())
+	{
+		return std::string();
+	}
+	Series = F->SeriesId;
+	if (!Live)
+	{
+		return Sr->Short + " \xC2\xB7 OPENS IN " + std::to_string(std::max(1, F->FirstDay - Today)) + "D";
+	}
+	const int Days = F->LastDay - F->FirstDay + 1;
+	return Sr->Short + " \xC2\xB7 DAY " + std::to_string(std::min(Days, std::max(1, Today - F->FirstDay + 1))) + " OF " + std::to_string(Days);
+}
+} // namespace rlnet_detail
+
 void RiverLine::Ticker(const Rect& R, double Now)
 {
 	// The lobby's site's wire (update 2 §5.3, §5.11): its headlines and its own "players online" (RiverLine's are today's
@@ -1743,7 +1801,18 @@ void RiverLine::Ticker(const Rect& R, double Now)
 		}
 		Items.push_back({It.Title + (It.Amount > 0 ? " (" + Money(It.Amount) + ")" : std::string()), NetKind(It.Kind)});
 	}
-	if (const net::SeriesInfo* Sr = Net.CurrentSeries(World))
+	// Update 4 G1 (SPEC v1.7 §2.7.4; LEAD_CALLS R-32; F-hubs FH-3a): RiverLine's festival from its Buildup, second on the wire after the
+	// players online, in the festival's Accent (its series colour until F-look's looks land); it stands in for its series' own item.
+	std::string FestSeries;
+	const std::string FestItem = Site == net::SiteId::RiverLine ? NetTickerFest(World, FestSeries) : std::string();
+	if (!FestItem.empty())
+	{
+		const net::SeriesInfo* Fs = Net.FindSeries(FestSeries);
+		const festart::FestivalLook* FestLook = Fs ? festart::LookFor(*Fs) : nullptr;
+		Items.insert(Items.begin() + 1, Item{FestItem, FestLook && FestLook->Accent ? Hex(FestLook->Accent) : Fs ? Hex(Fs->Color) : pal::Gold});
+	}
+	const net::SeriesInfo* WireSeries = Net.CurrentSeries(World);
+	if (const net::SeriesInfo* Sr = WireSeries && WireSeries->Id != FestSeries ? WireSeries : nullptr)
 	{
 		const int Day = net::DayOf(World);
 		Items.push_back({Day >= Sr->FirstDay ? Sr->Name + ": day " + std::to_string(Day - Sr->FirstDay + 1) + " of " + std::to_string(Sr->LastDay - Sr->FirstDay + 1)
@@ -2741,7 +2810,144 @@ std::vector<std::string> HostUiStrings()
 		"label\t1 event \xC2\xB7 {Gtd} guaranteed \xC2\xB7 {FirstDate} \xE2\x80\x93 {LastDate}",
 		"label\t{Gtd} GTD",
 		"label\t+ {Added} ADDED",
+		// FH-3a (§2.2.2, §2.8.8, §2.8.9): slide 0's sub-line over the edition's computed guarantee (GUARANTEED its label); the hub's RCOP
+		// Buildup panel (RcopBuildupPanel: the ladder's labels, the YOU pill, U23 with {Step1} as {Prize} and {MainBuyIn} as {BuyIn}, its
+		// "Last year: {Prize}." from FestLastYear); the Career goals (U24); the boards' copy (U25, {Series} as {Festival}).
+		"label\t{N} events \xC2\xB7 {BuyIn} Main Event with {Gtd} guaranteed",
+		"label\tGUARANTEED",
+		"label\tROAD TO THE MAIN EVENT",
+		"label\tSTEP {N}",
+		"label\tMAIN",
+		"label\tYOU \xC2\xB7 {Amount}",
+		"sentence\t{Prize} to a {BuyIn} seat.",
+		"sentence\tFive steps to the Main Event and its {Gtd} guarantee.",
+		"sentence\tStep 1 runs every four hours.",
+		"sentence\tMake a final table to unlock satellites.",
+		"sentence\tLast year: {Prize}.",
+		"sentence\tWin a {BuyIn} seat to the RCOP Main Event.",
+		"sentence\tWin the RCOP Main Event.",
+		"sentence\tPoints from every cash at {Festival}.",
+		"sentence\tPoints from every cash at {Festival}, from {Date}: the series opened before the record books did.",
+		"sentence\tThe leader takes the belt and a seat in the next {Festival} Main Event.",
+		"sentence\tThe leader takes the belt.",
+		"sentence\tEvery cash scores; the deeper the run and the bigger the field, the more it's worth.",
 	};
+}
+
+/** Update 4 G1 (SPEC v1.7 §2.8.8, U23, M-4; F-hubs FH-3a): "Last year: {Prize}." for edition F, only once the world's roll holds the
+ *  Main of F's brand from the year before (world::FestRoll, newest first; the prize through NetMoney); "" otherwise, so nothing is
+ *  ever typed. The hub's RCOP Buildup panel and the Career goal print it; the hub's Main card may (stream A's). */
+std::string FestLastYear(const world::World& W, const fest::Festival& F)
+{
+	for (const world::FestRollRow& Row : world::FestRoll(W, F.Which))
+	{
+		if (Row.Year == F.Year - 1 && Row.Main && Row.Main->Prize > 0)
+		{
+			return "Last year: " + NetMoney(Row.Main->Prize) + ".";
+		}
+	}
+	return std::string();
+}
+
+/** The next edition of F's brand (U25's "the next {Festival} Main Event", the seat kCrownTickets earns), nullptr past the calendar. */
+const fest::Festival* FestNextEdition(const fest::Festival& F)
+{
+	for (const fest::Festival& G : fest::All())
+	{
+		if (G.Which == F.Which && G.Site == F.Site && G.FirstDay > F.LastDay)
+		{
+			return &G;
+		}
+	}
+	return nullptr;
+}
+
+/** The RCOP edition the Career goals speak of (§2.8.8): the one on stage or next to open at Today, nullptr past the calendar. */
+const fest::Festival* RcopGoalEdition(int Today)
+{
+	for (const fest::Festival& F : fest::All())
+	{
+		if (F.Which == fest::Brand::Rcop && F.LastDay >= Today)
+		{
+			return &F;
+		}
+	}
+	return nullptr;
+}
+
+/**
+ * Update 4 G1 (SPEC v1.7 §2.8.8, U23; F-hubs FH-3a): the hub's RCOP Buildup panel, ROAD TO THE MAIN EVENT, moved off the shared
+ * SERIES page (the old rfind("rcop") branch) with every figure read from the sim: the four steps' buy-ins from step1..4's templates,
+ * the Main's buy-in and guarantee from the edition's Main template (F.MainId: "rcop-main" in 2026), each step's next start, the Main's
+ * date, YOU on the highest rung whose seat the player holds (each step's SeatTicket), "{Step1} to a {MainBuyIn} seat.", "Five steps to
+ * the Main Event and its {Gtd} guarantee." with "Step 1 runs every four hours." once satellites unlock, else "Make a final table to
+ * unlock satellites.", and "Last year: {Prize}." only from the roll (FestLastYear). Drawn inside Rt (the hub's right column, any height
+ * from 360; the bars scale to fit). Called by FestivalHub (UI/RiverLineFestival.cpp, stream A) for an RCOP edition in its Buildup:
+ * declared there in namespace ss::ui::rlfest_detail.
+ */
+void RcopBuildupPanel(Canvas& Cv, Ui& UI, const Session& S, const fest::Festival& F, const Rect& Rt, double World, double Now, double Since)
+{
+	const net::Network& Net = net::Site(net::SiteId::RiverLine);
+	const net::SeriesInfo* Sr = Net.FindSeries(F.SeriesId);
+	const Color Col = Sr ? Hex(Sr->Color) : pal::Accent;
+	const Color Col2 = Sr ? Hex(Sr->Color2) : pal::Accent2;
+	const net::EventTemplate* Steps[4] = {Net.FindTemplate("step1"), Net.FindTemplate("step2"), Net.FindTemplate("step3"), Net.FindTemplate("step4")};
+	const net::EventTemplate* Main = Net.FindTemplate(F.MainId);
+	Cv.FillRoundRect({Rt.X + 24.0f, Rt.Y + 25.0f, 3.0f, 13.0f}, 1.5f, Col);
+	NetSpaced(Cv, "ROAD TO THE MAIN EVENT", Rt.X + 35.0f, Rt.Y + 36.0f, 12.0f, 800, pal::Muted, 1.6f);
+	const char* Labels[5] = {"STEP 1", "STEP 2", "STEP 3", "STEP 4", "MAIN"};
+	const float Bw = (Rt.W - 48.0f - 4.0f * 8.0f) / 5.0f;
+	const float BoxH = 118.0f;
+	const float Cy = Rt.Y + Rt.H - BoxH - 18.0f;
+	const float Base = Cy - 48.0f;
+	// The bars climb 70 to 302 units as they did on the SERIES page, scaled down when the column is shorter (the Main's trophy above).
+	const float Scale = std::min(1.0f, std::max(0.3f, (Base - (Rt.Y + 60.0f) - 112.0f) / 302.0f));
+	for (int K = 0; K < 5; ++K)
+	{
+		const net::EventTemplate* T = K < 4 ? Steps[K] : Main;
+		const float H = (70.0f + Nf(K) * 58.0f) * Scale * NetEase((Since - 0.1 * K) / 0.6);
+		const float X = Rt.X + 24.0f + Nf(K) * (Bw + 8.0f);
+		const Color Kc = K == 4 ? pal::Gold : Mix(Col, Col2, Nf(K) / 4.0f);
+		if (K == 4)
+		{
+			Cv.GlowRoundRect({X, Base - H, Bw, H}, 10.0f, NetA(pal::Gold, 0.4f), 20.0f);
+		}
+		Cv.FillRoundRect({X, Base - H, Bw, H}, 10.0f, Paint::Linear({0.0f, Base - H}, {0.0f, Base}, NetA(Kc, 0.95f), NetA(Kc, 0.18f)));
+		NetSpaced(Cv, Labels[K], X + Bw / 2.0f, Base - H + 20.0f, 9.5f, 900, rlsites_detail::SitesTone(0x07121c), 1.0f, Align::Center);
+		UI.Text(T ? net::BuyIn(T->BuyInCents) : std::string(), X + Bw / 2.0f, Base - H + 42.0f, Ts(15.0f, 900, rlsites_detail::SitesTone(0x07121c), Align::Center));
+		if (K < 4)
+		{
+			net::EventInstance Next;
+			if (T && Net.Next(T->Id, World, Next))
+			{
+				UI.Text(net::TimeLabel(Next.Start), X + Bw / 2.0f, Base + 20.0f, Ts(11.5f, 700, pal::Muted, Align::Center));
+			}
+		}
+		else
+		{
+			NetTrophy(Cv, X + Bw / 2.0f, Base - H - 58.0f, 48.0f, Hex(0xffe08a), Hex(0xc9962b));
+			UI.Text(NetUpper(net::DateLabel(F.MainDay)), X + Bw / 2.0f, Base + 20.0f, Ts(11.5f, 700, pal::Gold, Align::Center));
+		}
+	}
+	// You are here: the highest rung whose seat the player holds (a step's seat is the next rung's ticket; step 4's the Main's).
+	int Here = 0;
+	for (int K = 0; K < 4; ++K)
+	{
+		Here = Steps[K] && !Steps[K]->SeatTicket.empty() && S.Life.TicketsFor(Steps[K]->SeatTicket) > 0 ? K + 1 : Here;
+	}
+	const float Yx = Rt.X + 24.0f + Bw / 2.0f + Nf(Here) * (Bw + 8.0f);
+	const float Yy = Base - (70.0f + Nf(Here) * 58.0f) * Scale - 30.0f + Nf(std::sin(Now * 3.0)) * 3.0f;
+	NetPill(Cv, "YOU \xC2\xB7 " + Money(S.BankrollCents), Yx - 38.0f, Yy - 24.0f, pal::Accent, true, 10.0f);
+	NetTriangle(Cv, Yx, Yy + 2.0f, 10.0f, false, pal::Accent);
+	UI.RRect({Rt.X + 24.0f, Cy, Rt.W - 48.0f, BoxH}, 10.0f, NetA(pal::Gold, 0.07f), NetA(pal::Gold, 0.35f));
+	if (Steps[0] && Main)
+	{
+		UI.Text(net::BuyIn(Steps[0]->BuyInCents) + " to a " + net::BuyIn(Main->BuyInCents) + " seat.", Rt.X + 44.0f, Cy + 34.0f, Ts(20.0f, 900, pal::Ink));
+	}
+	const std::string LastYear = FestLastYear(S.Living(), F);
+	const std::string Line = (Main ? "Five steps to the Main Event and its " + NetMoney(Main->GtdCents) + " guarantee." : std::string()) +
+		((S.Unlocks() & net::UnlockSatellite) ? " Step 1 runs every four hours." : " Make a final table to unlock satellites.") + (LastYear.empty() ? std::string() : " " + LastYear);
+	NetParagraph(Cv, Line, Rt.X + 44.0f, Cy + 60.0f, Rt.W - 88.0f, 13.5f, 500, rlsites_detail::SitesTone(0xc9d3e2), 19.0f, 3);
 }
 } // namespace rlfest_detail
 
@@ -3043,14 +3249,17 @@ void RiverLine::SeriesPage(double Now)
 		UI.Text("You", Rt.X + 24.0f, Fy + 32.0f, Ts(14.0f, 600, pal::Muted));
 		UI.Text(Mine.Rank > 0 ? "#" + Grouped(Mine.Rank) + " \xC2\xB7 " + Grouped(static_cast<int64_t>(std::llround(Mine.Value))) + " pts" : std::string("No points yet"), Rt.X + Rt.W - 24.0f, Fy + 32.0f,
 			Ts(16.0f, 800, Mine.Rank > 0 ? pal::Accent : pal::Muted, Align::Right));
-		const std::string Note = Sr->Id == "mm" ? "Every final table scores. The top three win RCOP Main Event packages worth $6,500."
-			: Sr->Bracelets > 0 ? "Every cash scores. " + std::to_string(Sr->Bracelets) + " of the titles come with a Championship bracelet."
+		// Update 4 G1 (SPEC v1.7 §2.8.8, U25; F-hubs FH-3a): no series board pays a prize (§2.8.9), so Micro Madness's note says what
+		// scores, as every other series' does.
+		const std::string Note = Sr->Bracelets > 0 ? "Every cash scores. " + std::to_string(Sr->Bracelets) + " of the titles come with a Championship bracelet."
 			: Sr->Rings > 0 ? "Every cash scores. " + std::to_string(Sr->Rings) + " of the titles come with a Grand Circuit ring."
 							: "Every cash scores; the deeper the run and the bigger the field, the more it's worth.";
 		NetParagraph(*C, Note, Rt.X + 24.0f, Fy + 60.0f, Rt.W - 48.0f, 13.0f, 500, pal::Muted, 18.0f, 2);
 	}
-	else if (Ahead && Sr->Id.rfind("rcop", 0) != 0)
+	else if (Ahead)
 	{
+		// Update 4 G1 (SPEC v1.7 §2.8.8; F-hubs FH-3a): every series ahead circles its highlights here. RCOP's ROAD TO THE MAIN EVENT left this
+		// shared page for the hub's RCOP Buildup panel (rlfest_detail::RcopBuildupPanel, below), its figures read from the sim.
 		// What to circle on the calendar: the Main Event, the high rollers, the ring and bracelet events.
 		Section("HIGHLIGHTS", Rt.X + 24.0f, Rt.Y + 36.0f, Col);
 		std::vector<const net::EventTemplate*> Picks;
@@ -3083,59 +3292,6 @@ void RiverLine::SeriesPage(double Now)
 			UI.Text(NetMoney(T.GtdCents), Rt.X + Rt.W - 24.0f, Y + 26.0f, Ts(15.0f, 800, pal::Gold, Align::Right, Baseline::Alphabetic, true));
 			C->SetAlpha(A0);
 		}
-	}
-	else if (Ahead)
-	{
-		// The satellite ladder to the Main Event.
-		Section("ROAD TO THE MAIN EVENT", Rt.X + 24.0f, Rt.Y + 36.0f, Col);
-		const char* Ids[4] = {"step1", "step2", "step3", "step4"};
-		const char* Labels[5] = {"STEP 1", "STEP 2", "STEP 3", "STEP 4", "MAIN"};
-		const char* Buys[5] = {"$2.20", "$11", "$55", "$215", "$5,250"};
-		const float Bw = (Rt.W - 48.0f - 4.0f * 8.0f) / 5.0f;
-		const float Base = Rt.Y + 400.0f;
-		for (int K = 0; K < 5; ++K)
-		{
-			const float H = (70.0f + Nf(K) * 58.0f) * NetEase((Since - 0.1 * K) / 0.6);
-			const float X = Rt.X + 24.0f + Nf(K) * (Bw + 8.0f);
-			const Color Kc = K == 4 ? pal::Gold : Mix(Col, Col2, Nf(K) / 4.0f);
-			if (K == 4)
-			{
-				C->GlowRoundRect({X, Base - H, Bw, H}, 10.0f, NetA(pal::Gold, 0.4f), 20.0f);
-			}
-			C->FillRoundRect({X, Base - H, Bw, H}, 10.0f, Paint::Linear({0.0f, Base - H}, {0.0f, Base}, NetA(Kc, 0.95f), NetA(Kc, 0.18f)));
-			NetSpaced(*C, Labels[K], X + Bw / 2.0f, Base - H + 20.0f, 9.5f, 900, rlsites_detail::SitesTone(0x07121c), 1.0f, Align::Center);
-			UI.Text(Buys[K], X + Bw / 2.0f, Base - H + 42.0f, Ts(15.0f, 900, rlsites_detail::SitesTone(0x07121c), Align::Center));
-			if (K < 4)
-			{
-				net::EventInstance Next;
-				if (Net.Next(Ids[K], World, Next))
-				{
-					UI.Text(net::TimeLabel(Next.Start), X + Bw / 2.0f, Base + 20.0f, Ts(11.5f, 700, pal::Muted, Align::Center));
-				}
-			}
-			else
-			{
-				NetTrophy(*C, X + Bw / 2.0f, Base - H - 58.0f, 48.0f, Hex(0xffe08a), Hex(0xc9962b));
-				UI.Text(HasMain ? NetUpper(net::DateLabel(net::DayOf(Main.Start))) : std::string(), X + Bw / 2.0f, Base + 20.0f, Ts(11.5f, 700, pal::Gold, Align::Center));
-			}
-		}
-		// You are here: the highest step the player holds a ticket for.
-		int Here = 0;
-		const char* Tickets[4] = {"step2", "step3", "step4", "rcop-main"};
-		for (int K = 0; K < 4; ++K)
-		{
-			Here = S.Life.TicketsFor(Tickets[K]) > 0 ? K + 1 : Here;
-		}
-		const float Yx = Rt.X + 24.0f + Bw / 2.0f + Nf(Here) * (Bw + 8.0f);
-		const float Yy = Base - (70.0f + Nf(Here) * 58.0f) - 30.0f + Nf(std::sin(Now * 3.0)) * 3.0f;
-		NetPill(*C, "YOU \xC2\xB7 " + Money(S.BankrollCents), Yx - 38.0f, Yy - 24.0f, pal::Accent, true, 10.0f);
-		NetTriangle(*C, Yx, Yy + 2.0f, 10.0f, false, pal::Accent);
-		const float Cy = Base + 48.0f;
-		UI.RRect({Rt.X + 24.0f, Cy, Rt.W - 48.0f, 118.0f}, 10.0f, NetA(pal::Gold, 0.07f), NetA(pal::Gold, 0.35f));
-		UI.Text("$2.20 to a $5,250 seat.", Rt.X + 44.0f, Cy + 34.0f, Ts(20.0f, 900, pal::Ink));
-		NetParagraph(*C, (S.Unlocks() & net::UnlockSatellite) ? "Five steps to the Main Event and its $25,000,000 guarantee. Last year's champion won $4,108,220. Step 1 runs every four hours."
-															   : "Five steps to the Main Event and its $25,000,000 guarantee. Last year's champion won $4,108,220. Make a final table to unlock satellites.",
-			Rt.X + 44.0f, Cy + 60.0f, Rt.W - 88.0f, 13.5f, 500, rlsites_detail::SitesTone(0xc9d3e2), 19.0f, 3);
 	}
 	else
 	{
@@ -3389,8 +3545,9 @@ void RiverLine::BoardsPage(double Now)
 		Ends = life::NightShiftStart(World) + 12.0 * 60.0;
 		break;
 	case net::Board::Season:
-		About = "Player of the Year " + Yr + ". Points from every final table since " + (BooksYear ? Opened + ", the night the record books opened" : std::string("January")) +
-			". The top three win RCOP " + std::to_string(Year + 1) + " Platinum Passes worth $25,000.";
+		// Update 4 G1 (SPEC v1.7 §2.8.9, §12 FD-4; F-hubs FH-3a): the board's prize claim goes because nothing pays it (W5); the Platinum
+		// Pass keeps its name wherever else the game prints it.
+		About = "Player of the Year " + Yr + ". Points from every final table since " + (BooksYear ? Opened + ", the night the record books opened" : std::string("January")) + ".";
 		Ends = YearEnds;
 		break;
 	case net::Board::Earnings:
@@ -3401,13 +3558,21 @@ void RiverLine::BoardsPage(double Now)
 	case net::Board::Wins: About = "Tournament titles won in " + Yr + ". Anyone can run deep once."; Ends = YearEnds; break;
 	case net::Board::FinalTables: About = "Final tables reached in " + Yr + ". The consistency board."; Ends = YearEnds; break;
 	case net::Board::Series:
+		// Update 4 G1 (SPEC v1.7 §2.8.9, U25; F-hubs FH-3a): no code pays a series board, so its copy says what scores. A festival's
+		// leader takes the belt and (kCrownTickets) a seat in the next edition's Main Event; the last edition on the calendar the belt.
 		if (Blank && Sr && Sr->FirstDay < net::NightOneDay)
 		{
-			About = "Points from every final table at " + Sr->Name + ", from " + Opened + ": the series opened before the record books did. The top three win RCOP Main Event packages.";
+			About = "Points from every cash at " + Sr->Name + ", from " + Opened + ": the series opened before the record books did.";
 		}
 		else
 		{
-			About = "Points from every final table at " + (Sr ? Sr->Name : std::string("the series")) + ". The top three win RCOP Main Event packages.";
+			About = "Points from every cash at " + (Sr ? Sr->Name : std::string("the series")) + ".";
+		}
+		if (const fest::Festival* Ed = Sr && Sr->Festival ? fest::FestivalOf(Sr->Id) : nullptr)
+		{
+			const fest::Festival* NextEd = rlfest_detail::FestNextEdition(*Ed);
+			About += fest::kCrownTickets && NextEd ? " The leader takes the belt and a seat in the next " + fest::NameAfterArticle(NextEd->Name) + " Main Event."
+												   : std::string(" The leader takes the belt.");
 		}
 		Ends = Sr ? static_cast<double>(Sr->LastDay + 1) * net::MinutesPerDay : -1.0;
 		break;
@@ -3467,17 +3632,33 @@ void RiverLine::BoardsPage(double Now)
 		}
 		Y += 26.0f * 7.0f + 12.0f;
 	}
-	else if (!Rival && (BoardShown == net::Board::Season || BoardShown == net::Board::Series))
+	else if (!Rival && BoardShown == net::Board::Series && Sr && Sr->Festival && fest::FestivalOf(Sr->Id))
 	{
-		Section("PRIZES", Rt.X + 26.0f, Y, pal::Gold);
-		const char* Prizes[3] = {BoardShown == net::Board::Season ? "Platinum Pass + $10,000" : "RCOP Main package ($6,500)", BoardShown == net::Board::Season ? "Platinum Pass + $5,000" : "RCOP Main package ($6,500)",
-			BoardShown == net::Board::Season ? "Platinum Pass" : "RCOP Main package ($6,500)"};
-		for (int I = 0; I < 3; ++I)
+		// Update 4 G1 (SPEC v1.7 §2.8.9; F-hubs FH-3a): a festival's PRIZES panel becomes THE BELT: the marks legend (U8's five marks, the
+		// race's dots) and the crown tickets beside the three that earn them ("A seat in the next Main Event", U28, while kCrownTickets
+		// and the calendar holds a next edition). A plain series and the Season board draw no prize panel: nothing pays them (FD-4).
+		Section("THE BELT", Rt.X + 26.0f, Y, pal::Gold);
+		const bool Seats = fest::kCrownTickets && rlfest_detail::FestNextEdition(*fest::FestivalOf(Sr->Id)) != nullptr;
+		const char* Marks[5] = {"THE BELT", "PODIUM", "FINALIST", "TOP 10%", "TOP 25%"};
+		const Color Dots[4] = {pal::Gold, Hex(0xc9d3e0), pal::Accent, Hex(0xd08c4f)};
+		for (int I = 0; I < 5; ++I)
 		{
-			UI.Text(Ordinal(I + 1), Rt.X + 26.0f, Y + 28.0f + Nf(I) * 26.0f, Ts(14.0f, 700, pal::Muted));
-			UI.Text(Prizes[I], Rt.X + Rt.W - 26.0f, Y + 28.0f + Nf(I) * 26.0f, Ts(14.0f, 800, pal::Gold, Align::Right));
+			const float Ry = Y + 28.0f + Nf(I) * 26.0f;
+			if (I < 4)
+			{
+				C->FillCircle(Rt.X + 30.0f, Ry - 4.5f, 4.0f, Dots[I]);
+			}
+			else
+			{
+				C->StrokeEllipse(Rt.X + 30.0f, Ry - 4.5f, 3.25f, 3.25f, pal::Muted, 1.5f);
+			}
+			UI.Text(Marks[I], Rt.X + 42.0f, Ry, Ts(14.0f, 700, I == 0 ? pal::Gold : pal::Muted));
+			if (Seats && I < 3)
+			{
+				UI.Text("A seat in the next Main Event", Rt.X + Rt.W - 26.0f, Ry, Ts(14.0f, 700, pal::Gold, Align::Right));
+			}
 		}
-		Y += 26.0f * 4.0f;
+		Y += 26.0f * 6.0f;
 	}
 	if (!Rival && (BoardShown == net::Board::Season || BoardShown == net::Board::Live))
 	{
@@ -4124,6 +4305,13 @@ void RiverLine::CareerPage(double Now)
 		bool Locked;
 	};
 	const bool Satellites = (S.Unlocks() & net::UnlockSatellite) != 0;
+	// Update 4 G1 (SPEC v1.7 §2.8.8, U24; F-hubs FH-3a): the two RCOP goals read the sim: the seat's buy-in from the edition's Main
+	// template (the one on stage or next to open), and " Last year: {Prize}." only once the world's roll holds last year's Main.
+	const fest::Festival* RcopEd = rlfest_detail::RcopGoalEdition(net::DayOf(World));
+	const net::EventTemplate* RcopMain = Net.FindTemplate(RcopEd ? RcopEd->MainId : std::string("rcop-main"));
+	const std::string RcopSeatGoal = "Win a " + net::BuyIn(RcopMain ? RcopMain->BuyInCents : 0) + " seat to the RCOP Main Event.";
+	const std::string RcopLast = RcopEd ? rlfest_detail::FestLastYear(S.Living(), *RcopEd) : std::string();
+	const std::string RcopWinGoal = "Win the RCOP Main Event." + (RcopLast.empty() ? std::string() : " " + RcopLast);
 	bool NightMoney = NightRank > 0 && NightRank <= 20;
 	for (const life::LedgerEntry& E : S.Life.Ledger)
 	{
@@ -4136,8 +4324,8 @@ void RiverLine::CareerPage(double Now)
 		{"Night Shift top 20", "Finish a night in the leaderboard's money.", NightMoney, false},
 		{"Series title", "Win an event in any RiverLine series.", You.SeriesTitles > 0, false},
 		{"Make rent", "Pay the $1,225 before Friday midnight.", S.Life.RentsPaid > 0, false},
-		{"Road to the Main", "Win a $5,250 seat to the RCOP Main Event.", S.Life.TicketsFor("rcop-main") > 0, !Satellites},
-		{"Life changer", "Win the RCOP Main Event. Last year: $4,108,220.", false, true},
+		{"Road to the Main", RcopSeatGoal, S.Life.TicketsFor("rcop-main") > 0, !Satellites},
+		{"Life changer", RcopWinGoal, false, true},
 	};
 	int DoneCount = 0;
 	for (const Step& St : Path)
