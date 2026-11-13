@@ -1,6 +1,7 @@
 #include "ShortStack/Game/Sites.h"
 
 #include "SitesDetail.h"
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Rep.h"
 #include "ShortStack/Game/Session.h"
@@ -124,6 +125,10 @@ SiteDef SitesIgnite()
 	// (Update 2's answer was 150; a "no" is this one constant back to 150).
 	D.Gate.MinEvents = 60;
 	D.Gate.MinRentsPaid = 2;
+	// Update 4 G1 (SPEC v1.7 §2.10, [ASK] 4 answered "the Festival Pass"; FW-7): while Ignite's festival is Announced, in Buildup or
+	// Live, two rents alone open the door for its first edition and 20 paid online events from its second (fest::PassNeeds). The
+	// other answers are 0 (two rents alone, every edition) and -1 (no Pass).
+	D.Gate.FestivalEvents = fest::kPassEvents;
 	D.LaunchDay = 28; // Mon Nov 2, 2026
 	return D;
 }
@@ -185,6 +190,8 @@ SiteDef SitesRunItTwice()
 	D.Gate.MinEvents2 = 150;
 	D.Gate.MinAbi100_2 = 550;
 	D.Gate.IgniteLevel = 20;
+	// Update 4 G1 (SPEC v1.7 §2.10; FW-7): the Festival Pass, as Ignite's: two rents for a first edition, 20 paid online events after.
+	D.Gate.FestivalEvents = fest::kPassEvents;
 	D.LaunchDay = NightOneDay; // its new lobby opened Tue Oct 6, 2026
 	return D;
 }

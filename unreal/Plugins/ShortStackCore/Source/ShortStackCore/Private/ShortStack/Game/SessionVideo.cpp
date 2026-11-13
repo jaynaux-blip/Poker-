@@ -1,4 +1,5 @@
 #include "ShortStack/Game/Session.h"
+#include "SessionFestDetail.h"
 #include "SessionHold.h"
 
 #include "ShortStack/Cards.h"
@@ -56,8 +57,44 @@ void AfterUpload(life::State& L, const std::vector<HistoryEntry>& History, const
 
 namespace session_video_detail
 {
-/** The life beats a story candidate is cut from (§4.4), by the StoryText key the session already sends once. */
+/** The life beats a story candidate is cut from (§4.4), by the StoryText key the session already sends once. Update 4 G1 (SPEC v1.7
+ *  §2.9.4; FW-5): and Festival Season's three prefixes, fest-main-, fest-belt- and fest-ft- (one key an edition, matched with
+ *  rfind(prefix, 0) == 0: session_fest_detail::FestStoryPrefix), their facts packed when the story is noted (FestStoryFill). */
 const char* const StoryKeys[] = {"rent-paid", "seat-rcop-main", "bracelet-first", "ring-first", "mm-title", "series-title"};
+
+/** The festival texts the session sent, in key order (TextsSeen's "fest-" run), for the story prefixes to match. */
+std::vector<std::string> FestStoryKeysSeen(const std::set<std::string>& TextsSeen)
+{
+	std::vector<std::string> Out;
+	for (auto It = TextsSeen.lower_bound("fest-"); It != TextsSeen.end() && It->compare(0, 5, "fest-") == 0; ++It)
+	{
+		if (session_fest_detail::FestStoryPrefix(*It) >= 0)
+		{
+			Out.push_back(*It);
+		}
+	}
+	return Out;
+}
+
+/** Festival stories waiting for their facts (§2.9.4): each open festival story is a series event's (Rerun's x1.3), its V1-V9 facts
+ *  (festival, trophy, buy-in, events, place) packed as display facts when it's noted. A candidate's facts are saved only with an idea
+ *  (video::Channel's open line), so a reloaded festival story reads them again from the world's same records (the edition, the hero's
+ *  results). */
+void FestStoryFill(video::Channel& C, const world::World& W)
+{
+	for (video::Candidate& X : C.Open)
+	{
+		if (X.K != video::Kind::Story || !X.IdeaFacts.empty() || session_fest_detail::FestStoryPrefix(X.Event) < 0)
+		{
+			continue;
+		}
+		X.Series = true;
+		for (const std::pair<std::string, std::string>& F : session_fest_detail::FestStoryFacts(W, X.Event))
+		{
+			X.IdeaFacts += (X.IdeaFacts.empty() ? "" : ";") + F.first + "=" + video::vcontent::FactEsc(F.second);
+		}
+	}
+}
 
 /** The key for "back home after an eviction": one per eviction. */
 std::string BackKey(int Evictions)
@@ -85,6 +122,10 @@ void MarkOldStories(life::State& L, const std::set<std::string>& TextsSeen, bool
 		{
 			L.Video.Paid.insert(std::string("story:") + Key);
 		}
+	}
+	for (const std::string& Key : FestStoryKeysSeen(TextsSeen))
+	{
+		L.Video.Paid.insert("story:" + Key);
 	}
 	for (int N = 1; N <= L.Evictions; ++N)
 	{
@@ -1187,6 +1228,14 @@ void Session::VideoStep(double From, double To)
 		}
 		video::NoteStory(Life.Video, Key, To);
 	}
+	for (const std::string& Key : FestStoryKeysSeen(TextsSeen))
+	{
+		if (Life.Video.Paid.count("story:" + Key) == 0)
+		{
+			video::NoteStory(Life.Video, Key, To);
+		}
+	}
+	FestStoryFill(Life.Video, LivingWorld);
 	if (Life.Evictions > 0 && !Evicted())
 	{
 		video::NoteStory(Life.Video, BackKey(Life.Evictions), To);

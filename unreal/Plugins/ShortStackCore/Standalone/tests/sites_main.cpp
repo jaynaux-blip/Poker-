@@ -1769,7 +1769,16 @@ void Invitations()
 	// Update 3 G2 (SPEC §11 Q4 as the user answered it on 2026-10-27; core-sites-g2's listed deliberate rewrites of Update 2's
 	// gate checks): Ignite at 60 paid online events (was 150); RunItTwice also at 150 at a $5.50 last-100 average (GateMet's Why
 	// 3) or at Ignite Level 20 (Why 4); every Update 2 door still opens it (Why 0, 1, 2); none of them before two rents.
-	const double After = (net::Def(net::SiteId::Ignite).LaunchDay + 3) * SitesDay + 600.0;
+	// Update 4 G1 (SPEC v1.7 §2.10 items 1 and 5; F-world's FW-7, fworld_to_fnet_3): the Festival Pass opens both rivals' doors on the two
+	// rents alone for a festival's first edition while it is Announced, in Buildup or Live (FEIGN I from Oct 31, so Ignite's opening
+	// week is inside it), so these doors are read on the first morning from Ignite's launch + 3 when neither site's Pass is open that
+	// day or the next (the Pass is festivals' FestPassGate's).
+	double After = (net::Def(net::SiteId::Ignite).LaunchDay + 3) * SitesDay + 600.0;
+	while (ss::fest::PassFestival(net::SiteId::Ignite, After) || ss::fest::PassFestival(net::SiteId::Ignite, After + SitesDay) ||
+		ss::fest::PassFestival(net::SiteId::RunItTwice, After) || ss::fest::PassFestival(net::SiteId::RunItTwice, After + SitesDay))
+	{
+		After += SitesDay;
+	}
 	const net::InviteGate& IgGate = net::Def(net::SiteId::Ignite).Gate;
 	const net::InviteGate& RtGate = net::Def(net::SiteId::RunItTwice).Gate;
 	Expect(IgGate.MinEvents == 60 && IgGate.MinRentsPaid == 2 && IgGate.MinEvents2 == 0 && IgGate.IgniteLevel == 0 && RtGate.MinEvents == 300 && RtGate.MinAbi100 == 1100 &&
