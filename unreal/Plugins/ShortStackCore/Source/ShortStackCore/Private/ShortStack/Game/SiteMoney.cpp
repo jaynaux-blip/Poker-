@@ -687,9 +687,22 @@ void Invite(Book& B, life::State& L, net::SiteId S, double World, int Why, bool 
 	Found->At = World;
 	Found->State = Second ? 3 : 0;
 	const std::string Key = std::string(Second ? "invite2:" : "invite:") + net::KeyOf(S);
-	// The reason is GateMet's (0 to 5: Update 4's Festival Pass is 5, §2.10, whose letter G1 writes); anything else (ss.Site.Invite
-	// past every gate passes -1) says hello and claims nothing.
-	const std::string Reason = Why >= 0 && Why <= 5 ? "why:" + std::to_string(Why) : std::string("why:hello");
+	// Update 4 G1 (SPEC v1.7 §2.10 items 2-3, §2.11 L1-L4; FW-7): when the Festival Pass opened the door (Why 5), the letter is the
+	// festival's own, invite:<key>:fest and its subject, naming the festival in its window, the day it opens and its Main's buy-in.
+	// Accepted, the account is an ordinary one; declined, the generic second letter comes 30 days on (Second, below).
+	const fest::Festival* PassFest = !Second && Why == 5 ? fest::PassFestival(S, World) : nullptr;
+	if (PassFest)
+	{
+		const net::EventTemplate* Main = net::ForEvent(PassFest->MainId).FindTemplate(PassFest->MainId);
+		const std::vector<std::pair<std::string, std::string>> FestVars = {
+			{"Festival", PassFest->Name}, {"Date", fest::DateInSentence(PassFest->FirstDay, net::DayOf(World))}, {"MainBuyIn", net::BuyIn(Main ? Main->BuyInCents : 0)}};
+		PostLetter(L, S, World, LetterInvite, FillCopy(SiteText(Key + ":fest:subject"), FestVars), FillCopy(SiteText(Key + ":fest"), FestVars));
+		L.Update2LinesRead |= life::U2Sites;
+		return;
+	}
+	// The reason is GateMet's (0 to 4; 5, the Pass, wrote its own letter above unless its festival had left the window); anything
+	// else (ss.Site.Invite past every gate passes -1) says hello and claims nothing.
+	const std::string Reason = Why >= 0 && Why <= 4 ? "why:" + std::to_string(Why) : std::string("why:hello");
 	const std::vector<std::pair<std::string, std::string>> Vars = {{"Why", SiteText(Reason)}};
 	PostLetter(L, S, World, LetterInvite, FillCopy(SiteText(Key + ":subject"), Vars), FillCopy(SiteText(Key), Vars));
 	L.Update2LinesRead |= life::U2Sites;
@@ -1161,9 +1174,14 @@ std::vector<life::Mark> Marks(const Book& B, double From, double To)
 		{
 			Add(A.BonusExpires, MarkBonus, FillCopy(SiteText("mark:bonus"), {{"Site", SiteName(A.Site)}}), SiteName(A.Site));
 		}
-		// A joined rival's series start days.
+		// A joined rival's series start days. Update 4 G1 (SPEC v1.7 §2.9.1; FW-7): a festival series is fest::Marks' (FESTIVAL and
+		// MAIN for all ten, account or not, merged by Session::Marks), so it never reads SERIES here too.
 		for (const net::SeriesInfo& S : net::Site(A.Site).Series())
 		{
+			if (S.Festival)
+			{
+				continue;
+			}
 			const double Starts = static_cast<double>(S.FirstDay) * SiteDay;
 			if (Starts >= From && Starts <= To)
 			{
