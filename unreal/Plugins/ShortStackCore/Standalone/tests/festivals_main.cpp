@@ -46,7 +46,8 @@
 // (fest::Inventory, F-world's fest::TextInventory and the sites' copy table, site::Copy and site::CopyLabels, F-world's 27 festival rows
 // found by FW-1's key list) through one set of rules by kind (FestNetCopyWhy: the festival-only rules on festival strings), with
 // FestChampWord and §2.11's championship rule by site (no Ignite string holds "championship"; RunItTwice's only as "the club's
-// championship"), also over every series and template on Ignite and RunItTwice; and FestRcopKept lands: RCOP's strings and the six
+// championship"; a shared festival template is judged on its PENNANT fill as Ignite's and on its REIGN fill as RunItTwice's; no
+// headline title holds it), also over every series and template on Ignite and RunItTwice; and FestRcopKept lands: RCOP's strings and the six
 // tournament names the game already prints, kept and screened. SitesCopy (rival_sites) screens SeriesInfo::Title too.
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
 #include "CopyLint.h"
@@ -2039,15 +2040,31 @@ std::string FestNetChampSite(const std::string& Text, bool IgniteRow, bool RitRo
 	return std::string();
 }
 
+/** A shared festival template (FN-4b, fix round 1): one that names its festival through {Festival}, {FESTIVAL}, {Short} or {SHORT},
+ *  so it prints for any festival's edition, Ignite's PENNANT and RunItTwice's REIGN among them. */
+bool FestNetHoldsFestival(const std::string& Template)
+{
+	for (const char* Var : {"{Festival}", "{FESTIVAL}", "{Short}", "{SHORT}"})
+	{
+		if (Template.find(Var) != std::string::npos)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 /** FestCopy's rules for one inventory string (FN-2a's, shared by every core inventory from FN-4b): its kind's length cap and stop rule
  *  (label and subject: no closing stop, 200; sentence: a stop, 600; text: 84; headtitle: 120; headbody: 200 and a stop; journey: 120
  *  and a stop), filled from the samples (Filled gets the fill) through CopyLint, both trademark tiers, U1, FestChampWord, §2.11's
- *  championship rule by site (on the Ignite fill and on a RunItTwice fill), the glyph rule (ASCII and · — – … é ’), the article rule
- *  (no "the The" with The Championship Online 2027) and the year (a next year's {Date} prints it); a festival string also the design
- *  words, X1 ("players"), DESIGN §2.6's avoided words with "marquee" and "pavilion", and no *COOP form (§1.2 items 1, 3-5: the sites'
- *  older copy keeps its "The Spark", "tier" and "players"). "" when it passes, else the reasons. */
+ *  championship rule by site (on the Ignite fill and on a RunItTwice fill; a shared festival template that is no row of one site's,
+ *  OneSite false, is an Ignite string on its PENNANT fill and a RunItTwice string on its REIGN fill), no "championship" in a headline
+ *  title (HeadTitle: a head:*:title row of the copy table or a "headtitle" entry, §2.11's FestCopy row), the glyph rule (ASCII and
+ *  · — – … é ’), the article rule (no "the The" with The Championship Online 2027) and the year (a next year's {Date} prints it); a
+ *  festival string also the design words, X1 ("players"), DESIGN §2.6's avoided words with "marquee" and "pavilion", and no *COOP
+ *  form (§1.2 items 1, 3-5: the sites' older copy keeps its "The Spark", "tier" and "players"). "" when it passes, else the reasons. */
 std::string FestNetCopyWhy(const std::string& Kind, const std::string& Text, const std::map<std::string, std::string>& Vars, bool Festival, bool IgniteRow,
-	bool RitRow, const std::string& NextYear, std::string& Filled)
+	bool RitRow, bool OneSite, bool HeadTitle, const std::string& NextYear, std::string& Filled)
 {
 	size_t Cap = copylint::LetterBody;
 	bool Stop = true;
@@ -2098,14 +2115,24 @@ std::string FestNetCopyWhy(const std::string& Kind, const std::string& Text, con
 		Why += Festival && trademarks::HasWord(Low, W) ? std::string(" avoided: ") + W : std::string();
 	}
 	Why += Festival && Low.find("coop") != std::string::npos ? " a *COOP form" : "";
+	// The championship rule by site: Vars is the PENNANT fill (Ignite's); a shared festival template is an Ignite string there and a
+	// RunItTwice string on its REIGN fill.
+	const bool Shared = !OneSite && FestNetHoldsFestival(Text);
 	Why += FestNetChampWord(Filled) ? " FestChampWord" : "";
-	Why += FestNetChampSite(Filled, IgniteRow, RitRow);
+	Why += FestNetChampSite(Filled, IgniteRow || Shared, RitRow);
 	std::map<std::string, std::string> Rit = Vars;
 	Rit["Site"] = "RunItTwice";
-	Rit["Festival"] = "REIGN";
+	for (const char* Var : {"Festival", "FESTIVAL", "Short", "SHORT"})
+	{
+		Rit[Var] = "REIGN";
+	}
 	const std::string RitFilled = FestNetFill(Text, Rit);
 	Why += FestNetChampWord(RitFilled) ? " FestChampWord (RunItTwice fill)" : "";
-	Why += FestNetChampSite(RitFilled, IgniteRow, RitRow);
+	Why += FestNetChampSite(RitFilled, IgniteRow, RitRow || Shared);
+	// No headline title holds "championship" (§2.11), in its template or either fill.
+	const bool HeadChamp = trademarks::Lower(Text).find("championship") != std::string::npos ||
+		trademarks::Lower(Filled).find("championship") != std::string::npos || trademarks::Lower(RitFilled).find("championship") != std::string::npos;
+	Why += HeadTitle && HeadChamp ? " a headline title holds \"championship\"" : "";
 	// The glyph rule: ASCII plus · — – … é ’ (no ×).
 	for (size_t K = 0; K < Filled.size(); ++K)
 	{
@@ -2153,14 +2180,17 @@ const char* const FestNetSiteKeys[] = {"news:fest:announce:title", "news:fest:an
  *  string by its kind through FestNetCopyWhy (CopyLint, both trademark tiers, U1, FestChampWord, the championship rule by site, the
  *  glyphs, the article and the year for every string; the design words, X1, the avoided words and *COOP for the festival strings),
  *  filled from the samples (copylint's, sites_main's SitesCopy values and fworld_to_fnet_1's); no rival festival name, Short, Title,
- *  tagline, event name, blurb, seats text or trophy holds "championship"; no Ignite string on Ignite's site (its series, templates
- *  and page words) holds it at all, and RunItTwice's only as "the club's championship" in body copy, never in a name; every
+ *  tagline, event name, blurb, seats text, trophy or headline title (a "headtitle" entry, or a copy-table title row keyed head:*:title)
+ *  holds "championship"; no Ignite string on Ignite's site (its series, templates and page words) holds it at all, nor a shared
+ *  festival template ({Festival}, {FESTIVAL}, {Short} or {SHORT}, no row of one site's) on its PENNANT fill, and RunItTwice's (and a
+ *  shared template on its REIGN fill) only as "the club's championship" in body copy, never in a name; every
  *  {Festival} template filled again with "The Championship Online 2027" holds no "the The" and every {Date} a next year's date with
  *  its year; NameAfterArticle and DateInSentence answer §1.2 item 13's forms. Planted: "players" in a count; "GRIT Championship" as a
  *  Title; "Ignite's championship" in a tagline; NameAfterArticle and DateInSentence left at H0's stubs; PUSH's tagline without its
  *  closing stop (FN-2b); FN-4b: "players" in the record News sentence; "PUSH Championship" as a Title; "Ignite's championship" in
  *  Ignite's championship announcement (News); "RunItTwice's championship" in RunItTwice's; "marquee" in a Dee text; "championship"
- *  in an Ignite weekly's blurb. */
+ *  in an Ignite weekly's blurb; FN-4b's fix round 1: "Championship" in head:fest:main:title, "the club's championship" in
+ *  head:fest:crown:title (the headline rule alone) and "championship" in Dee's shared T9 (the PENNANT fill's rule alone). */
 void FestCopyNet()
 {
 	namespace fest = ss::fest;
@@ -2171,7 +2201,7 @@ void FestCopyNet()
 		{"MiniBuyIn", "$22"}, {"Step1", "$1.10"}, {"MainDate", "Apr 11"}, {"Nights", "14"}, {"Show1", "7 PM"}, {"Show2", "10 PM"}, {"Prize", "$41,280"},
 		{"Trophy", "The Gold Pennant"}, {"Points", "1,284"}, {"Cashes", "9"}, {"Year", "2027"}, {"K", "2"}, {"MARK", "FINALIST"}, {"Rank", "14"}, {"Scorers", "608"},
 		{"SatBuyIn", "$22"}, {"TROPHY", "THE GOLD PENNANT"}, {"BuyIn", "$2.20"}, {"N", "3"}, {"A", "PENNANT"}, {"B", "REIGN"}, {"C", "RCOP"}, {"MonthA", "April"},
-		{"MonthB", "August"}};
+		{"MonthB", "August"}, {"FESTIVAL", "PENNANT"}, {"Short", "PENNANT"}, {"SHORT", "PENNANT"}};
 	for (const auto& Kv : Extra)
 	{
 		Vars[Kv.first] = Kv.second;
@@ -2184,11 +2214,13 @@ void FestCopyNet()
 	const std::string NextYear = fest::DateInSentence(ss::world::DayOn(2027, 3, 30), Today);
 
 	// The core inventories, each entry with its source, kind and rules (FN-4b).
+	// OneSite: a copy-table row of one site's (its key names Ignite, RunItTwice or RiverLine), never a shared festival template;
+	// HeadTitle: a headline title (a "headtitle" entry, or a copy-table title row whose key starts with head: and ends with :title).
 	struct FestNetCore
 	{
 		const char* Source;
 		std::string Kind, Text;
-		bool Festival, IgniteRow, RitRow;
+		bool Festival, IgniteRow, RitRow, OneSite, HeadTitle;
 	};
 	std::vector<FestNetCore> Core;
 	for (const char* Source : {"fest::Inventory", "fest::TextInventory"})
@@ -2196,12 +2228,14 @@ void FestCopyNet()
 		for (const std::string& Entry : std::string(Source) == "fest::Inventory" ? fest::Inventory() : fest::TextInventory())
 		{
 			const size_t Tab = Entry.find('\t');
-			Core.push_back({Source, Tab == std::string::npos ? std::string() : Entry.substr(0, Tab), Tab == std::string::npos ? Entry : Entry.substr(Tab + 1), true, false, false});
+			const std::string Kind = Tab == std::string::npos ? std::string() : Entry.substr(0, Tab);
+			Core.push_back({Source, Kind, Tab == std::string::npos ? Entry : Entry.substr(Tab + 1), true, false, false, false, Kind == "headtitle"});
 		}
 	}
 	std::map<std::string, std::string> FestRows; // text -> its key
 	std::string Unkeyed;
 	int Keys = 0;
+	std::set<std::string> KeyWords;
 	for (const char* Key : FestNetSiteKeys)
 	{
 		const std::string Text = ss::site::CopyText(Key);
@@ -2210,6 +2244,46 @@ void FestCopyNet()
 		if (!Text.empty())
 		{
 			FestRows[Text] = Key;
+		}
+		std::string Word;
+		for (const char C : std::string(Key) + ":")
+		{
+			if (C != ':')
+			{
+				Word += C;
+				continue;
+			}
+			KeyWords.insert(Word);
+			Word.clear();
+		}
+	}
+	// The headline titles of the copy table (it answers by key alone, site::CopyText): FW-1's head:*:title rows and any other
+	// head:<a>:title or head:<a>:<b>:title row the key list's words reach, each a title row (CopyLabels): head:fest:title is the
+	// title headline's body, a sentence.
+	std::set<std::string> HeadKeys;
+	for (const char* Key : FestNetSiteKeys)
+	{
+		const std::string K = Key;
+		if (K.rfind("head:", 0) == 0 && copylint::EndsWith(K, ":title"))
+		{
+			HeadKeys.insert(K);
+		}
+	}
+	for (const std::string& A : KeyWords)
+	{
+		HeadKeys.insert("head:" + A + ":title");
+		for (const std::string& B : KeyWords)
+		{
+			HeadKeys.insert("head:" + A + ":" + B + ":title");
+		}
+	}
+	std::set<std::string> HeadTexts;
+	for (const std::string& K : HeadKeys)
+	{
+		const std::string Text = ss::site::CopyText(K);
+		if (!Text.empty())
+		{
+			HeadTexts.insert(Text);
 		}
 	}
 	int SiteFest = 0;
@@ -2221,17 +2295,22 @@ void FestCopyNet()
 			const auto It = FestRows.find(S);
 			const std::string Key = It == FestRows.end() ? std::string() : It->second;
 			SiteFest += Key.empty() ? 0 : 1;
-			Core.push_back({Source, Sentences ? "sentence" : "label", S, !Key.empty(), Key.find(":ignite") != std::string::npos, Key.find(":runittwice") != std::string::npos});
+			const bool Ig = Key.find(":ignite") != std::string::npos;
+			const bool Rit = Key.find(":runittwice") != std::string::npos;
+			const bool Rl = copylint::EndsWith(Key, ":rl") || Key.find(":rl:") != std::string::npos;
+			Core.push_back({Source, Sentences ? "sentence" : "label", S, !Key.empty(), Ig, Rit, Ig || Rit || Rl, !Sentences && HeadTexts.count(S) > 0});
 		}
 	}
 	std::map<std::string, int> Entries;
 	int Problems = 0;
+	int Heads = 0;
 	std::string First;
 	for (const FestNetCore& C : Core)
 	{
 		++Entries[C.Source];
+		Heads += C.HeadTitle ? 1 : 0;
 		std::string Filled;
-		const std::string Why = FestNetCopyWhy(C.Kind, C.Text, Vars, C.Festival, C.IgniteRow, C.RitRow, NextYear, Filled);
+		const std::string Why = FestNetCopyWhy(C.Kind, C.Text, Vars, C.Festival, C.IgniteRow, C.RitRow, C.OneSite, C.HeadTitle, NextYear, Filled);
 		if (!Why.empty())
 		{
 			++Problems;
@@ -2240,11 +2319,13 @@ void FestCopyNet()
 		}
 	}
 	const int Ours = Entries["fest::Inventory"];
-	std::printf("  FestCopy: fest::Inventory %d, fest::TextInventory %d, site::Copy %d, site::CopyLabels %d entries (%d festival rows by FW-1's keys)\n", Ours,
-		Entries["fest::TextInventory"], Entries["site::Copy"], Entries["site::CopyLabels"], SiteFest);
+	std::printf("  FestCopy: fest::Inventory %d, fest::TextInventory %d, site::Copy %d, site::CopyLabels %d entries (%d festival rows by FW-1's keys, %d "
+				"headline titles)\n",
+		Ours, Entries["fest::TextInventory"], Entries["site::Copy"], Entries["site::CopyLabels"], SiteFest, Heads);
 	Expect(Ours > 0 && Entries["fest::TextInventory"] > 0 && Entries["site::Copy"] > 0 && Entries["site::CopyLabels"] > 0 && Problems == 0,
-		"every core inventory passes the copy lint by kind, both trademark tiers, U1, FestChampWord, the championship rule by site, the glyph rule and the article and "
-		"year rules, and its festival strings the design words, X1 and the avoided words (fest::Inventory " + std::to_string(Ours) + ", fest::TextInventory " +
+		"every core inventory passes the copy lint by kind, both trademark tiers, U1, FestChampWord, the championship rule by site (a shared festival template on "
+		"its PENNANT and REIGN fills), no \"championship\" in a headline title (" + std::to_string(Heads) + "), the glyph rule and the article and year rules, "
+		"and its festival strings the design words, X1 and the avoided words (fest::Inventory " + std::to_string(Ours) + ", fest::TextInventory " +
 			std::to_string(Entries["fest::TextInventory"]) + ", site::Copy " + std::to_string(Entries["site::Copy"]) + ", site::CopyLabels " +
 			std::to_string(Entries["site::CopyLabels"]) + "; " + std::to_string(Problems) + " problems)" + First);
 	Expect(Keys == static_cast<int>(sizeof(FestNetSiteKeys) / sizeof(FestNetSiteKeys[0])) && SiteFest == Keys,
