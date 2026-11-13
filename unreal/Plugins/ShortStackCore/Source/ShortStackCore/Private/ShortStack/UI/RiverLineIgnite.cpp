@@ -22,8 +22,10 @@
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/SiteShow.h"
 #include "ShortStack/Game/World.h"
+#include "ShortStack/Game/WorldFest.h"
 #include "ShortStack/UI/Avatars.h"
 #include "ShortStack/UI/EventArt.h"
+#include "ShortStack/UI/FestivalArt.h"
 #include "ShortStack/UI/SiteArt.h"
 #include "ShortStack/UI/SiteMotion.h"
 
@@ -783,12 +785,161 @@ void IgniteDock(IgniteCtx& X, bool FlipChip)
 
 // ------------------------------------------------------------------ PLAY: the Boardwalk (SPEC §2.4 A)
 
-/** The series running today on Ignite (Wildfire), or null. */
+/** The series running today on Ignite (Wildfire), or null. Update 4 G1 (SPEC v1.7 §2.7.4, FH-3b): a festival's days are its
+ *  takeover (the attraction, the Lighthouse's day line, the hub), never Wildfire's bunting and bonfires. */
 const net::SeriesInfo* IgniteWildfire(const net::Network& Net, double World)
 {
 	const net::SeriesInfo* Sr = Net.CurrentSeries(World);
 	const int Today = net::DayOf(World);
-	return Sr && Today >= Sr->FirstDay && Today <= Sr->LastDay ? Sr : nullptr;
+	return Sr && !Sr->Festival && Today >= Sr->FirstDay && Today <= Sr->LastDay ? Sr : nullptr;
+}
+
+/** Update 4 G1 (SPEC v1.7 §2.7.4, §2.1.4; F-hubs FH-3b): Ignite's festival on the boardwalk at World. Live: the edition whose days hold
+ *  today (fest::LiveOn; the band's attraction, chip 10, the floor's shelf, the Prize Counter's hand-over); else the edition on stage
+ *  (MainDay, Closing, Afterglow) before the next one's Buildup, as the hub's routing orders them (rlnet_detail::NetHubPick). The
+ *  Lighthouse reads Buildup, Live (MainDay and Closing: its last day) and Afterglow; Announced and Off draw today's boardwalk. */
+struct IgniteFestNow
+{
+	const fest::Festival* F = nullptr;
+	const net::SeriesInfo* Sr = nullptr;
+	fest::Phase P = fest::Phase::Off;
+	int Day = 0, Days = 0; // the festival's day (1 on FirstDay) of how many, while Live
+	bool Live() const { return F && Sr && Day >= 1 && Day <= Days; }
+	std::string Short() const { return Sr ? Sr->Short : std::string(); }
+};
+
+IgniteFestNow IgniteFestAt(double World)
+{
+	IgniteFestNow Out;
+	const net::Network& Net = net::Site(net::SiteId::Ignite);
+	const int Today = net::DayOf(World);
+	if (const fest::Festival* L = fest::LiveOn(net::SiteId::Ignite, Today))
+	{
+		Out.F = L;
+		Out.Sr = Net.FindSeries(L->SeriesId);
+		Out.P = fest::PhaseOf(*L, World, Net.Attached());
+		Out.Day = Today - L->FirstDay + 1;
+		Out.Days = L->LastDay - L->FirstDay + 1;
+		return Out;
+	}
+	// Closing holds until the crown and Afterglow runs kAfterglowDays past it (an edition never crowned goes Off two days after
+	// LastEnd, LEAD_CALLS R-13): a fortnight back holds every tail; Buildup opens kBuildupDays ahead.
+	constexpr int TailDays = 14;
+	for (const fest::Festival* F : fest::Festivals(Today - TailDays, Today + fest::kBuildupDays + 1))
+	{
+		if (F->Site != net::SiteId::Ignite)
+		{
+			continue;
+		}
+		const fest::Phase P = fest::PhaseOf(*F, World, Net.Attached());
+		if (P == fest::Phase::Buildup || P == fest::Phase::MainDay || P == fest::Phase::Closing || P == fest::Phase::Afterglow || P == fest::Phase::Live)
+		{
+			Out.F = F;
+			Out.Sr = Net.FindSeries(F->SeriesId);
+			Out.P = P;
+			Out.Days = F->LastDay - F->FirstDay + 1;
+			return Out;
+		}
+	}
+	return Out;
+}
+
+/** The Afterglow's champion (§2.6.2): the edition's Main Event winner on the world's roll, "" before the crown (or with no world). */
+std::string IgniteFestChampion(const fest::Festival& F)
+{
+	const world::World* W = net::Site(net::SiteId::Ignite).Attached();
+	if (!W)
+	{
+		return std::string();
+	}
+	for (const world::FestRollRow& Row : world::FestRoll(*W, F.Which))
+	{
+		if (Row.Key == F.SeriesId && Row.Main)
+		{
+			return Row.Main->Name;
+		}
+	}
+	return std::string();
+}
+
+/** The Lighthouse's festival line (U15; §2.7.4): "{SHORT} · OPENS IN {D}D" in the Buildup, "{SHORT} · DAY {N} OF {M}" while Live (its
+ *  last day through Closing), "{SHORT} CHAMPION · {NAME}" in the Afterglow; "" when the sign keeps today's line (no festival on stage,
+ *  or an Afterglow whose champion the world hasn't crowned). Every figure from the edition and the clock. */
+std::string IgniteLighthouseLine(const IgniteFestNow& Fs, double World, const std::string& Champion)
+{
+	if (!Fs.F || !Fs.Sr)
+	{
+		return std::string();
+	}
+	const int Today = net::DayOf(World);
+	switch (Fs.P)
+	{
+	case fest::Phase::Buildup: return Fs.Short() + " \xC2\xB7 OPENS IN " + std::to_string(std::max(1, Fs.F->FirstDay - Today)) + "D";
+	case fest::Phase::Live:
+	case fest::Phase::MainDay:
+	case fest::Phase::Closing:
+	{
+		const int Days = Fs.F->LastDay - Fs.F->FirstDay + 1;
+		const int Day = std::min(Days, std::max(1, Today - Fs.F->FirstDay + 1));
+		return Fs.Short() + " \xC2\xB7 DAY " + std::to_string(Day) + " OF " + std::to_string(Days);
+	}
+	case fest::Phase::Afterglow: return Champion.empty() ? std::string() : Fs.Short() + " CHAMPION \xC2\xB7 " + IgniteUpper(Champion);
+	default: break;
+	}
+	return std::string();
+}
+
+/** The Lighthouse's festival line at World as the boardwalk draws it ("" for today's line): u4_ui's FestCopyUi checks U15's figures
+ *  against the edition through it. */
+std::string IgniteLighthouseAt(double World)
+{
+	const IgniteFestNow Fs = IgniteFestAt(World);
+	return IgniteLighthouseLine(Fs, World, Fs.P == fest::Phase::Afterglow && Fs.F ? IgniteFestChampion(*Fs.F) : std::string());
+}
+
+/** FestBandstandPick (SPEC v1.7 §2.7.4, §2.15.2; F-hubs FH-3b): while a festival is Live on Ignite the bandstand features its latest
+ *  event starting later that day ("FEIGN TONIGHT · #9", U32), else nothing (The Spark, or what's up next, as today). Label is the
+ *  bandstand's line; the pick is a pure function of the clock (u4_ui calls it on the real calendar). */
+bool IgniteBandstandFest(double World, net::EventInstance& Out, std::string& Label)
+{
+	const IgniteFestNow Fs = IgniteFestAt(World);
+	if (!Fs.Live())
+	{
+		return false;
+	}
+	const net::Network& Net = net::Site(net::SiteId::Ignite);
+	const double DayEnd = (std::floor(World / net::MinutesPerDay) + 1.0) * net::MinutesPerDay;
+	bool Has = false;
+	for (const net::EventInstance& E : Net.Window(World, DayEnd))
+	{
+		const net::EventTemplate& T = Net.TemplateOf(E);
+		if (E.Start > World && E.Start < DayEnd && T.Series == Fs.F->SeriesId && (!Has || E.Start >= Out.Start))
+		{
+			Out = E;
+			Has = true;
+		}
+	}
+	if (Has)
+	{
+		Label = Fs.Short() + " TONIGHT \xC2\xB7 #" + std::to_string(Net.TemplateOf(Out).EventNo);
+	}
+	return Has;
+}
+
+/** Chip 10 (SPEC v1.7 §2.7.4): the festival's chip, drawn second after All while a festival is Live on Ignite (the ten existing
+ *  indices and IgniteChipKeeps' cases hold). */
+constexpr int IgniteFestChip = 10;
+
+/** Chip 10's rows: the festival's own (template series) and its satellites (fest::Festival::Satellites). */
+bool IgniteFestKeeps(const fest::Festival& F, const net::EventTemplate& T)
+{
+	return T.Series == F.SeriesId || std::find(F.Satellites.begin(), F.Satellites.end(), T.Id) != F.Satellites.end();
+}
+
+/** The festival's title templates (the Main, or a championship's trio): the floor's shelf ends on their own cabinets (§2.7.4). */
+bool IgniteFestTitle(const fest::Festival& F, const net::EventTemplate& T)
+{
+	return std::find(F.TitleIds.begin(), F.TitleIds.end(), T.Id) != F.TitleIds.end() || T.Id == F.MainId;
 }
 
 /** A sign's hotspot: a glow when the pointer's over it; true on a click. */
@@ -827,13 +978,28 @@ void IgniteBoardwalk(IgniteCtx& X)
 	const net::SeriesInfo* Fire = IgniteWildfire(Net, X.World);
 	B.Wildfire = Fire != nullptr;
 	B.SkinKey = Skin::Current().Key();
-	// The static skyline, cached in the Boardwalk pool per mood and skin (≤ 12k vertices, SPEC §10).
+	// Update 4 G1 (SPEC v1.7 §2.7.4, FH-3b): the festival Live on Ignite and its day of how many, for F-look's attraction (FEIGN's
+	// arch, PUSH's tower, PENNANT's pavilion; drawn only while 1 <= FestDay <= FestDays).
+	const IgniteFestNow Fest = IgniteFestAt(X.World);
+	if (Fest.Live())
+	{
+		B.Fest = Fest.F->Which;
+		B.FestDay = Fest.Day;
+		B.FestDays = Fest.Days;
+	}
+	// The static skyline, cached in the Boardwalk pool per mood and skin (≤ 12k vertices, SPEC §10), and per attraction: the static
+	// layer draws the brand's attraction (never the day's number), so the brand joins the key while one stands (a festival-free
+	// boardwalk keeps today's key).
 	{
 		uint64_t Key = 0xcbf29ce484222325ull;
 		const uint32_t Parts[3] = {static_cast<uint32_t>(K.Mood), K.Night ? 1u : 0u, 0x1640a7u};
 		for (uint32_t P : Parts)
 		{
 			Key = (Key ^ P) * 0x100000001b3ull;
+		}
+		if (B.Fest != fest::Brand::None)
+		{
+			Key = (Key ^ (0xf0000u | static_cast<uint32_t>(B.Fest))) * 0x100000001b3ull;
 		}
 		Key = (Key ^ B.SkinKey) * 0x100000001b3ull;
 		C.Cached(Key, 0.0f, 0.0f, [&B](Canvas& At) { IgniteBoardwalkStatic(At, B); }, Canvas::CachePool::Boardwalk);
@@ -845,12 +1011,19 @@ void IgniteBoardwalk(IgniteCtx& X)
 		At.Text(std::to_string(static_cast<int>(K.Bpm)) + " BPM", 1576.0f, 106.0f, IgniteTx(8.5f, 700, IgniteHx(K.Cream, 0.5f), Align::Right));
 	}, Canvas::CachePool::Boardwalk);
 
-	// The Lighthouse: the Sunday Blaze's countdown (or, while Wildfire runs, the series' sign, opening SERIES).
+	// The Lighthouse: the Sunday Blaze's countdown (or, while Wildfire runs, the series' sign, opening SERIES). Update 4 G1 (SPEC
+	// v1.7 §2.7.4, U15; FH-3b): a festival on stage takes the sign from its Buildup to its Afterglow, and a click opens its hub.
 	{
 		const Rect Sign{16.0f, 268.0f, 152.0f, 28.0f};
+		const std::string FestLine = IgniteLighthouseAt(X.World);
 		if (IgniteHotspot(X, "iglight", {28.0f, 88.0f, 128.0f, 208.0f}, 18.0f) || IgniteHotspot(X, "iglightsign", Sign, 14.0f))
 		{
-			if (Fire)
+			if (!FestLine.empty())
+			{
+				X.RL.ShowSeries(IgniteFestAt(X.World).F->SeriesId, X.Now);
+				Access::OpenPage(X.RL, RiverLine::Page::Series, X.Now);
+			}
+			else if (Fire)
 			{
 				Access::OpenPage(X.RL, RiverLine::Page::Series, X.Now);
 			}
@@ -859,14 +1032,21 @@ void IgniteBoardwalk(IgniteCtx& X)
 				IgniteOpenSheet(X.RL, Bz.Id, X.Now);
 			}
 		}
-		const bool Series = Fire != nullptr;
-		C.Cached((static_cast<uint64_t>(Fnv1a(Series ? "ignite:lighthouse-sign|series" : "ignite:lighthouse-sign")) << 32) ^ static_cast<uint64_t>(K.Coral), 0.0f, 0.0f, [&K, &Sign, Series](Canvas& At) {
+		const bool Series = Fire != nullptr || !FestLine.empty();
+		// The plate's key mixes the festival's brand (§2.7.4: the sign's cache key mixes the brand); today's plates keep theirs.
+		const uint64_t SignKey = !FestLine.empty() ? (static_cast<uint64_t>(Fnv1a("ignite:lighthouse-sign|fest|" + FestLine.substr(0, FestLine.find(' ')))) << 32) ^ static_cast<uint64_t>(K.Coral)
+											   : (static_cast<uint64_t>(Fnv1a(Series ? "ignite:lighthouse-sign|series" : "ignite:lighthouse-sign")) << 32) ^ static_cast<uint64_t>(K.Coral);
+		C.Cached(SignKey, 0.0f, 0.0f, [&K, &Sign, Series](Canvas& At) {
 			At.FillRoundRect(Sign, 14.0f, IgniteHx(0x1a0f2a));
 			At.StrokeRoundRect(Sign, 14.0f, Series ? Hex(IgTang) : Hex(IgSun), 1.5f);
 			IgniteFlame(At, 31.0f, 289.0f, 11.0f, Hex(K.Coral), Hex(IgTang), Hex(IgSun));
 		});
 		std::string Line;
-		if (Fire)
+		if (!FestLine.empty())
+		{
+			Line = FestLine;
+		}
+		else if (Fire)
 		{
 			Line = Fire->Short + " \xC2\xB7 DAY " + std::to_string(net::DayOf(X.World) - Fire->FirstDay + 1) + " OF " + std::to_string(Fire->LastDay - Fire->FirstDay + 1);
 		}
@@ -878,16 +1058,24 @@ void IgniteBoardwalk(IgniteCtx& X)
 		{
 			Line = "SUNDAY BLAZE";
 		}
-		C.Text(Line, 42.0f, 286.5f, IgniteTx(10.0f, 900, Fire ? Hex(IgTang) : Hex(IgSun), Align::Left, Baseline::Alphabetic, 120.0f));
+		C.Text(Line, 42.0f, 286.5f, IgniteTx(10.0f, 900, Series ? Hex(IgTang) : Hex(IgSun), Align::Left, Baseline::Alphabetic, 120.0f));
 	}
 
-	// The Bandstand: TONIGHT (the slide-1 logic: the night's featured event), else what's up next.
+	// The Bandstand: TONIGHT (the slide-1 logic: the night's featured event), else what's up next. Update 4 G1 (SPEC v1.7 §2.7.4,
+	// U32; FH-3b): while a festival is Live it features the festival's latest event starting later that day ("FEIGN TONIGHT · #9",
+	// IgniteBandstandFest), else The Spark as today; under PENNANT's pavilion (F-look's) the line sits in the dome's frieze, the card
+	// in the screen between the columns, and the foot sign ("STEP INSIDE · THE HUB") opens the hub.
 	{
 		const std::vector<Access::FeatureSlide>& Slides = Access::FeatureSlides(X.RL);
 		net::EventInstance E;
 		bool Has = false;
 		bool Tonight = false;
-		if (!Slides.empty() && Slides.front().HasEvent && Slides.front().Art == 0)
+		std::string FestLabel;
+		if (IgniteBandstandFest(X.World, E, FestLabel))
+		{
+			Has = Tonight = true;
+		}
+		else if (!Slides.empty() && Slides.front().HasEvent && Slides.front().Art == 0)
 		{
 			E = Slides.front().E;
 			Has = Tonight = true;
@@ -901,20 +1089,42 @@ void IgniteBoardwalk(IgniteCtx& X)
 				Has = true;
 			}
 		}
-		if (IgniteHotspot(X, "igband", {184.0f, 104.0f, 444.0f, 196.0f}, 24.0f) && Has)
+		const bool Pv = Fest.Live() && Fest.F->Which == fest::Brand::Pennant;
+		const bool ToHub = Pv && IgniteHotspot(X, "igpavilion", {318.0f, 277.0f, 176.0f, 22.0f}, 11.0f);
+		if (ToHub)
+		{
+			X.RL.ShowSeries(Fest.F->SeriesId, X.Now);
+			Access::OpenPage(X.RL, RiverLine::Page::Series, X.Now);
+		}
+		if (IgniteHotspot(X, "igband", {184.0f, 104.0f, 444.0f, 196.0f}, 24.0f) && Has && !ToHub)
 		{
 			IgniteOpenSheet(X.RL, E.Id, X.Now);
 		}
-		C.Text(Tonight ? "TONIGHT \xC2\xB7 BANDSTAND" : "UP NEXT \xC2\xB7 BANDSTAND", 230.0f, 160.0f, IgniteTx(11.5f, 800, Hex(IgLime)));
+		const std::string Head = !FestLabel.empty() ? FestLabel : Tonight ? std::string("TONIGHT \xC2\xB7 BANDSTAND") : std::string("UP NEXT \xC2\xB7 BANDSTAND");
+		if (Pv)
+		{
+			// The frieze {168, 136, 476, 24}: 12 Bold-800 caps in Bulb White beside the low-detail crest at 20.
+			const float Hw = C.Measure(Head, 12.0f, 800);
+			const float Hx = 406.0f - Hw / 2.0f + 13.0f;
+			if (Fest.Sr)
+			{
+				eventart::SeriesCrest(C, *Fest.Sr, Hx - 16.0f, 148.0f, 20.0f, X.Preview ? 0.0 : X.Now);
+			}
+			C.Text(Head, Hx, 152.5f, IgniteTx(12.0f, 800, IgniteHx(0xffe9a8)));
+		}
+		else
+		{
+			C.Text(Head, 230.0f, 160.0f, IgniteTx(11.5f, 800, Hex(IgLime)));
+		}
 		if (Has)
 		{
 			const net::EventTemplate& T = Net.TemplateOf(E);
 			const net::LiveState L = Net.Live(E, X.World);
-			C.Text(T.Name, 230.0f, 196.0f, IgniteBi(32.0f, Hex(IgSun), Align::Left, Baseline::Alphabetic, 226.0f));
+			C.Text(T.Name, 230.0f, Pv ? 210.0f : 196.0f, IgniteBi(Pv ? 26.0f : 32.0f, Hex(IgSun), Align::Left, Baseline::Alphabetic, Pv ? 214.0f : 226.0f));
 			std::string Facts = IgniteWhen(E.Start, X.World) + " \xC2\xB7 " + net::BuyIn(T.BuyInCents);
 			Facts += T.GtdCents > 0 ? " \xC2\xB7 GTD " + rlnet_detail::NetMoney(T.GtdCents) : std::string();
 			Facts += " \xC2\xB7 " + Grouped(L.Entries) + " in";
-			C.Text(Facts, 230.0f, 218.0f, IgniteTx(14.0f, 700, Hex(K.Cream), Align::Left, Baseline::Alphabetic, 354.0f));
+			C.Text(Facts, 230.0f, Pv ? 231.0f : 218.0f, IgniteTx(Pv ? 13.5f : 14.0f, 700, Hex(K.Cream), Align::Left, Baseline::Alphabetic, 354.0f));
 			std::string Clock;
 			switch (L.St)
 			{
@@ -923,39 +1133,49 @@ void IgniteBoardwalk(IgniteCtx& X)
 			case net::Status::LateReg: Clock = "LATE " + rlnet_detail::NetHms(L.LateRegLeft); break;
 			default: Clock = "ON NOW"; break;
 			}
-			const float Cw = std::max(110.0f, C.Measure(Clock, 12.5f, 900) + 26.0f);
-			C.FillRoundRect({584.0f - Cw, 150.0f, Cw, 30.0f}, 15.0f, Hex(K.Coral));
-			C.Text(Clock, 584.0f - Cw / 2.0f, 170.0f, IgniteTx(12.5f, 900, IgniteHx(0x2a0d14), Align::Center));
-			// WHO'S IN: the regulars the world has registered (the Headliners join them at G2).
-			C.FillRect({230.0f, 232.0f, 354.0f, 1.0f}, IgniteHx(K.Rim));
-			C.Text("WHO'S IN", 230.0f, 250.0f, IgniteTx(10.0f, 900, Hex(igniteart::IgPink)));
+			if (Pv)
+			{
+				// The pavilion's screen: the pill at {452, 188, 132, 24}, clear of the frieze and the pennants.
+				C.FillRoundRect({452.0f, 188.0f, 132.0f, 24.0f}, 12.0f, Hex(K.Coral));
+				C.Text(Clock, 518.0f, 204.5f, IgniteTx(11.5f, 900, IgniteHx(0x2a0d14), Align::Center, Baseline::Alphabetic, 120.0f));
+			}
+			else
+			{
+				const float Cw = std::max(110.0f, C.Measure(Clock, 12.5f, 900) + 26.0f);
+				C.FillRoundRect({584.0f - Cw, 150.0f, Cw, 30.0f}, 15.0f, Hex(K.Coral));
+				C.Text(Clock, 584.0f - Cw / 2.0f, 170.0f, IgniteTx(12.5f, 900, IgniteHx(0x2a0d14), Align::Center));
+			}
+			// WHO'S IN: the regulars the world has registered (the Headliners join them at G2). Under the pavilion, 10 lower.
+			const float Wy = Pv ? 10.0f : 0.0f;
+			C.FillRect({230.0f, Pv ? 241.0f : 232.0f, 354.0f, 1.0f}, IgniteHx(K.Rim));
+			C.Text("WHO'S IN", 230.0f, 250.0f + Wy, IgniteTx(10.0f, 900, Hex(igniteart::IgPink)));
 			std::vector<int> Who = X.S.Living().Registered(E.Id);
 			const world::World& W = X.S.Living();
 			std::stable_sort(Who.begin(), Who.end(), [&W](int A, int Bb) { return W.Get(A)->RepOf(world::Rep::Overall) > W.Get(Bb)->RepOf(world::Rep::Overall); });
 			if (Who.empty())
 			{
-				C.Text(L.St == net::Status::Announced ? IgniteSeatsOpen : IgniteNoRegulars, 230.0f, 272.0f, IgniteTx(12.5f, 600, pal::Muted, Align::Left, Baseline::Alphabetic, 354.0f));
+				C.Text(L.St == net::Status::Announced ? IgniteSeatsOpen : IgniteNoRegulars, 230.0f, 272.0f + Wy, IgniteTx(12.5f, 600, pal::Muted, Align::Left, Baseline::Alphabetic, 354.0f));
 			}
 			float Wx = 246.0f;
 			for (size_t I = 0; I < Who.size() && I < 3; ++I)
 			{
 				const world::Npc* N = W.Get(Who[I]);
 				const AvatarSpec Pic = AvatarFor(N->Name);
-				DrawAvatar(C, Wx, 268.0f, 12.0f, Pic);
-				C.StrokeArc(Wx, 268.0f, 12.5f, 0.0f, 2.0f * Pi, Hex(igniteart::IgSun), 1.5f);
-				const float Nw = C.Text(N->Name, Wx + 18.0f, 272.0f, IgniteTx(12.5f, 700, Hex(K.Cream), Align::Left, Baseline::Alphabetic, 96.0f));
+				DrawAvatar(C, Wx, 268.0f + Wy, 12.0f, Pic);
+				C.StrokeArc(Wx, 268.0f + Wy, 12.5f, 0.0f, 2.0f * Pi, Hex(igniteart::IgSun), 1.5f);
+				const float Nw = C.Text(N->Name, Wx + 18.0f, 272.0f + Wy, IgniteTx(12.5f, 700, Hex(K.Cream), Align::Left, Baseline::Alphabetic, 96.0f));
 				Wx += 18.0f + Nw + 22.0f;
 			}
 			if (Who.size() > 3)
 			{
-				C.Text("+" + std::to_string(Who.size() - 3), Wx, 272.0f, IgniteTx(12.0f, 800, pal::Muted));
+				C.Text("+" + std::to_string(Who.size() - 3), Wx, 272.0f + Wy, IgniteTx(12.0f, 800, pal::Muted));
 			}
 			// G2: what the entry earns, the Headliners in it (a star), and SPECIAL GUEST while you're billed (F8).
 			const IgniteLoops& Lp = IgniteLoopsOf(X.RL, X.Now);
 			if (Lp.Live)
 			{
-				C.Text("SPARKS", 584.0f, 202.0f, IgniteTx(9.0f, 900, IgniteHx(igniteart::IgLime, 0.8f), Align::Right));
-				C.Text("+" + Grouped(IgniteBaseSparks(T.BuyInCents)), 546.0f, 202.0f, IgniteBi(17.0f, Hex(igniteart::IgLime), Align::Right));
+				C.Text("SPARKS", 584.0f, Pv ? 228.0f : 202.0f, IgniteTx(9.0f, 900, IgniteHx(igniteart::IgLime, 0.8f), Align::Right));
+				C.Text("+" + Grouped(IgniteBaseSparks(T.BuyInCents)), 546.0f, Pv ? 228.0f : 202.0f, IgniteBi(17.0f, Hex(igniteart::IgLime), Align::Right));
 				int Heads = 0;
 				for (size_t I = 0; I < Who.size() && I < 3; ++I)
 				{
@@ -964,7 +1184,7 @@ void IgniteBoardwalk(IgniteCtx& X)
 				}
 				if (Heads > 0)
 				{
-					C.Text(std::to_string(Heads) + (Heads == 1 ? " HEADLINER" : " HEADLINERS"), 584.0f, 250.0f, IgniteTx(10.0f, 900, Hex(igniteart::IgSun), Align::Right));
+					C.Text(std::to_string(Heads) + (Heads == 1 ? " HEADLINER" : " HEADLINERS"), 584.0f, 250.0f + Wy, IgniteTx(10.0f, 900, Hex(igniteart::IgSun), Align::Right));
 				}
 				if (Lp.Guest)
 				{
@@ -974,7 +1194,7 @@ void IgniteBoardwalk(IgniteCtx& X)
 		}
 		else
 		{
-			C.Text("The night's lineup", 230.0f, 200.0f, IgniteBi(26.0f, Hex(IgSun)));
+			C.Text("The night's lineup", 230.0f, Pv ? 214.0f : 200.0f, IgniteBi(26.0f, Hex(IgSun)));
 		}
 	}
 
@@ -1135,8 +1355,21 @@ void IgniteBoardwalk(IgniteCtx& X)
 		}
 	}
 
+	// Update 4 G1 (SPEC v1.7 §2.7.4, PLAN_G1 item 1; FH-3b): while FEIGN is Live its funhouse arch stands where the Prize Counter booth
+	// stands (F-look's static layer draws no booth body under it), so the counter's head, its hanging tickets, its lines, the Sparks or
+	// RELEASED box and igprize go for the festival's days, and the arch (its foot sign reads "STEP INSIDE · THE HUB") opens the hub.
+	// The Prize Counter page itself is unchanged and reachable from REWARDS; the Fuse Booth is untouched; PUSH and PENNANT keep the
+	// booth.
+	if (Fest.Live() && Fest.F->Which == fest::Brand::Feign)
+	{
+		if (IgniteHotspot(X, "igarch", {1244.0f, 104.0f, 320.0f, 194.0f}, 12.0f))
+		{
+			X.RL.ShowSeries(Fest.F->SeriesId, X.Now);
+			Access::OpenPage(X.RL, RiverLine::Page::Series, X.Now);
+		}
+	}
 	// The Prize Counter. G2 (F1): tickets on strings with their prices, a look, your Sparks; it opens the Prize Counter.
-	if (Lp.Live)
+	else if (Lp.Live)
 	{
 		if (IgniteHotspot(X, "igprize", {1244.0f, 104.0f, 320.0f, 194.0f}, 12.0f))
 		{
@@ -1349,27 +1582,50 @@ bool IgniteChipKeeps(int Chip, const net::EventTemplate& T, const net::LiveState
 	}
 }
 
-void IgniteChips(IgniteCtx& X, int Count)
+/** Chip 10's face (SPEC v1.7 §2.7.4): the festival's Accent fill (a coral ring when on), its low-detail crest at 22, its Short beside
+ *  it. u4_ui measures it (the floor's chip and label, PLAN_FHUBS FH-3's budget row). */
+void IgniteFestChipFace(Canvas& At, const net::SeriesInfo& Sr, const Rect& R, bool On, bool Hot, uint32_t Fill, uint32_t Coral, uint32_t RimHi)
+{
+	if (On)
+	{
+		At.GlowRoundRect(R, 16.0f, IgniteHx(Coral, 0.3f), 10.0f);
+	}
+	igniteart::IgnitePill(At, R, IgniteHx(Fill), On ? Hex(Coral) : IgniteHx(RimHi), On ? 2.0f : Hot ? 1.2f : 0.0f);
+	eventart::SeriesCrest(At, Sr, R.X + 22.0f, R.Y + 16.0f, 22.0f, 0.0);
+	At.Text(Sr.Short, R.X + 26.0f + (R.W - 26.0f) / 2.0f, R.Y + 21.0f, igniteart::IgniteTx(13.5f, 800, IgniteHx(0x2a0d14), Align::Center));
+}
+
+/** The chip row's order (SPEC v1.7 §2.7.4): All, the festival's chip 10 while one is Live, then 1 to 9. */
+const int IgniteChipOrder[11] = {0, IgniteFestChip, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+
+void IgniteChips(IgniteCtx& X, int Count, const IgniteFestNow& Fest)
 {
 	Canvas& C = X.C;
 	const igniteart::IgniteTones& K = X.K;
 	// The pointer first (each chip's hit area), then the row replays from the cache by the chip that's on, the one under the
 	// pointer, the count and the hour's tones (G1_AUDIT M3).
-	Rect Rs[10];
+	Rect Rs[11];
 	int Hot = -1;
 	const int Was = X.U.Chip;
 	// FUSE's chip shows once FUSE lights (G2): it jumps to the Fuse Booth.
 	const bool Fuse = IgniteLoopsOf(X.RL, X.Now).Live && IgniteLoopsOf(X.RL, X.Now).FuseOn;
+	// Update 4 G1 (SPEC v1.7 §2.7.4, FH-3b): while a festival is Live on Ignite (every hour; only the palette yields to Afterburner
+	// Hours) its chip stands second: the festival's Short (chip<Short>) beside its low-detail crest at 22 on its Accent.
+	const bool FestOn = Fest.Live();
+	const std::string FestShort = FestOn ? Fest.Short() : std::string();
+	const festart::FestivalLook* FestLook = FestOn ? festart::LookFor(*Fest.Sr) : nullptr;
+	const uint32_t FestFill = FestLook && FestLook->Accent ? FestLook->Accent : FestOn ? Fest.Sr->Color : 0u;
+	const auto ChipName = [&FestShort](int I) { return I == IgniteFestChip ? FestShort : std::string(IgniteChipNames[I]); };
 	float Cx = 24.0f;
-	for (int I = 0; I < 10; ++I)
+	for (const int I : IgniteChipOrder)
 	{
-		if (I == 8 && !Fuse)
+		if ((I == 8 && !Fuse) || (I == IgniteFestChip && !FestOn))
 		{
 			continue;
 		}
-		const float W = C.Measure(IgniteChipNames[I], 13.5f, 700) + 30.0f;
+		const float W = C.Measure(ChipName(I), 13.5f, 700) + 30.0f + (I == IgniteFestChip ? 26.0f : 0.0f);
 		Rs[I] = {Cx, 440.0f, W, 32.0f};
-		const Ui::ClickState St = X.UI.Clickable(std::string("chip") + IgniteChipNames[I], Rs[I], !X.Preview);
+		const Ui::ClickState St = X.UI.Clickable("chip" + ChipName(I), Rs[I], !X.Preview);
 		Hot = St.Hover ? I : Hot;
 		if (St.Clicked && I == 8)
 		{
@@ -1385,17 +1641,27 @@ void IgniteChips(IgniteCtx& X, int Count)
 		Cx += W + 8.0f;
 	}
 	const std::string Floor = Grouped(Count) + (Count == 1 ? " event on the floor" : " events on the floor");
-	const uint64_t Key = (static_cast<uint64_t>(Fnv1a("ignite:chips|" + Floor)) << 16) ^ (static_cast<uint64_t>(Was) << 8) ^ (static_cast<uint64_t>(Hot + 1) << 4) ^
+	uint64_t Key = (static_cast<uint64_t>(Fnv1a("ignite:chips|" + Floor)) << 16) ^ (static_cast<uint64_t>(Was) << 8) ^ (static_cast<uint64_t>(Hot + 1) << 4) ^
 		(static_cast<uint64_t>(K.Mood) << 1) ^ (K.Night ? 1u : 0u) ^ (Skin::Current().Key() << 20) ^ (Fuse ? 0x4000000000000000ull : 0ull);
-	C.Cached(Key, 0.0f, 0.0f, [&K, &Rs, &Floor, Was, Hot, Fuse](Canvas& At) {
-		for (int I = 0; I < 10; ++I)
+	if (FestOn)
+	{
+		Key = (Key ^ static_cast<uint64_t>(Fnv1a("ignite:chips|fest|" + FestShort))) * 0x100000001b3ull;
+	}
+	const net::SeriesInfo* FestSr = FestOn ? Fest.Sr : nullptr;
+	C.Cached(Key, 0.0f, 0.0f, [&K, &Rs, &Floor, Was, Hot, Fuse, FestOn, FestSr, FestFill](Canvas& At) {
+		for (const int I : IgniteChipOrder)
 		{
-			if (I == 8 && !Fuse)
+			if ((I == 8 && !Fuse) || (I == IgniteFestChip && !FestOn))
 			{
 				continue;
 			}
 			const Rect& R = Rs[I];
 			const bool On = Was == I;
+			if (I == IgniteFestChip)
+			{
+				IgniteFestChipFace(At, *FestSr, R, On, Hot == I, FestFill, K.Coral, K.RimHi);
+				continue;
+			}
 			if (On)
 			{
 				At.GlowRoundRect(R, 16.0f, IgniteHx(K.Coral, 0.3f), 10.0f);
@@ -1485,15 +1751,31 @@ void IgniteCabinetFace(Canvas& C, const net::EventTemplate& T, const igniteart::
 	const bool Rest = Cab.Rest;
 	const std::string Look = Rest ? "ignite:cabinet:" + T.Id + "|" + Cab.When + "|" + std::to_string(Cab.Mark) : "ignite:cabinet:" + T.Id;
 	const uint64_t Key = (static_cast<uint64_t>(Fnv1a(Look)) << 8) ^ (static_cast<uint64_t>(K.Mood) << 1) ^ (K.Night ? 1u : 0u) ^ (Cab.Loops ? 0x80u : 0u) ^ (Cab.Themed ? 0x40u : 0u);
-	C.Cached(Key, X0, Y0, [&T, &K, &Cab, Rest](Canvas& At) {
+	// Update 4 G1 (SPEC v1.7 §2.7.4, FH-3b): a festival's title (its Main, a championship's three) is its own cabinet on the floor's
+	// festival shelf: MAIN EVENT (the headliner's words after the code and the buy-in), "{Gtd} GTD" and "+ {Added} ADDED".
+	const fest::Festival* TitleOf = T.Series.empty() ? nullptr : fest::FestivalOf(T.Series);
+	const bool Title = TitleOf && IgniteFestTitle(*TitleOf, T);
+	std::string Words = T.Name;
+	if (Title)
+	{
+		const size_t Colon = Words.find(": ");
+		Words = Colon == std::string::npos ? Words : Words.substr(Colon + 2);
+		const std::string Fee = net::BuyIn(T.BuyInCents) + " ";
+		Words = Words.compare(0, Fee.size(), Fee) == 0 ? Words.substr(Fee.size()) : Words;
+	}
+	C.Cached(Key, X0, Y0, [&T, &K, &Cab, &Words, Rest, Title](Canvas& At) {
 		IgniteCabinetBody(At, {0.0f, 0.0f, 180.0f, 120.0f}, IgniteEventTint(T, K), false, 0.0f, K, false);
 		IgniteEventMark(At, T, 30.0f, 27.0f, 18.0f, K);
 		if (T.GtdCents > 0)
 		{
 			At.FillPolygon(IgniteStar(62.0f, 38.0f, 5.5f, 2.6f, 5), Hex(IgSun));
-			At.Text(rlnet_detail::NetMoney(T.GtdCents), 70.0f, 42.0f, IgniteTx(11.0f, 800, Hex(IgSun)));
+			At.Text(rlnet_detail::NetMoney(T.GtdCents) + (Title ? " GTD" : ""), 70.0f, 42.0f, IgniteTx(11.0f, 800, Hex(IgSun)));
 		}
-		At.Text(T.Name, 14.0f, 74.0f, IgniteTx(14.5f, 700, Hex(K.Cream), Align::Left, Baseline::Alphabetic, 152.0f));
+		if (Title && T.AddedCents > 0)
+		{
+			At.Text("+ " + rlnet_detail::NetMoney(T.AddedCents) + " ADDED", 70.0f, 56.0f, IgniteTx(9.5f, 800, Hex(IgLime)));
+		}
+		At.Text(Words, 14.0f, 74.0f, IgniteTx(14.5f, 700, Hex(K.Cream), Align::Left, Baseline::Alphabetic, 152.0f));
 		At.Text(net::BuyIn(T.BuyInCents), 14.0f, 101.0f, IgniteBi(23.0f, Hex(K.Cream)));
 		At.FillRect({14.0f, 109.0f, 152.0f, 3.0f}, Rgba(255, 255, 255, 0.12f));
 		if (Cab.Loops && T.BuyInCents > 0)
@@ -1570,17 +1852,65 @@ void IgniteCabinet(IgniteCtx& X, const IgniteCab& Cab)
 	C.SetAlpha(A0);
 }
 
-void IgniteFloor(IgniteCtx& X, const std::vector<Access::ListRow>& Rows)
+void IgniteFloor(IgniteCtx& X, const std::vector<Access::ListRow>& Schedule)
 {
 	Canvas& C = X.C;
 	const igniteart::IgniteTones& K = X.K;
 	IgniteUi& U = X.U;
 	const net::Network& Net = net::Site(net::SiteId::Ignite);
+	// Update 4 G1 (SPEC v1.7 §2.7.4, FH-3b): while a festival is Live on Ignite, chip 10 keeps its rows and satellites and the floor's
+	// first shelf is "{SHORT} · ON THE FLOOR", ending on the Main's own cabinet (a championship's three titles, in day order), each
+	// title row joining the floor even when it starts past the schedule's day. The festival over, its chip falls back to All.
+	const IgniteFestNow Fest = IgniteFestAt(X.World);
+	if (U.Chip == IgniteFestChip && !Fest.Live())
+	{
+		U.Chip = 0;
+	}
+	std::vector<Access::ListRow> WithTitles;
+	if (Fest.Live())
+	{
+		WithTitles = Schedule;
+		std::vector<std::pair<double, std::string>> Titles; // (start, template id): the edition's title templates still to start
+		for (const std::string& Id : Fest.F->TitleIds.empty() ? std::vector<std::string>{Fest.F->MainId} : Fest.F->TitleIds)
+		{
+			if (const net::EventTemplate* T = Net.FindTemplate(Id))
+			{
+				const double Start = static_cast<double>(T->OnlyDay) * net::MinutesPerDay + static_cast<double>(T->StartMinute);
+				if (T->OnlyDay >= 0 && Start + 1.0 > X.World)
+				{
+					Titles.push_back({Start, Id});
+				}
+			}
+		}
+		std::sort(Titles.begin(), Titles.end());
+		for (const std::pair<double, std::string>& Ti : Titles)
+		{
+			const bool Listed = std::any_of(WithTitles.begin(), WithTitles.end(), [&](const Access::ListRow& R) { return Net.TemplateOf(R.E).Id == Ti.second; });
+			if (Listed)
+			{
+				continue;
+			}
+			for (net::EventInstance& E : Net.Window(Ti.first - 1.0, Ti.first + 1.0))
+			{
+				if (Net.TemplateOf(E).Id == Ti.second)
+				{
+					Access::ListRow Row;
+					Row.L = Net.Live(E, X.World);
+					Row.Joinable = Net.Joinable(E, &Row.Lock, X.S.Unlocks());
+					Row.E = std::move(E);
+					WithTitles.push_back(std::move(Row));
+					break;
+				}
+			}
+		}
+	}
+	const std::vector<Access::ListRow>& Rows = Fest.Live() ? WithTitles : Schedule;
 	// The floor's rows: the shared schedule, then the chip's filter.
 	std::vector<size_t> Kept;
 	for (size_t I = 0; I < Rows.size(); ++I)
 	{
-		if (IgniteChipKeeps(U.Chip, Net.TemplateOf(Rows[I].E), Rows[I].L, X.S, Net))
+		const net::EventTemplate& T = Net.TemplateOf(Rows[I].E);
+		if (U.Chip == IgniteFestChip ? IgniteFestKeeps(*Fest.F, T) : IgniteChipKeeps(U.Chip, T, Rows[I].L, X.S, Net))
 		{
 			Kept.push_back(I);
 		}
@@ -1634,8 +1964,30 @@ void IgniteFloor(IgniteCtx& X, const std::vector<Access::ListRow>& Rows)
 		}
 	}
 	Shelves[1].Sub = Guaranteed > 0 ? rlnet_detail::NetMoney(Guaranteed) + " guaranteed" : std::string();
+	// The festival's shelf (U32's floor half, from SeriesInfo), first, in U.ShelfX's eighth slot: its rows in start order, then its
+	// title cabinets in day order. A row may sit on a later shelf too; Listed takes it once, where it first shows.
+	if (Fest.Live())
+	{
+		IgniteShelf Fs;
+		Fs.Label = Fest.Short() + " \xC2\xB7 ON THE FLOOR";
+		Fs.Sub = Grouped(Fest.Sr->Events) + (Fest.Sr->Events == 1 ? " event" : " events") + " \xC2\xB7 " + rlnet_detail::NetMoney(Fest.Sr->GtdCents) + " guaranteed \xC2\xB7 " +
+			net::DateLabel(Fest.Sr->FirstDay) + " \xE2\x80\x93 " + net::DateLabel(Fest.Sr->LastDay);
+		std::vector<size_t> TitleRows;
+		for (const size_t I : Kept)
+		{
+			const net::EventTemplate& T = Net.TemplateOf(Rows[I].E);
+			if (T.Series == Fest.F->SeriesId)
+			{
+				(IgniteFestTitle(*Fest.F, T) ? TitleRows : Fs.Rows).push_back(I);
+			}
+		}
+		std::stable_sort(TitleRows.begin(), TitleRows.end(), [&Rows](size_t A, size_t Bb) { return Rows[A].E.Start < Rows[Bb].E.Start; });
+		Fs.Rows.insert(Fs.Rows.end(), TitleRows.begin(), TitleRows.end());
+		Shelves.insert(Shelves.begin(), Fs);
+	}
 	std::vector<IgniteShelf> Shown;
 	std::vector<int> Slot; // each shown shelf's index into U.ShelfX
+	const size_t FestShelves = Fest.Live() ? 1 : 0;
 	for (size_t I = 0; I < Shelves.size(); ++I)
 	{
 		if (!Shelves[I].Rows.empty())
@@ -1645,7 +1997,7 @@ void IgniteFloor(IgniteCtx& X, const std::vector<Access::ListRow>& Rows)
 				Shelves[I].Sub = std::to_string(Shelves[I].Rows.size()) + (Shelves[I].Rows.size() == 1 ? " event" : " events");
 			}
 			Shown.push_back(Shelves[I]);
-			Slot.push_back(static_cast<int>(I));
+			Slot.push_back(I < FestShelves ? 7 : static_cast<int>(I - FestShelves));
 		}
 	}
 	// Listed: shelf, then tile (arrow keys walk the cabinets); "always select something" (NetLobby's rule).
@@ -1663,7 +2015,7 @@ void IgniteFloor(IgniteCtx& X, const std::vector<Access::ListRow>& Rows)
 	}
 	// The chips, and the count of what's on the shelves (an open event no shelf holds, a GTD tomorrow afternoon, isn't on
 	// the floor, so it isn't counted).
-	IgniteChips(X, static_cast<int>(Listed.size()));
+	IgniteChips(X, static_cast<int>(Listed.size()), Fest);
 	const std::string& Sel = Access::EventId(X.RL);
 	if (std::find(Listed.begin(), Listed.end(), Sel) == Listed.end() && !Listed.empty() && !U.Sheet)
 	{
@@ -2298,6 +2650,8 @@ void IgniteLobby(IgniteCtx& X)
 		switch (Page)
 		{
 		case Pg::Lobby: IgnitePlay(X); break;
+		// Update 4 G1 (SPEC v1.7 §2.8.1, F-hubs FH-1c): the shared SeriesPage routes a festival (FEIGN, PUSH, PENNANT) to its hub in
+		// Ignite's content rect ({24, 84, 1552, 786}, above the dock: UI/RiverLineNet.cpp's NetHubRect); Wildfire keeps the page.
 		case Pg::Series: Access::SeriesPage(RL, X.Now); break;
 		case Pg::Fuse:
 			X.C.FillRect({0.0f, 72.0f, 1600.0f, 890.0f}, IgniteHx(X.K.Plum));

@@ -10,6 +10,7 @@
 
 #include "ShortStack/Game/Badges.h"
 #include "ShortStack/Game/Chat.h"
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
@@ -2644,10 +2645,117 @@ void RiverLine::LiveWeek(const Rect& R, double Now)
 
 // ------------------------------------------------------------------ series
 
+namespace rlnet_detail
+{
+// Update 4 G1 (SPEC v1.7 §2.8.1; F-hubs' stream B, FH-1c): the festival hub's routing on the three hosts. A host's SERIES page shows
+// a festival edition as its hub (FestivalHub, UI/RiverLineFestival.cpp, stream A's), worn in the host's frame: RiverLine's
+// SeriesPage below; Ignite's Pg::Series, which draws this same SeriesPage through Access::SeriesPage (so FEIGN, PUSH and PENNANT
+// get Ignite's rect and Wildfire keeps the page); RunItTwice's Page::Series in RiverLine::RitFrame (UI/RiverLineRit.cpp). A plain
+// series keeps today's page. It reads fest::'s pure functions and PhaseOf's crown minute only (no HoldGuarded world method, PLAN_FHUBS
+// Q17), and nothing before F-net's calendar (FN-1): fest::All() is empty until then, so every page is today's.
+
+/** The hub's content rect on a host (§2.8.1): Ignite's ends at y 870, above the dock (L7); RunItTwice's starts right of the rail. */
+Rect NetHubRect(net::SiteId Site)
+{
+	switch (Site)
+	{
+	case net::SiteId::Ignite: return {24.0f, 84.0f, 1552.0f, 786.0f};
+	case net::SiteId::RunItTwice: return {232.0f, 96.0f, 1344.0f, 854.0f};
+	default: break;
+	}
+	return {24.0f, 84.0f, 1552.0f, 866.0f};
+}
+
+/** NetHubEdition's choice, pure (u4_ui's FestHostsRouting calls it with constructed editions). HasPick: the series the host shows is
+ *  one of the host's own; Picked its edition (fest::FestivalOf, null for a plain series). Near: the editions around today with their
+ *  phases, in FirstDay order. A picked series decides alone: a festival opens its hub in any phase, a plain series keeps its page.
+ *  With none picked, the host's first edition that isn't Off: the one on stage (Live to Afterglow) comes before the next one's
+ *  Announced or Buildup, as one host's editions only overlap that way (§2.1.4). Another site's edition never shows on this host. */
+const fest::Festival* NetHubPick(net::SiteId Site, bool HasPick, const fest::Festival* Picked, const std::vector<std::pair<const fest::Festival*, fest::Phase>>& Near)
+{
+	if (HasPick)
+	{
+		return Picked && Picked->Site == Site ? Picked : nullptr;
+	}
+	for (const std::pair<const fest::Festival*, fest::Phase>& N : Near)
+	{
+		if (N.first && N.first->Site == Site && N.second != fest::Phase::Off)
+		{
+			return N.first;
+		}
+	}
+	return nullptr;
+}
+
+/** The edition a host's SERIES page shows as its hub, or null for today's page (§2.8.1): RiverLine::SeriesId selects it when it
+ *  names one of the host's series; a page opened with none (or with another site's) shows the host's current or next edition inside
+ *  its Announced-to-Afterglow window. */
+const fest::Festival* NetHubEdition(net::SiteId Site, const std::string& SeriesId, double World)
+{
+	const net::Network& Net = net::Site(Site);
+	const bool HasPick = !SeriesId.empty() && Net.FindSeries(SeriesId) != nullptr;
+	std::vector<std::pair<const fest::Festival*, fest::Phase>> Near;
+	if (!HasPick)
+	{
+		// Announced opens kAnnounceDays before FirstDay; Closing holds until the crown and Afterglow runs kAfterglowDays past it (an
+		// edition never crowned goes Off two days after LastEnd, LEAD_CALLS R-13), so a fortnight back holds every tail.
+		constexpr int TailDays = 14;
+		const int Today = net::DayOf(World);
+		for (const fest::Festival* F : fest::Festivals(Today - TailDays, Today + fest::kAnnounceDays + 1))
+		{
+			if (F->Site == Site)
+			{
+				Near.emplace_back(F, fest::PhaseOf(*F, World, Net.Attached()));
+			}
+		}
+	}
+	return NetHubPick(Site, HasPick, HasPick ? fest::FestivalOf(SeriesId) : nullptr, Near);
+}
+} // namespace rlnet_detail
+
+namespace rlfest_detail
+{
+/** Stream B's festival strings for fest::FestUiInventory (LEAD_CALLS R-1, PLAN_G1 §2.1): the host files' lines (the takeover's words
+ *  on Ignite and RunItTwice, the register sheets' YOUR strip, slide 0, the tickers, the card's pill), so CopyLint, both trademark tiers
+ *  and U1 run over them with the hub's. Declared and called in UI/RiverLineFestival.cpp (stream A); each "<kind>\t<text>" (§2.11), its
+ *  placeholders the hub's sample names ({FESTIVAL} the Short, {N}, {Days}, {D}, {Gtd}, {Added}, {FirstDate}, {LastDate}, {Time},
+ *  {Name}), filled from the sim when drawn. FH-3b: the takeover's words (U15, U22, U32 and the floor's Main cabinet). */
+std::vector<std::string> HostUiStrings()
+{
+	return {
+		// U15: the Lighthouse's sign (UI/RiverLineIgnite.cpp) and RunItTwice's tape (UI/RiverLineRit.cpp), from the Buildup to the
+		// Afterglow; GRIT's nightly form; the tape's race leader (§2.7.4's "the race leader", printed in caps).
+		"label\t{FESTIVAL} \xC2\xB7 OPENS IN {D}D",
+		"label\t{FESTIVAL} \xC2\xB7 DAY {N} OF {Days}",
+		"label\t{FESTIVAL} CHAMPION \xC2\xB7 {Name}",
+		"label\t{FESTIVAL} \xC2\xB7 NIGHT {N} OF {Days} \xC2\xB7 SHOWS AT {Time} AND {Time}",
+		"label\t{FESTIVAL} \xC2\xB7 {Name} LEADS THE RACE \xC2\xB7 {N} PTS",
+		"label\t{FESTIVAL} \xC2\xB7 YOU LEAD THE RACE \xC2\xB7 {N} PTS",
+		// U22: the wall calendar's words (UI/SecondScreen.cpp's Word()).
+		"label\tFESTIVAL",
+		"label\tMAIN",
+		// U32: the bandstand's line and Ignite's floor shelf (UI/RiverLineIgnite.cpp); the Main's own cabinet.
+		"label\t{FESTIVAL} TONIGHT \xC2\xB7 #{N}",
+		"label\t{FESTIVAL} \xC2\xB7 ON THE FLOOR",
+		"label\t{N} events \xC2\xB7 {Gtd} guaranteed \xC2\xB7 {FirstDate} \xE2\x80\x93 {LastDate}",
+		"label\t1 event \xC2\xB7 {Gtd} guaranteed \xC2\xB7 {FirstDate} \xE2\x80\x93 {LastDate}",
+		"label\t{Gtd} GTD",
+		"label\t+ {Added} ADDED",
+	};
+}
+} // namespace rlfest_detail
+
 void RiverLine::SeriesPage(double Now)
 {
 	// The site in front's series (update 2 §5.11; a rival's are its own: the RunItTwice Open, Wildfire).
 	const net::SiteId Site = rlsites_detail::SitesClient(*this, S);
+	// Update 4 G1 (SPEC v1.7 §2.8.1, FH-1c): a festival edition is its hub, in the host's content rect (RiverLine's, or Ignite's when
+	// Ignite's frame draws this page); a plain series keeps the page below.
+	if (const fest::Festival* HubFest = rlnet_detail::NetHubEdition(Site, SeriesId, World))
+	{
+		FestivalHub(rlnet_detail::NetHubRect(Site), *HubFest, Now);
+		return;
+	}
 	const net::Network& Net = net::Site(Site);
 	const net::SeriesInfo* Sr = SeriesId.empty() ? Net.CurrentSeries(World) : Net.FindSeries(SeriesId);
 	if (!Sr)
