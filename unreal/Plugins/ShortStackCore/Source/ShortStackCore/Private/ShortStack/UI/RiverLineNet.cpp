@@ -13,6 +13,7 @@
 #include "ShortStack/Game/Chat.h"
 #include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/SiteShow.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Stake.h"
@@ -382,6 +383,114 @@ void NetFestPiece(Canvas& Cv, const world::World& W, const std::pair<const world
 		}
 	}
 	festart::FestTrophy(Cv, F->Which, Cx, Cy, Size, Time, Size <= 30.0f, Fields, Slot == world::FestSlot::Main ? 0 : 1);
+}
+
+// Update 4 G1 (SPEC v1.7 §2.1.4, §2.4.4, §2.7.4, U13, U15, U16, U26; PLAN_FHUBS Q23; F-hubs FH-5c): the Afterglow on RiverLine's lobby
+// (slide 0's form and the wire's item) and the wire's overlay items while its festival is Live, each from the world's roll and the
+// network's own figures (W5).
+
+/** RiverLine's edition in its Afterglow at World (fest::PhaseOf with the attached world: kAfterglowDays from the crown minute), Main its
+ *  Main Event's champion on the world's roll (world::FestRoll); nullptr outside every Afterglow, and while the roll holds no Main for
+ *  it (the lobby keeps today's slides and wire then, as Ignite's Lighthouse keeps its own line). */
+const fest::Festival* NetAfterglow(double World, const world::Honor*& Main)
+{
+	Main = nullptr;
+	const net::Network& Net = net::Site(net::SiteId::RiverLine);
+	const world::World* W = Net.Attached();
+	if (!W)
+	{
+		return nullptr;
+	}
+	const int Today = net::DayOf(World);
+	constexpr int NetAfterglowTail = 14; // the crown follows LastDay within a day or two, and its Afterglow runs kAfterglowDays more
+	for (const fest::Festival* F : fest::Festivals(Today - NetAfterglowTail, Today))
+	{
+		if (F->Site != net::SiteId::RiverLine || fest::PhaseOf(*F, World, W) != fest::Phase::Afterglow)
+		{
+			continue;
+		}
+		for (const world::FestRollRow& Row : world::FestRoll(*W, F->Which))
+		{
+			if (Row.Key == F->SeriesId && Row.Main)
+			{
+				Main = Row.Main;
+				return F;
+			}
+		}
+	}
+	return nullptr;
+}
+
+/** The wire's overlay items while RiverLine's festival is Live (§2.4.4's overlay watch in U26's forms; §2.7.4's festival items): for
+ *  the edition's guaranteed headliners (its featured events with a guarantee, and its Main) that started in the last day or start in
+ *  the next twelve hours, the overlay RiverLine added once registration closed, else the projection short or over while registering
+ *  with someone in (site::show::OverlayOf: the guarantee against the pool, so added money is never an overlay); the two latest starts,
+ *  in start order. None outside the festival's days. */
+std::vector<std::string> NetTickerOverlays(double World)
+{
+	std::vector<std::string> Out;
+	const net::SiteId Site = net::SiteId::RiverLine;
+	const fest::Festival* F = fest::LiveOn(Site, net::DayOf(World));
+	if (!F)
+	{
+		return Out;
+	}
+	const net::Network& Net = net::Site(Site);
+	std::vector<std::pair<double, std::string>> Items;
+	for (const net::EventInstance& E : Net.Window(World - net::MinutesPerDay, World + 12.0 * 60.0))
+	{
+		const net::EventTemplate& T = Net.TemplateOf(E);
+		if (T.Series != F->SeriesId || !(T.Featured || T.Id == F->MainId) || T.GtdCents <= 0)
+		{
+			continue;
+		}
+		const site::show::OverlayView V = site::show::OverlayOf(Net, E, World);
+		if (!V.Shown)
+		{
+			continue;
+		}
+		const std::string Name = NetShortName(T.Name);
+		if (V.Actual)
+		{
+			if (V.Cents > 0)
+			{
+				Items.push_back({E.Start, rlsites_detail::SitesShortName(Site) + " added " + NetMoney(V.Cents) + " to cover " + Name + "'s guarantee."});
+			}
+			continue;
+		}
+		if (V.Cents > 0)
+		{
+			Items.push_back({E.Start, Name + " is projected " + NetMoney(V.Cents) + " short."});
+			continue;
+		}
+		const double Each = static_cast<double>(T.BuyInCents) * Net.Definition().Rake.PrizeShare(T);
+		const Chips Over = static_cast<Chips>(std::llround(V.Entries * Each)) - T.GtdCents;
+		if (Over > 0)
+		{
+			Items.push_back({E.Start, Name + " is projected " + NetMoney(Over) + " over."});
+		}
+	}
+	std::stable_sort(Items.begin(), Items.end(), [](const auto& A, const auto& B) { return A.first < B.first; });
+	for (size_t I = Items.size() > 2 ? Items.size() - 2 : 0; I < Items.size(); ++I)
+	{
+		Out.push_back(Items[I].second);
+	}
+	return Out;
+}
+
+/** The wire's overlay items at World's whole minute, read once a minute (the tape's rule): the wire draws every frame, and the reading
+ *  is a pure function of the minute and the network's own figures (no world, no session), so one cached minute serves them all. */
+const std::vector<std::string>& NetTickerOverlaysNow(double World)
+{
+	static double NetOverlaysMinute = -1.0;
+	static std::vector<std::string> NetOverlaysItems;
+	const double Minute = std::floor(World);
+	if (Minute != NetOverlaysMinute)
+	{
+		NetOverlaysMinute = Minute;
+		NetOverlaysItems = NetTickerOverlays(Minute);
+	}
+	return NetOverlaysItems;
 }
 } // namespace rlnet_detail
 
@@ -1065,6 +1174,31 @@ const std::vector<RiverLine::FeatureSlide>& RiverLine::FeatureSlides()
 			F.ClockLabel = net::DayOf(World) < Rc->FirstDay ? "SERIES STARTS IN" : "SERIES ENDS IN";
 			F.ClockAt = net::DayOf(World) < Rc->FirstDay ? static_cast<double>(Rc->FirstDay) * net::MinutesPerDay + 11.0 * 60.0 : static_cast<double>(Rc->LastDay + 1) * net::MinutesPerDay;
 			F.Cta = "Road to the Main Event";
+			F.Action = 1;
+			Slides.push_back(F);
+		}
+	}
+	// Update 4 G1 (SPEC v1.7 §2.7.4, §2.1.4, U13, U15, U16; F-hubs FH-5c): the festival slide's Afterglow form, in the festival slide's
+	// place from the crown for kAfterglowDays: U15's "{SHORT} CHAMPION · {NAME}" over the edition's name, U16's "Crowned {Date}." and
+	// the champion's prize (CHAMPION) from the world's roll; no clock (the edition is over); its button opens the series, the hub.
+	const world::Honor* AgMain = nullptr;
+	if (const fest::Festival* Ag = NetAfterglow(World, AgMain))
+	{
+		const net::SeriesInfo* AgSr = Net.FindSeries(Ag->SeriesId);
+		const world::World* AgW = Net.Attached();
+		if (AgSr && !AgSr->Short.empty() && AgMain && AgW)
+		{
+			FeatureSlide F;
+			F.Art = 2;
+			F.SeriesId = AgSr->Id;
+			F.Col = AgSr->Color;
+			F.Col2 = AgSr->Color2;
+			F.Kicker = AgSr->Short + " CHAMPION \xC2\xB7 " + NetUpper(AgMain->Name);
+			F.Title = AgSr->Name;
+			F.Sub = "Crowned " + fest::DateInSentence(net::DayOf(world::FestCrownedAt(*AgW, Ag->SeriesId)), net::DayOf(World)) + ".";
+			F.Big = NetMoney(AgMain->Prize > 0 ? AgMain->Prize : AgSr->GtdCents);
+			F.BigLabel = AgMain->Prize > 0 ? "CHAMPION" : "GUARANTEED";
+			F.Cta = "View the series";
 			F.Action = 1;
 			Slides.push_back(F);
 		}
@@ -2115,9 +2249,10 @@ namespace rlnet_detail
 {
 /** Update 4 G1 (SPEC v1.7 §2.7.4, §2.1.4, U15; LEAD_CALLS R-32; F-hubs FH-3a): RiverLine's festival on the taskbar's wire from its
  *  Buildup: "{SHORT} · OPENS IN {D}D" through the Buildup, "{SHORT} · DAY {N} OF {M}" while Live (its Main day included); "" before
- *  the Buildup (the Announced weeks keep today's wire, so Night One's lobby stays still) and after LastDay (the Afterglow's item is
- *  FH-5c's). Series is set to the edition's series id (the wire's own series item gives way to it). Every figure from the edition's
- *  dates and the clock. */
+ *  the Buildup (the Announced weeks keep today's wire, so Night One's lobby stays still) and after LastDay until the crown. FH-5c: the
+ *  Afterglow's item, "{SHORT} CHAMPION · {NAME}" (NetAfterglow: kAfterglowDays from the crown, the Main's champion on the world's
+ *  roll), ahead of a next edition's Buildup as the hub orders them (the edition on stage first). Series is set to the edition's series
+ *  id (the wire's own series item gives way to it). Every figure from the edition's dates, the roll and the clock. */
 std::string NetTickerFest(double World, std::string& Series)
 {
 	Series.clear();
@@ -2128,6 +2263,14 @@ std::string NetTickerFest(double World, std::string& Series)
 	const bool Live = F != nullptr;
 	if (!F)
 	{
+		const world::Honor* Champ = nullptr;
+		const fest::Festival* Ag = NetAfterglow(World, Champ);
+		const net::SeriesInfo* AgSr = Ag ? Net.FindSeries(Ag->SeriesId) : nullptr;
+		if (AgSr && !AgSr->Short.empty() && Champ)
+		{
+			Series = Ag->SeriesId;
+			return AgSr->Short + " CHAMPION \xC2\xB7 " + NetUpper(Champ->Name);
+		}
 		for (const fest::Festival* Next : fest::Festivals(Today, Today + fest::kBuildupDays + 1))
 		{
 			if (Next->Site == Site && fest::PhaseOf(*Next, World, Net.Attached()) == fest::Phase::Buildup)
@@ -2194,7 +2337,14 @@ void RiverLine::Ticker(const Rect& R, double Now)
 	{
 		const net::SeriesInfo* Fs = Net.FindSeries(FestSeries);
 		const festart::FestivalLook* FestLook = Fs ? festart::LookFor(*Fs) : nullptr;
-		Items.insert(Items.begin() + 1, Item{FestItem, FestLook && FestLook->Accent ? Hex(FestLook->Accent) : Fs ? Hex(Fs->Color) : pal::Gold});
+		const Color FestCol = FestLook && FestLook->Accent ? Hex(FestLook->Accent) : Fs ? Hex(Fs->Color) : pal::Gold;
+		Items.insert(Items.begin() + 1, Item{FestItem, FestCol});
+		// FH-5c (§2.4.4, U26): while it is Live, its headliners' overlays and projections follow its item, in its Accent.
+		const std::vector<std::string>& Overlays = NetTickerOverlaysNow(World);
+		for (size_t I = 0; I < Overlays.size(); ++I)
+		{
+			Items.insert(Items.begin() + 2 + static_cast<std::ptrdiff_t>(I), Item{Overlays[I], FestCol});
+		}
 	}
 	if (const net::SeriesInfo* Sr = NetWireSeries(Net, World, FestSeries))
 	{
@@ -3174,7 +3324,8 @@ namespace rlfest_detail
  *  placeholders the hub's sample names ({FESTIVAL} the Short, {N}, {Days}, {D}, {Gtd}, {Added}, {FirstDate}, {LastDate}, {Time},
  *  {Name}), filled from the sim when drawn. FH-3b: the takeover's words (U15, U22, U32 and the floor's Main cabinet). FH-4B: the
  *  register sheets' YOUR strip (U5, U10 without its race clause, the race at its right), U37 and the wallets' step ticket rows. FH-6b:
- *  the trophy cases' festival words (U20), DEFENDING CHAMPION and the honorific line (U21). */
+ *  the trophy cases' festival words (U20), DEFENDING CHAMPION and the honorific line (U21). FH-5c: slide 0's Afterglow form (U13's
+ *  CHAMPION, U16's crown date) and the wire's overlay items (U26). */
 std::vector<std::string> HostUiStrings()
 {
 	return {
@@ -3241,6 +3392,13 @@ std::vector<std::string> HostUiStrings()
 		"label\tDefending {Festival} champion",
 		"label\t{Festival} {Year} champion",
 		"label\t{Festival} {Year} Player of the Series",
+		// FH-5c (§2.1.4, §2.4.4; U13, U15, U16, U26): slide 0's Afterglow form (U15's champion line above, CHAMPION over the champion's
+		// prize, U16's crown date; the wire's Afterglow item is U15's line too) and the wire's overlay items while the festival is Live.
+		"label\tCHAMPION",
+		"sentence\tCrowned {Date}.",
+		"sentence\t{Site} added {Overlay} to cover {Event}'s guarantee.",
+		"sentence\t{Event} is projected {Amount} short.",
+		"sentence\t{Event} is projected {Amount} over.",
 	};
 }
 

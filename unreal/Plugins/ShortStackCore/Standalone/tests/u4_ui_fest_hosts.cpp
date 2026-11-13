@@ -25,6 +25,10 @@
 // honorific line, only for a true defender, from the roll and the calendar; rlnet_detail::NetFestDefends, NetFestHonorific), the pin
 // wall's band on the Career page (RiverLine Rewards keeps it while the wall is hidden) and the trophy case's festival pieces (U20,
 // rlnet_detail::NetFestCase) with the Career page's cost printed (asserted at FH-7); FestCopyUi's B half gains U20's and U21's strings.
+// G1 FH-5c: FestAfterglowHosts (§2.1.4's Afterglow on the hosts' front pages, U15, U16; §2.4.4's overlay watch on RiverLine's wire,
+// U26; PLAN_FHUBS Q23), on FestHonestLines' career: the wire's overlay items through RCOP 2026's days against the test's own reading of
+// site::show::OverlayOf, drawn on the lobby; RCOP 2026's Afterglow on slide 0 and the wire (the champion from the world's roll, nothing
+// before the crown or after the three days); RunItTwice's first edition's Afterglow on the tape; FestCopyUi's B half gains their strings.
 #include "UiSeg.h"
 
 #include "CopyLint.h"
@@ -33,6 +37,7 @@
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/SiteShow.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/WorldFest.h"
@@ -73,6 +78,9 @@ int NetStepTicket(net::SiteId Site, const std::string& Ticket, double World, con
 const fest::Festival* NetFestDefends(const world::World& W, int Npc, double WorldMin);
 std::string NetFestHonorific(const world::World& W, int Npc, double WorldMin);
 std::vector<std::pair<const world::Award*, const world::Honor*>> NetFestCase(const std::vector<world::Award>& Awards, const world::World& W, int Npc);
+// UI/RiverLineNet.cpp (FH-5c): RiverLine's edition in its Afterglow (and its Main's champion) and the wire's overlay items (U26).
+const fest::Festival* NetAfterglow(double World, const world::Honor*& Main);
+std::vector<std::string> NetTickerOverlays(double World);
 } // namespace rlnet_detail
 namespace rlignite_detail
 {
@@ -95,6 +103,9 @@ std::string RitFestCode(const net::Network& Net, const net::EventInstance& E);
 std::string RitTableCode(const std::string& EventId);
 std::string RitEventName(const std::string& Name);
 void RitHoldSelection(RiverLine& RL, const std::string& InstanceId);
+// UI/RiverLineRit.cpp (FH-5c): the tape's festival at a minute (and its phase) and its Afterglow item.
+const fest::Festival* RitTapeFest(double World, fest::Phase& P);
+std::string RitTapeChampion(const fest::Festival& F);
 } // namespace rlrit_detail
 namespace agenda_detail
 {
@@ -589,7 +600,7 @@ void FestCopyUiHosts()
 	const std::pair<const char*, const char*> Extra[] = {{"D", "12"}, {"N", "4"}, {"Days", "22"}, {"FirstDate", "Mar 30"}, {"LastDate", "Apr 11"}, {"Gtd", "$281,100"},
 		{"Added", "$2,500"}, {"FESTIVAL", "PENNANT"}, {"Time", "9:00 PM"}, {"Name", "MRS. PARK"}, {"Festival", "RCOP 2027"}, {"BuyIn", "$5,250"},
 		{"Prize", "$795.32"}, {"Date", "Oct 6"}, {"Rank", "38th"}, {"Scorers", "1,124"}, {"Events", "3"}, {"Cashes", "2"}, {"Best", "9th"},
-		{"Field", "1,104"}, {"Dates", "Apr 7 and Apr 9"}, {"Year", "2027"}};
+		{"Field", "1,104"}, {"Dates", "Apr 7 and Apr 9"}, {"Year", "2027"}, {"Site", "RiverLine"}, {"Overlay", "$4,210"}};
 	for (const auto& Kv : Extra)
 	{
 		Vars[Kv.first] = Kv.second;
@@ -617,6 +628,19 @@ void FestCopyUiHosts()
 		}
 	}
 	ui_test::Expect(Inv.size() >= 12, "FestCopyUi (hosts): stream B's strings reach fest::FestUiInventory through HostUiStrings");
+	// FH-5c: the wire's overlay items in U26's three forms, in their current sense (SPEC minor 12): never v1.0's "paid {Overlay} over its
+	// guarantee", which said the opposite of an overlay.
+	int HostsU26 = 0;
+	bool HostsOldSense = false;
+	for (const std::string& Entry : Inv)
+	{
+		HostsU26 += Entry == "sentence	{Site} added {Overlay} to cover {Event}'s guarantee." || Entry == "sentence	{Event} is projected {Amount} short." ||
+				Entry == "sentence	{Event} is projected {Amount} over."
+			? 1
+			: 0;
+		HostsOldSense = HostsOldSense || Entry.find("over its guarantee") != std::string::npos;
+	}
+	ui_test::Expect(HostsU26 == 3 && !HostsOldSense, "FestCopyUi (hosts): the wire's overlay items are U26's three forms, never v1.0's \"paid {Overlay} over its guarantee\"");
 
 	// U15's figures (FestBlurbsFilled' U15 half): the Lighthouse's countdown and day from FEIGN 2026's dates and the clock.
 	const ss::fest::Festival* Feign = ss::fest::FestivalOf("ignite.feign26");
@@ -1275,6 +1299,305 @@ std::string HostsWantWire(const ss::fest::Festival& F, const std::string& Short,
 	return std::string();
 }
 
+/** FH-5c: NetMoney's form (RiverLine's money: whole dollars from $1,000 or on a whole dollar, else the cents). */
+std::string HostsNetMoney(ss::Chips Cents)
+{
+	return Cents >= 100000 || Cents % 100 == 0 ? HostsWhole(Cents) : ss::Money(Cents);
+}
+
+/** FH-5c: the wire's overlay items as the test reads them (§2.4.4, U26), from the network's own figures (site::show::OverlayOf) and
+ *  U26's three forms: while F is the edition Live on its site, its guaranteed headliners (featured, or its Main) that started in the
+ *  last day or start in the next twelve hours; the paid overlay once registration closed, else the projection short, else over (the
+ *  projected entries' pool past the guarantee); the two latest starts, in start order. The oracle NetTickerOverlays answers to. */
+std::vector<std::string> HostsWantOverlays(const ss::fest::Festival& F, double World)
+{
+	std::vector<std::string> Out;
+	const ss::fest::Festival* Live = ss::fest::LiveOn(F.Site, ss::net::DayOf(World));
+	if (!Live || Live->SeriesId != F.SeriesId)
+	{
+		return Out;
+	}
+	const ss::net::Network& Net = ss::net::Site(F.Site);
+	std::vector<std::pair<double, std::string>> All;
+	for (const ss::net::EventInstance& E : Net.Window(World - ss::net::MinutesPerDay, World + 12.0 * 60.0))
+	{
+		const ss::net::EventTemplate& T = Net.TemplateOf(E);
+		if (T.Series != F.SeriesId || T.GtdCents <= 0 || !(T.Featured || T.Id == F.MainId))
+		{
+			continue;
+		}
+		const ss::site::show::OverlayView V = ss::site::show::OverlayOf(Net, E, World);
+		if (!V.Shown)
+		{
+			continue;
+		}
+		const std::string Name = HostsShortName(T.Name);
+		const ss::Chips Over = static_cast<ss::Chips>(std::llround(V.Entries * static_cast<double>(T.BuyInCents) * Net.Definition().Rake.PrizeShare(T))) - T.GtdCents;
+		if (V.Actual && V.Cents > 0)
+		{
+			All.push_back({E.Start, "RiverLine added " + HostsNetMoney(V.Cents) + " to cover " + Name + "'s guarantee."});
+		}
+		else if (!V.Actual && V.Cents > 0)
+		{
+			All.push_back({E.Start, Name + " is projected " + HostsNetMoney(V.Cents) + " short."});
+		}
+		else if (!V.Actual && Over > 0)
+		{
+			All.push_back({E.Start, Name + " is projected " + HostsNetMoney(Over) + " over."});
+		}
+	}
+	std::stable_sort(All.begin(), All.end(), [](const std::pair<double, std::string>& A, const std::pair<double, std::string>& B) { return A.first < B.first; });
+	for (size_t I = All.size() > 2 ? All.size() - 2 : 0; I < All.size(); ++I)
+	{
+		Out.push_back(All[I].second);
+	}
+	return Out;
+}
+
+/** FH-5c: a tracked kicker read back (NetSpaced draws a glyph at a time): every run on the baseline Base from X0 on, in x order, its
+ *  spaces dropped. */
+std::string HostsSpacedAt(const ss::ui::DrawList& L, float Base, float X0)
+{
+	std::vector<std::pair<float, std::string>> Glyphs;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && std::fabs(Cmd.Text.BaselineY - Base) < 1.0f && Cmd.Text.X >= X0 - 1.0f)
+		{
+			Glyphs.push_back({Cmd.Text.X, Cmd.Text.Text});
+		}
+	}
+	std::stable_sort(Glyphs.begin(), Glyphs.end(), [](const std::pair<float, std::string>& A, const std::pair<float, std::string>& B) { return A.first < B.first; });
+	std::string Out;
+	for (const std::pair<float, std::string>& G : Glyphs)
+	{
+		for (const char Ch : G.second)
+		{
+			Out += Ch == ' ' ? std::string() : std::string(1, Ch);
+		}
+	}
+	return Out;
+}
+
+/** FH-5c: S with its spaces dropped. */
+std::string HostsNoSpaces(const std::string& S)
+{
+	std::string Out;
+	for (const char Ch : S)
+	{
+		Out += Ch == ' ' ? std::string() : std::string(1, Ch);
+	}
+	return Out;
+}
+
+/** FH-5c: edition F's Main Event champion on the world's roll (world::FestRoll), nullptr while it holds none. */
+const ss::world::Honor* HostsRollMain(const ss::world::World& W, const ss::fest::Festival& F)
+{
+	for (const ss::world::FestRollRow& Row : ss::world::FestRoll(W, F.Which))
+	{
+		if (Row.Key == F.SeriesId && Row.Main)
+		{
+			return Row.Main;
+		}
+	}
+	return nullptr;
+}
+
+/** FH-5c: the laptop's world caught up to its clock, and moved on past edition F's crown when the crown is still ahead; F's crown minute
+ *  (-1 while the world hasn't crowned it). */
+double HostsAfterCrown(HostsLaptop& P, const ss::fest::Festival& F)
+{
+	P.S.DrainWorld();
+	double Crowned = ss::world::FestCrownedAt(P.S.Living(), F.SeriesId);
+	if (Crowned > P.S.WorldMinutes())
+	{
+		P.At(Crowned + 60.0);
+		P.S.DrainWorld();
+		Crowned = ss::world::FestCrownedAt(P.S.Living(), F.SeriesId);
+	}
+	return Crowned;
+}
+
+/**
+ * FestAfterglowHosts, its RiverLine half (§2.1.4, §2.4.4, §2.7.4; U13, U15, U16, U26; F-hubs FH-5c), on FestHonestLines' career at
+ * RCOP 2026's Live day: (1) every three hours from the day before each RiverLine edition through 2027 to the day after it, the wire's
+ * overlay items (rlnet_detail::NetTickerOverlays) equal the test's own reading (HostsWantOverlays: OverlayOf in U26's forms, none
+ * outside its days), and at the first of those minutes still ahead in RCOP 2026's days the lobby's wire draws them; (2) two days after
+ * LastDay, once
+ * the world has crowned RCOP 2026 and in its Afterglow: the wire's festival item is U15's "RCOP CHAMPION · {NAME}" (the Main's champion
+ * on the roll), nothing in the Closing before the crown and nothing once the three days are over, and slide 0 takes its Afterglow form
+ * (the kicker's champion line, "Crowned {Date}." and the champion's prize).
+ * Plants: the wire's U26 items in v1.0's "paid {Overlay} over its guarantee"; the slide's Afterglow form dropped; the wire's Afterglow
+ * item kept to the Closing's "".
+ */
+void FestAfterglowWire(HostsLaptop& P, const ss::fest::Festival& Rcop, const ss::net::SeriesInfo& Rc)
+{
+	namespace rn = ss::ui::rlnet_detail;
+	const auto Began = std::chrono::steady_clock::now();
+	int Bad = 0, Added = 0, Shorts = 0, Overs = 0, Items = 0, Editions = 0;
+	std::vector<double> Ahead; // RCOP 2026's minutes still ahead of the laptop's clock whose wire has an overlay item
+	for (const ss::fest::Festival& Ed : ss::fest::All())
+	{
+		if (Ed.Site != ss::net::SiteId::RiverLine || Ed.FirstDay > Rcop.FirstDay + 450)
+		{
+			continue;
+		}
+		++Editions;
+		for (int Day = Ed.FirstDay - 1; Day <= Ed.LastDay + 1; ++Day)
+		{
+			for (int Hour = 0; Hour < 24; Hour += 3)
+			{
+				const double World = static_cast<double>(Day) * ss::net::MinutesPerDay + static_cast<double>(Hour) * 60.0 + 30.0;
+				const std::vector<std::string> Got = rn::NetTickerOverlays(World);
+				const std::vector<std::string> Want = HostsWantOverlays(Ed, World);
+				if (&Ed == &Rcop && !Got.empty() && World > P.S.WorldMinutes() && Day <= Rcop.LastDay)
+				{
+					Ahead.push_back(World);
+				}
+				if (Got != Want && ++Bad <= 3)
+				{
+				std::string G, Wt;
+				for (const std::string& S : Got)
+				{
+					G += "[" + S + "]";
+				}
+				for (const std::string& S : Want)
+				{
+					Wt += "[" + S + "]";
+				}
+				ui_test::Expect(false, ("FestAfterglowHosts: " + Ed.Name + "'s day " + std::to_string(Day) + " " + std::to_string(Hour) + ":30's wire overlays read " + G + ", not " + Wt).c_str());
+				}
+				for (const std::string& S : Got)
+				{
+					++Items;
+					Added += S.find(" to cover ") != std::string::npos ? 1 : 0;
+					Shorts += S.size() > 7 && S.compare(S.size() - 7, 7, " short.") == 0 ? 1 : 0;
+					Overs += S.size() > 6 && S.compare(S.size() - 6, 6, " over.") == 0 ? 1 : 0;
+				}
+			}
+		}
+	}
+	ui_test::Expect(Bad == 0, "FestAfterglowHosts: the wire's overlay items are U26's forms of OverlayOf's figures, the edition's headliners only, on its days only");
+	ui_test::Expect(Items > 0 && Added + Shorts + Overs == Items, "FestAfterglowHosts: the wire carries RiverLine's festivals' overlay items in U26's forms through their days");
+	// Drawn at the first minute still ahead in RCOP 2026's days whose wire has an overlay item.
+	ui_test::Expect(!Ahead.empty(), "FestAfterglowHosts: RCOP 2026's days ahead of the career's clock have a minute with an overlay item on the wire");
+	if (!Ahead.empty())
+	{
+		P.At(Ahead.front());
+	}
+	HostsOpenRiverLine(P, ss::ui::RiverLine::Page::Lobby);
+	const ss::ui::DrawList Lobby = P.Settled();
+	int Drawn = 0;
+	for (const std::string& S : rn::NetTickerOverlays(std::floor(P.S.WorldMinutes()))) // the wire reads its whole minute
+	{
+		Drawn += ui_test::DrewRun(Lobby, S) ? 1 : 0;
+		ui_test::Expect(ui_test::DrewRun(Lobby, S), ("FestAfterglowHosts: the lobby's wire draws \"" + S + "\"").c_str());
+	}
+	ui_test::Expect(Drawn > 0, "FestAfterglowHosts: RCOP's lobby draws an overlay item on its wire");
+
+	// RCOP 2026's Afterglow: two days after LastDay at noon, past the crown.
+	P.At(static_cast<double>(Rcop.LastDay + 2) * ss::net::MinutesPerDay + 12.0 * 60.0);
+	const double Crowned = HostsAfterCrown(P, Rcop);
+	const ss::world::World& W = P.S.Living();
+	const double At = P.S.WorldMinutes();
+	const ss::world::Honor* Champ = HostsRollMain(W, Rcop);
+	ui_test::Expect(Crowned > 0.0 && ss::fest::PhaseOf(Rcop, At, &W) == ss::fest::Phase::Afterglow && Champ,
+		"FestAfterglowHosts: the world has crowned RCOP 2026 two days after its last day, its Main's champion on the roll, and it is in its Afterglow");
+	if (!(Crowned > 0.0 && Champ))
+	{
+		return;
+	}
+	const std::string WantWire = Rc.Short + " CHAMPION \xC2\xB7 " + HostsUpper(Champ->Name);
+	std::string Series;
+	const std::string Wire = rn::NetTickerFest(At, Series);
+	ui_test::Expect(Wire == WantWire && Series == Rcop.SeriesId, ("FestAfterglowHosts: the wire's Afterglow item reads \"" + WantWire + "\", not \"" + Wire + "\"").c_str());
+	const ss::world::Honor* Held = nullptr;
+	ui_test::Expect(rn::NetAfterglow(At, Held) == &Rcop && Held == Champ, "FestAfterglowHosts: RCOP 2026 is RiverLine's edition in its Afterglow, with its Main's champion");
+	std::string Before, After;
+	const std::string Closing = ss::net::DayOf(Crowned - 30.0) > Rcop.LastDay ? rn::NetTickerFest(Crowned - 30.0, Before) : std::string();
+	const std::string Over = rn::NetTickerFest(Crowned + static_cast<double>(ss::fest::kAfterglowDays) * ss::net::MinutesPerDay + 60.0, After);
+	ui_test::Expect(Closing.empty() && Over != WantWire && After != Rcop.SeriesId,
+		("FestAfterglowHosts: no champion on the wire in the Closing before the crown (\"" + Closing + "\") nor once the Afterglow is over (\"" + Over + "\")").c_str());
+	HostsOpenRiverLine(P, ss::ui::RiverLine::Page::Lobby);
+	const std::string Sub = "Crowned " + ss::fest::DateInSentence(ss::net::DayOf(Crowned), ss::net::DayOf(At)) + ".";
+	const std::string Prize = HostsNetMoney(Champ->Prize);
+	const std::string Kicker = HostsNoSpaces(WantWire);
+	bool WireDrawn = false, SubDrawn = false, KickerDrawn = false, PrizeDrawn = false;
+	for (int Turn = 0; Turn < 12; ++Turn)
+	{
+		P.Now += 8.0;
+		P.Frame();
+		P.Now += 1.0;
+		const ss::ui::DrawList L = P.Frame();
+		WireDrawn = WireDrawn || ui_test::DrewRun(L, WantWire);
+		const bool Slide = ui_test::DrewRun(L, Sub);
+		SubDrawn = SubDrawn || Slide;
+		KickerDrawn = KickerDrawn || (Slide && HostsSpacedAt(L, 126.0f, 60.0f).find(Kicker) != std::string::npos);
+		PrizeDrawn = PrizeDrawn || (Slide && ui_test::DrewRun(L, Prize));
+	}
+	ui_test::Expect(WireDrawn, ("FestAfterglowHosts: the lobby's wire draws \"" + WantWire + "\"").c_str());
+	ui_test::Expect(SubDrawn && KickerDrawn && PrizeDrawn, ("FestAfterglowHosts: slide 0's Afterglow form draws \"" + WantWire + "\" over " + Rc.Name + ", \"" + Sub + "\" and " + Prize +
+		" (" + (SubDrawn ? "" : "no crown date ") + (KickerDrawn ? "" : "no champion line ") + (PrizeDrawn ? "" : "no prize") + ")").c_str());
+	std::printf("FestAfterglowHosts (wire): %d overlay items over %d RiverLine editions' days (%d added, %d short, %d over), %d drawn on RCOP 2026's day %d; crowned day %d; %s; "
+				"%s; %.2f s\n",
+		Items, Editions, Added, Shorts, Overs, Drawn, Ahead.empty() ? -1 : ss::net::DayOf(Ahead.front()) - Rcop.FirstDay + 1, ss::net::DayOf(Crowned), WantWire.c_str(), Sub.c_str(),
+		std::chrono::duration<double>(std::chrono::steady_clock::now() - Began).count());
+}
+
+/**
+ * FestAfterglowHosts, its RunItTwice half (§2.1.4, U15; PLAN_FHUBS Q23; F-hubs FH-5c), on the same career: RunItTwice's first edition
+ * whose Afterglow is still ahead, two days after its last day (past its crown): the tape's festival is it in its Afterglow, its item
+ * U15's "{SHORT} CHAMPION · {NAME}" (the Main's champion on the roll) drawn on THE BOARD's tape, and in the Closing before the crown
+ * the tape's festival is Closing (no champion yet).
+ * Plant: the tape's Afterglow item dropped.
+ */
+void FestAfterglowTape(HostsLaptop& P)
+{
+	namespace rr = ss::ui::rlrit_detail;
+	const int Today = ss::net::DayOf(P.S.WorldMinutes());
+	const ss::fest::Festival* F = nullptr;
+	for (const ss::fest::Festival& E : ss::fest::All())
+	{
+		if (!F && E.Site == ss::net::SiteId::RunItTwice && E.LastDay + 2 > Today)
+		{
+			F = &E;
+		}
+	}
+	ui_test::Expect(F != nullptr, "FestAfterglowHosts: RunItTwice has an edition ahead of the career's clock");
+	if (!F)
+	{
+		return;
+	}
+	P.At(static_cast<double>(F->LastDay + 2) * ss::net::MinutesPerDay + 12.0 * 60.0);
+	const double Crowned = HostsAfterCrown(P, *F);
+	const ss::world::World& W = P.S.Living();
+	const double At = P.S.WorldMinutes();
+	const ss::world::Honor* Champ = HostsRollMain(W, *F);
+	const ss::net::SeriesInfo* Sr = ss::net::Site(F->Site).FindSeries(F->SeriesId);
+	ui_test::Expect(Crowned > 0.0 && Champ && Sr && ss::fest::PhaseOf(*F, At, &W) == ss::fest::Phase::Afterglow,
+		("FestAfterglowHosts: the world has crowned " + F->Name + ", its Main's champion on the roll, and it is in its Afterglow").c_str());
+	if (!(Crowned > 0.0 && Champ && Sr))
+	{
+		return;
+	}
+	const std::string Want = Sr->Short + " CHAMPION \xC2\xB7 " + ss::ui::rlrit_detail::RitUpper(Champ->Name);
+	ss::fest::Phase Ph = ss::fest::Phase::Off;
+	ss::fest::Phase Early = ss::fest::Phase::Off;
+	const ss::fest::Festival* OnTape = rr::RitTapeFest(At, Ph);
+	const ss::fest::Festival* Before = rr::RitTapeFest(Crowned - 30.0, Early);
+	ui_test::Expect(OnTape == F && Ph == ss::fest::Phase::Afterglow && rr::RitTapeChampion(*F) == Want,
+		("FestAfterglowHosts: the tape's Afterglow item reads \"" + Want + "\", not \"" + rr::RitTapeChampion(*F) + "\"").c_str());
+	ui_test::Expect(Before == F && Early != ss::fest::Phase::Afterglow, ("FestAfterglowHosts: before " + F->Name + "'s crown the tape's festival is not in its Afterglow").c_str());
+	P.OpenRit(ss::ui::RiverLine::Page::Lobby);
+	bool Drawn = false;
+	for (int K = 0; K < 40 && !Drawn; ++K)
+	{
+		P.Now += 0.5;
+		Drawn = ui_test::DrewRun(P.Frame(), Want);
+	}
+	ui_test::Expect(Drawn, ("FestAfterglowHosts: RunItTwice's tape draws \"" + Want + "\" in " + F->Name + "'s Afterglow").c_str());
+	std::printf("FestAfterglowHosts (tape): %s crowned day %d; %s %s\n", F->Name.c_str(), ss::net::DayOf(Crowned), Want.c_str(), Drawn ? "drawn" : "not drawn");
+}
+
 void FestHonestDefenders(HostsLaptop& P); // FH-6b: below, after the YOUR strip's helpers it plays the hero's event with
 
 /**
@@ -1420,6 +1743,8 @@ void FestHonestLines()
 	ui_test::Expect(CareerText.find(WinGoal) != std::string::npos && (!CareerLast.empty() || CareerText.find("Last year") == std::string::npos),
 		("FestHonestLines: the Career goal reads \"" + WinGoal + "\" (U24, \"Last year\" only from the roll)").c_str());
 	ui_test::Expect(HostsClaim(Career, false).empty(), ("FestHonestLines: the Career page holds no typed past (" + HostsClaim(Career, false) + ")").c_str());
+	// FH-5c: the wire's overlay items through RCOP's days, then RCOP 2026's Afterglow on slide 0 and the wire (two days after LastDay).
+	FestAfterglowWire(P, *Rcop, *Rc);
 
 	// A plain series after RCOP: its Series board says what scores and draws no prize panel.
 	const ss::net::SeriesInfo* Plain = nullptr;
@@ -1449,7 +1774,9 @@ void FestHonestLines()
 		Gtd.c_str(), Night.Vertices.size(), HostsRuns(Night), Live.Vertices.size(), HostsRuns(Live), LiveDay - Rcop->FirstDay + 1,
 		static_cast<long long>(Live.Vertices.size()) - static_cast<long long>(Night.Vertices.size()), Plain ? Plain->Name.c_str() : "none",
 		std::chrono::duration<double>(std::chrono::steady_clock::now() - Began).count());
-	// FH-6b: the true defenders, the pin wall's band and the trophy case, on the same career a year on.
+	// FH-5c: RunItTwice's first edition's Afterglow on the tape; FH-6b: the true defenders, the pin wall's band and the trophy case, on the
+	// same career a year on.
+	FestAfterglowTape(P);
 	FestHonestDefenders(P);
 }
 /** FH-4B: one of edition F's runs on F's site at the laptop's clock: Kind 0 a numbered event (its series F's) in play now (late

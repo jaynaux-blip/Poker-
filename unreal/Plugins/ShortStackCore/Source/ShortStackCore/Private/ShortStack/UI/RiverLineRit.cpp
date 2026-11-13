@@ -651,7 +651,7 @@ void RitRail(RitCtx& X, bool Collapsed)
 
 /** Update 4 G1 (SPEC v1.7 §2.7.4, U15; F-hubs FH-3b): RunItTwice's festival on the tape at World: the edition Live today (fest::LiveOn),
  *  else the one in its Buildup (the countdown; an edition on stage in its Closing or Afterglow comes first, as the hub's routing
- *  orders them, and its Afterglow item is FH-5c's). Null when none. */
+ *  orders them; its Afterglow item is RitTapeChampion's, FH-5c). Null when none. */
 const fest::Festival* RitTapeFest(double World, fest::Phase& P)
 {
 	const net::Network& Net = net::Site(RitSite);
@@ -744,12 +744,34 @@ std::string RitTapeLeader(const fest::Festival& F, const world::World& W)
 		Grouped(static_cast<int64_t>(std::llround(Top.front().second.Points))) + " PTS";
 }
 
+/** Update 4 G1 (SPEC v1.7 §2.1.4, U15; PLAN_FHUBS Q23; F-hubs FH-5c): RunItTwice's front page in a festival's Afterglow carries the
+ *  champion on the tape: "{SHORT} CHAMPION · {NAME}", the edition's Main Event champion on the world's roll (world::FestRoll, the
+ *  attached world's); "" while the roll holds no Main for it (no world, or nobody crowned), so the tape never invents one. */
+std::string RitTapeChampion(const fest::Festival& F)
+{
+	const std::string Short = RitFestShort(F.SeriesId);
+	const world::World* W = net::Site(RitSite).Attached();
+	if (Short.empty() || !W)
+	{
+		return std::string();
+	}
+	for (const world::FestRollRow& Row : world::FestRoll(*W, F.Which))
+	{
+		if (Row.Key == F.SeriesId && Row.Main)
+		{
+			return Short + " CHAMPION \xC2\xB7 " + RitUpper(Row.Main->Name);
+		}
+	}
+	return std::string();
+}
+
 /** The tape's items: world facts only, rebuilt each world minute (W5: nothing invented, no hashed counts). */
 std::vector<RitTapeItem> RitTapeBuild(RitCtx& X)
 {
 	std::vector<RitTapeItem> Out = X.U.Extra; // the tables' own lines first: the latest wins
 	const net::Network& Net = net::Site(RitSite);
 	// Update 4 G1 (SPEC v1.7 §2.7.4, FH-3b): the festival's countdown (Buildup) or its day (Live), and its race's leader, in white.
+	// FH-5c (§2.1.4, U15, Q23): its champion through the Afterglow.
 	fest::Phase FestP = fest::Phase::Off;
 	const fest::Festival* Fest = RitTapeFest(X.World, FestP);
 	if (Fest)
@@ -758,6 +780,11 @@ std::vector<RitTapeItem> RitTapeBuild(RitCtx& X)
 		if (!Count.empty())
 		{
 			Out.push_back({"fest:count", Count, RitWhite, 0});
+		}
+		const std::string Champ = FestP == fest::Phase::Afterglow ? RitTapeChampion(*Fest) : std::string();
+		if (!Champ.empty())
+		{
+			Out.push_back({"fest:champ", Champ, RitWhite, 0});
 		}
 		const std::string Lead = FestP == fest::Phase::Live ? RitTapeLeader(*Fest, X.S.Living()) : std::string();
 		if (!Lead.empty())
