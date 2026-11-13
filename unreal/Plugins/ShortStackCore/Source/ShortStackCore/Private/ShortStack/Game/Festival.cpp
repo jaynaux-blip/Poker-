@@ -418,9 +418,53 @@ int PassNeeds(const Festival& F, const net::InviteGate& Gate)
 	return F.Edition == 1 ? 0 : Gate.FestivalEvents;
 }
 
-YourLineView YourLine(const Festival& /*F*/, const world::World* /*W*/)
+YourLineView YourLine(const Festival& F, const world::World* W)
 {
-	return YourLineView();
+	// G1 (F-hubs' body, sent as fhubs_to_fnet_1; LEAD_CALLS R-8; SPEC v1.7 §2.8.2): the hero's line in edition F, the YOUR panel's
+	// numbers and the register sheets' two-line strip. Shown once the hero has played F: the pin the world derives for it
+	// (world::HeroFestPins, one per edition played) gives the events, the cashes and the best finish with its field. "race {Rank} of
+	// {Scorers}" reads the race while the race the world's views read is F's (world::FestRaceKey: the live race, or its final
+	// standings until they clear), else the hero's kept mark for F (world::HeroMarks: the rank and scorers at the crown); Rank 0 leaves
+	// the clause off (not scoring yet, or no mark). Presentation only: never saved, no random number, no HoldGuarded call.
+	YourLineView V;
+	if (!W)
+	{
+		return V;
+	}
+	for (const world::HeroFestPin& Pin : world::HeroFestPins(*W))
+	{
+		if (Pin.Key == F.SeriesId)
+		{
+			V.Shown = true;
+			V.Name = F.Name;
+			V.Events = Pin.Events;
+			V.Cashes = Pin.Cashes;
+			V.Best = Pin.BestPlace;
+			V.Field = Pin.BestEntries;
+			break;
+		}
+	}
+	if (!V.Shown)
+	{
+		return V;
+	}
+	if (world::FestRaceKey(*W) == F.SeriesId)
+	{
+		const std::pair<int, int> Standing = world::FestStanding(*W, -1);
+		V.Rank = Standing.first;
+		V.Scorers = Standing.second;
+		return V;
+	}
+	for (const world::HeroFestMark& M : world::HeroMarks(*W))
+	{
+		if (M.Key == F.SeriesId)
+		{
+			V.Rank = M.Rank;
+			V.Scorers = M.Scorers;
+			break;
+		}
+	}
+	return V;
 }
 
 std::vector<std::string> Inventory()
