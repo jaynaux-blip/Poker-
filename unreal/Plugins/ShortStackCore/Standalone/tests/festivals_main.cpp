@@ -56,6 +56,15 @@
 // the network and the world to the cent on every rival Main of 2026-2028, the written lift's figures, a Blank world through FEIGN
 // I's Main), FestAddedMoneyAgrees (Added end to end, the Mains only, the world's P.Pool), FestGuarantees, FestNoRiverLineJuice,
 // FestOverlayIgnoresAdded, FestRacePoints and FestTalkBubbleCurve. SoftBound's line with PENNANT's Main is in rival_sites.
+//
+// G1, FN-6 (F-net; PLAN_FNET §4 FN-6 and its Corrections item 9; LEAD_CALLS R-14, R-15): tickets and seats. Network::NextFor walks a
+// one-off's repeats (G/Network.cpp) and fest::SeatsWon has its body (G/Festival.cpp), and two checks land with FestLadderSeats'
+// SeatsWon half: FestNextForRepeats (every run of the championships' steps through NextFor, Step 1's 13:30 run after the 12:00 one
+// on day 8, a Step 2 ticket good until day 11's last run; R-15's person half: WorldSim's ExpireTickets, through the forward
+// declaration below, credits no person's Step 2 ticket while runs remain and credits a dead one; and no other ticket a satellite
+// seats names a repeating event, so no other NextFor answer moves) and FestSeats (SeatsWon over every edition equals the sum over
+// its Main-ticket satellites at three moments; R-14's session half: a seat won in Ring Rush 2027's trio, planted as the session
+// plants a won seat, registers the hero into its Main through the session's path with the clock at day 165, no world simulated).
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/WorldSim.h"
 #include "CopyLint.h"
@@ -65,6 +74,7 @@
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Lobby.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Session.h"
 #include "ShortStack/Game/SiteShow.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/TableTalk.h"
@@ -84,6 +94,19 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+namespace ss
+{
+namespace world
+{
+namespace worldsim_detail
+{
+// G1, FN-6 (LEAD_CALLS R-15): G/WorldSim.cpp's (F-world's; no header): a person's tickets whose event and seat chain have nothing left
+// are credited at their seat value. FestNextForRepeats' person half calls it on a constructed Npc.
+void ExpireTickets(Npc& N, double Now);
+} // namespace worldsim_detail
+} // namespace world
+} // namespace ss
 
 namespace festivals_test
 {
@@ -1703,6 +1726,36 @@ void FestMajorFloorNet()
 		"(RCOP's trio over $1M each)" + Bad + TableBad);
 }
 
+// ------------------------------------------------------------------ FN-6's walks (F-net)
+
+/** Every run of template T starting in [From, To), through Network::Next (Instances' own list, never NextFor), in start order: the
+ *  independent walk FN-6's checks hold NextFor and SeatsWon to. */
+std::vector<ss::net::EventInstance> FestNetRunsOf(const ss::net::Network& N, const ss::net::EventTemplate& T, double From, double To)
+{
+	std::vector<ss::net::EventInstance> Out;
+	ss::net::EventInstance E;
+	for (double At = From; N.Next(T.Id, At, E) && E.Start < To; At = E.Start + 1.0)
+	{
+		Out.push_back(E);
+	}
+	return Out;
+}
+
+/** The world's seat rule (G/WorldSim.cpp's P.Seats) over every run of the one-offs Temps on their days finished by At:
+ *  Σ max(1, Pool / SeatValue). */
+int FestNetSeatsOf(const ss::net::Network& N, const std::vector<const ss::net::EventTemplate*>& Temps, double At)
+{
+	int Seats = 0;
+	for (const ss::net::EventTemplate* T : Temps)
+	{
+		for (const ss::net::EventInstance& E : FestNetRunsOf(N, *T, FestNetAt(T->OnlyDay), FestNetAt(T->OnlyDay + 1)))
+		{
+			Seats += E.Start + E.Duration <= At && T->SeatValueCents > 0 ? std::max<int>(1, static_cast<int>(E.Pool / T->SeatValueCents)) : 0;
+		}
+	}
+	return Seats;
+}
+
 // ------------------------------------------------------------------ FestLadderSeats (F-net)
 
 /** §2.3.2's ladder (v1.6), every PENNANT and REIGN edition: Step k's SeatTicket is Step k+1's ticket key; both of a step's templates
@@ -1710,8 +1763,9 @@ void FestMajorFloorNet()
  *  texts and values follow the next rung ("Step 2 tickets ($5.50)" at $5.50, "PENNANT Main Event seats" at $215) and SeatValue reads
  *  them by ticket; walked with FinalTarget's rule every satellite's seat ends at the Main ticket, which NextFor resolves through
  *  Takes to the edition's Main; a Step 2 ticket won on day 8 registers on day 9's Step 2 and, unused, on day 11's; Festival::Satellites
- *  holds the eight in ladder order. (SeatsWon's Main-ticket filter is FN-6's half.) Planted: a step keyed <series>-s2 (FinalTarget
- *  stops at Step 2). */
+ *  holds the eight in ladder order; FN-6: once the edition is over, SeatsWon counts the seats of Step 3, the Mega and the Last Chance
+ *  only (the satellites seating the Main ticket), never Step 1's or Step 2's step tickets. Planted: a step keyed <series>-s2
+ *  (FinalTarget stops at Step 2); SeatsWon counting Step 1's seats. */
 void FestLadderSeatsNet()
 {
 	namespace fest = ss::fest;
@@ -1783,6 +1837,14 @@ void FestLadderSeatsNet()
 			const bool Days = S1a->OnlyDay == F->FirstDay + 7 && S2a->OnlyDay == F->FirstDay + 8 && S2b->OnlyDay == F->FirstDay + 10;
 			Why = MainNext && Day9 && Day11 && Days ? Why : "NextFor misses a rung (Main " + std::to_string(MainNext) + ", day 9 " + std::to_string(Day9) + ", day 11 " +
 					std::to_string(Day11) + ")";
+			// SeatsWon (FN-6): over the finished edition, the Main-ticket satellites' seats alone; the steps' tickets are seats too
+			// (max(1, Pool / SeatValue) a run), but not Main seats.
+			const double Over = std::floor(fest::LastEnd(*F)) + FestNetDay;
+			const int MainSeats = FestNetSeatsOf(N, {S3a, S3b, Mega, Last}, Over);
+			const int StepSeats = FestNetSeatsOf(N, {S1a, S1b, S2a, S2b}, Over);
+			const int Won = fest::SeatsWon(*F, Over);
+			Why = Won == MainSeats && MainSeats > 0 && StepSeats > 0 ? Why
+				: "SeatsWon " + std::to_string(Won) + " against the Main-ticket satellites' " + std::to_string(MainSeats) + " (the steps' tickets " + std::to_string(StepSeats) + ")";
 		}
 		if (!Why.empty() && Bad.empty())
 		{
@@ -1792,7 +1854,8 @@ void FestLadderSeatsNet()
 	Expect(Editions == 28 && Bad.empty(),
 		"every PENNANT and REIGN edition's ladder (" + std::to_string(Editions) + "): Step 1 seats Step 2's key (-s2a), Step 2 Step 3's (-s3a), Step 3, the Mega and the Last "
 		"Chance the Main ticket; a step's two templates take its first run's id; seats texts and values from the next rung (\"Step 2 tickets ($5.50)\"); FinalTarget walks every "
-		"seat to the Main ticket and NextFor finds the Main through it; a Step 2 ticket from day 8 plays day 9's or day 11's Step 2; Satellites in ladder order" + Bad);
+		"seat to the Main ticket and NextFor finds the Main through it; a Step 2 ticket from day 8 plays day 9's or day 11's Step 2; Satellites in ladder order; SeatsWon "
+		"over a finished edition counts Step 3's, the Mega's and the Last Chance's seats, never the steps' tickets" + Bad);
 }
 
 // ------------------------------------------------------------------ FestMainTicket (F-net's half)
@@ -1854,6 +1917,297 @@ void FestMainTicketNet()
 		"each championship Main takes its year-free ticket (ignite.pennant-main, runittwice.reign-main) in every edition 2027-2040 (" + std::to_string(Editions) +
 			"); NextFor of it finds that edition's Main, and after the 2028 Main the 2029 Main; the key is at home on its site, seats at the Main's buy-in and is no "
 			"template's id; FEIGN's, GRIT's, PUSH's and WRIT's Mains take their own ids" + Bad);
+}
+
+// ------------------------------------------------------------------ FestNextForRepeats (F-net, FN-6)
+
+/** §2.3.2 (v1.6), §2.15.1, LEAD_CALLS R-15: NextFor walks a one-off's repeats. In every PENNANT and REIGN edition, walked from the
+ *  step's first day, NextFor of each step's ticket meets every run of the step's two templates in order (Network::Next's list: Step 1's
+ *  8 + 8 or 6 + 6, Step 2's 4 + 4 or 3 + 3, Step 3's 2 + 2), the same instances, and nothing after the last: Step 1's 13:30 run
+ *  (PENNANT; REIGN's 14:00) answers once the 12:00 run has started on day 8, and a Step 2 ticket finds day 11's last run (23:00 on
+ *  PENNANT, 21:00 on REIGN) a minute before it. The person half (R-15): a constructed Npc holding a Step 2 ticket keeps it, its
+ *  bankroll untouched, through ExpireTickets at days 8-11's boundaries and between day 11's runs, while ExpireTickets credits a 2040
+ *  Step 2 ticket at its value once that edition's Main has started (the ticket and its Main are spent). No other ticket moves: no
+ *  ticket a satellite seats on any site names a repeating one-off, outside the championships' Step 2 and Step 3 keys (GRIT's shows
+ *  take none). Planted: NextFor reading T.StartMinute only. */
+void FestNextForRepeatsNet()
+{
+	namespace fest = ss::fest;
+	namespace net = ss::net;
+	namespace world = ss::world;
+	int Editions = 0;
+	int Runs = 0;
+	std::string Bad;
+	std::string PersonBad;
+	std::string Sample;
+	for (const fest::Festival* F : FestNetRivalEditions())
+	{
+		if (!fest::IsChampionship(F->Which))
+		{
+			continue;
+		}
+		++Editions;
+		const net::Network& N = net::Site(F->Site);
+		const auto Tm = [&N, F](const char* Stem) { return N.FindTemplate(F->SeriesId + Stem); };
+		const net::EventTemplate* Steps[3][2] = {{Tm("-s1a"), Tm("-s1b")}, {Tm("-s2a"), Tm("-s2b")}, {Tm("-s3a"), Tm("-s3b")}};
+		std::string Why;
+		for (int K = 0; K < 3 && Why.empty(); ++K)
+		{
+			const net::EventTemplate* A = Steps[K][0];
+			const net::EventTemplate* B = Steps[K][1];
+			if (!A || !B)
+			{
+				Why = "Step " + std::to_string(K + 1) + " is missing";
+				break;
+			}
+			// Every run, as Instances lists them, against NextFor's walk of the step's ticket.
+			std::vector<net::EventInstance> Want = FestNetRunsOf(N, *A, FestNetAt(A->OnlyDay), FestNetAt(A->OnlyDay + 1));
+			const std::vector<net::EventInstance> Second = FestNetRunsOf(N, *B, FestNetAt(B->OnlyDay), FestNetAt(B->OnlyDay + 1));
+			Want.insert(Want.end(), Second.begin(), Second.end());
+			std::vector<std::string> Got;
+			net::EventInstance E;
+			for (double From = FestNetAt(A->OnlyDay); N.NextFor(A->Id, From, E) && Got.size() < 64; From = E.Start + 1.0)
+			{
+				Got.push_back(E.Id + "/" + std::to_string(E.Entries) + "/" + std::to_string(E.Pool));
+			}
+			std::vector<std::string> Listed;
+			for (const net::EventInstance& W : Want)
+			{
+				Listed.push_back(W.Id + "/" + std::to_string(W.Entries) + "/" + std::to_string(W.Pool));
+			}
+			const size_t Expected = F->Which == fest::Brand::Pennant ? (K == 0 ? 16u : K == 1 ? 8u : 4u) : (K == 0 ? 12u : K == 1 ? 6u : 4u);
+			Runs += static_cast<int>(Got.size());
+			if (Got != Listed || Listed.size() != Expected)
+			{
+				Why = "Step " + std::to_string(K + 1) + "'s ticket meets " + std::to_string(Got.size()) + " runs through NextFor, " + std::to_string(Listed.size()) +
+					" listed (" + std::to_string(Expected) + " expected)";
+			}
+		}
+		if (Steps[0][0] && Steps[1][0] && Steps[1][1])
+		{
+			const net::EventTemplate* S1a = Steps[0][0];
+			const net::EventTemplate* S2a = Steps[1][0];
+			const net::EventTemplate* S2b = Steps[1][1];
+			const int Second = F->Which == fest::Brand::Pennant ? 13 * 60 + 30 : 14 * 60;
+			const int LastRun = F->Which == fest::Brand::Pennant ? 23 * 60 : 21 * 60;
+			net::EventInstance E;
+			const bool Day8 = N.NextFor(S1a->Id, FestNetAt(S1a->OnlyDay, 12 * 60) + 1.0, E) && &N.TemplateOf(E) == S1a && E.Start == FestNetAt(S1a->OnlyDay, Second);
+			const bool Day11 = N.NextFor(S2a->Id, FestNetAt(S2b->OnlyDay, LastRun) - 1.0, E) && &N.TemplateOf(E) == S2b && E.Start == FestNetAt(S2b->OnlyDay, LastRun);
+			const bool After = !N.NextFor(S2a->Id, FestNetAt(S2b->OnlyDay, LastRun) + 1.0, E);
+			const bool Days = S1a->OnlyDay == F->FirstDay + 7 && S2b->OnlyDay == F->FirstDay + 10;
+			Why = (Day8 && Day11 && After && Days) || !Why.empty() ? Why
+				: "Step 1's second run on day 8 " + std::to_string(Day8) + ", day 11's last Step 2 " + std::to_string(Day11) + ", nothing after it " + std::to_string(After);
+			if (Why.empty() && Sample.empty())
+			{
+				Sample = "; " + F->Name + ": Step 1 from 12:01 on day 8 -> " + net::TimeLabel(FestNetAt(S1a->OnlyDay, Second)) + ", a Step 2 ticket from " +
+					net::TimeLabel(FestNetAt(S2b->OnlyDay, LastRun) - 1.0) + " on day 11 -> " + net::TimeLabel(FestNetAt(S2b->OnlyDay, LastRun));
+			}
+			// The person half (R-15): a Step 2 ticket held from day 8 is never credited while day 11's runs remain.
+			std::string Person;
+			world::Npc P;
+			P.Tickets[S2a->Id] = 1;
+			const ss::Chips Roll = P.Bankroll;
+			const double Moments[] = {FestNetAt(F->FirstDay + 7), FestNetAt(F->FirstDay + 8), FestNetAt(F->FirstDay + 9), FestNetAt(F->FirstDay + 10),
+				FestNetAt(S2b->OnlyDay, LastRun) - 60.0};
+			for (double Now : Moments)
+			{
+				world::worldsim_detail::ExpireTickets(P, Now);
+				if (Person.empty() && (P.Tickets.count(S2a->Id) == 0 || P.Bankroll != Roll))
+				{
+					Person = "ExpireTickets credited a Step 2 ticket at " + net::TimeLabel(Now) + " on day " + std::to_string(net::DayOf(Now) - F->FirstDay + 1);
+				}
+			}
+			// The contrast: the last edition's Step 2 ticket, once its Main has started, has nothing left and is credited at its value.
+			if (F->Year == fest::kLastYear)
+			{
+				world::Npc Late;
+				Late.Tickets[S2a->Id] = 1;
+				const ss::Chips Before = Late.Bankroll;
+				world::worldsim_detail::ExpireTickets(Late, F->MainStart + 1.0);
+				Person = Person.empty() && (Late.Tickets.count(S2a->Id) != 0 || Late.Bankroll != Before + N.SeatValue(S2a->Id) || N.SeatValue(S2a->Id) != S2a->BuyInCents)
+					? "the spent Step 2 ticket is not credited at its value"
+					: Person;
+			}
+			if (!Person.empty() && PersonBad.empty())
+			{
+				PersonBad = "; the person half: " + F->Name + ": " + Person;
+			}
+		}
+		if (!Why.empty() && Bad.empty())
+		{
+			Bad = ": " + F->Name + ": " + Why;
+		}
+	}
+	// No other ticket moves: every ticket a satellite seats that names a repeating one-off is a championship's Step 2 or Step 3 key.
+	int Seated = 0;
+	std::string Other;
+	for (int S = 0; S < static_cast<int>(net::SiteId::Count); ++S)
+	{
+		const net::Network& N = net::Site(static_cast<net::SiteId>(S));
+		std::set<std::string> Repeating;
+		for (const net::EventTemplate& T : N.Templates())
+		{
+			if (T.OnlyDay != -9999 && T.EveryMinutes > 0)
+			{
+				Repeating.insert(N.TicketOf(T.Id));
+			}
+		}
+		for (const net::EventTemplate& T : N.Templates())
+		{
+			if (T.Fmt != net::Format::Satellite || T.SeatTicket.empty())
+			{
+				continue;
+			}
+			++Seated;
+			const size_t Dash = T.SeatTicket.rfind('-');
+			const std::string Key = Dash == std::string::npos ? std::string() : T.SeatTicket.substr(Dash);
+			const fest::Festival* Of = fest::FestivalOf(Dash == std::string::npos ? std::string() : T.SeatTicket.substr(0, Dash));
+			const bool Step = (Key == "-s2a" || Key == "-s3a") && Of && fest::IsChampionship(Of->Which) && Of->Site != net::SiteId::RiverLine;
+			if (Repeating.count(T.SeatTicket) > 0 && !Step && Other.empty())
+			{
+				Other = "; " + T.Id + " seats " + T.SeatTicket + ", a repeating event";
+			}
+		}
+	}
+	std::printf("  FestNextForRepeats: %d championship editions, %d step runs met through NextFor, %d satellite seats checked for repeats%s\n", Editions, Runs, Seated,
+		Sample.c_str());
+	Expect(Editions == 28 && Bad.empty() && PersonBad.empty() && Runs == 14 * (16 + 8 + 4) + 14 * (12 + 6 + 4) && Seated > 0 && Other.empty(),
+		"NextFor walks a one-off's repeats: in every PENNANT and REIGN edition (" + std::to_string(Editions) + ") each step's ticket meets every run of its two templates (" +
+			std::to_string(Runs) + " runs, the instances Network::Next lists) and nothing after; Step 1's next run after 12:00 on day 8 is 13:30 (REIGN 14:00); a Step 2 "
+			"ticket finds day 11's last run; ExpireTickets keeps a person's Step 2 ticket at days 8-11's boundaries and between day 11's runs, and credits a spent one at "
+			"its value; no other ticket a satellite seats (" + std::to_string(Seated) + ") names a repeating event" + Sample + Bad + PersonBad + Other);
+}
+
+// ------------------------------------------------------------------ FestSeats (F-net, FN-6)
+
+/** §2.8.3, §2.15.1, LEAD_CALLS R-14: SeatsWon. Over every edition (all three sites, 2026-2040), at Buildup's start, at the Main's
+ *  start and a day after its last event, SeatsWon equals Σ max(1, Pool / SeatValue) over the runs of its satellites whose SeatTicket
+ *  is its Main's ticket finished by then (each run walked by Network::Next: a one-off's on its day, RCOP's recurring step4 and
+ *  mega-rcop from Buildup to the Main's start); a championship's Step 1 and 2 seats are step tickets, left out (PENNANT and REIGN:
+ *  their seats exist and the figure is below the all-satellite sum), while every other festival's satellites all seat its Main, so
+ *  its figure is the plain sum (unchanged); a finished edition with satellites has seats. The session half (R-14): Ring Rush 2027's
+ *  Main Satellite's seat, planted as a won seat is (++Life.Tickets[SeatTicket], G/Session.cpp's seat line), registers the hero into
+ *  that Main through the session's path (Listing, CanAfford through Session::TicketsFor, RegisterEvent) with the clock at day 165,
+ *  2 hours before the Main, no world simulated: the table opens on the Main, the ticket is spent and the bankroll untouched.
+ *  Planted: seats counted from tracked winners only (one a finished satellite); Step 1's seats counted. */
+void FestSeatsNet()
+{
+	namespace fest = ss::fest;
+	namespace net = ss::net;
+	struct Run
+	{
+		double End;
+		int Seats;
+		bool Main;
+	};
+	int Editions = 0;
+	int Champs = 0;
+	int Seated = 0;
+	std::string Bad;
+	std::string Sample;
+	for (const fest::Festival& F : fest::All())
+	{
+		++Editions;
+		const net::Network& N = net::Site(F.Site);
+		const std::string MainTicket = N.TicketOf(F.MainId);
+		const double Buildup = FestNetAt(F.FirstDay - fest::kBuildupDays);
+		std::vector<Run> Runs;
+		bool AllMain = true;
+		for (const std::string& Id : F.Satellites)
+		{
+			const net::EventTemplate* T = N.FindTemplate(Id);
+			if (!T)
+			{
+				AllMain = false;
+				continue;
+			}
+			const bool Main = T->SeatTicket == MainTicket;
+			const bool Recurring = T->OnlyDay == -9999;
+			AllMain = AllMain && Main;
+			for (const net::EventInstance& E : FestNetRunsOf(N, *T, Recurring ? Buildup : FestNetAt(T->OnlyDay), Recurring ? F.MainStart : FestNetAt(T->OnlyDay + 1)))
+			{
+				Runs.push_back({E.Start + E.Duration, T->SeatValueCents > 0 ? std::max<int>(1, static_cast<int>(E.Pool / T->SeatValueCents)) : 0, Main});
+			}
+		}
+		const auto Sum = [&Runs](double At, bool MainOnly) {
+			int S = 0;
+			for (const Run& R : Runs)
+			{
+				S += R.End <= At && (R.Main || !MainOnly) ? R.Seats : 0;
+			}
+			return S;
+		};
+		const double Done = std::floor(fest::LastEnd(F)) + FestNetDay;
+		const double Moments[] = {Buildup, std::floor(F.MainStart), Done};
+		std::string Why;
+		for (double At : Moments)
+		{
+			const int Won = fest::SeatsWon(F, At);
+			Why = Why.empty() && Won != Sum(At, true)
+				? "SeatsWon " + std::to_string(Won) + " at " + net::TimeLabel(At) + " on " + FestNetDate(net::DayOf(At)) + ", the Main-ticket satellites' " +
+					std::to_string(Sum(At, true))
+				: Why;
+		}
+		const bool Ladder = fest::IsChampionship(F.Which) && F.Site != net::SiteId::RiverLine;
+		Champs += Ladder ? 1 : 0;
+		const int Won = fest::SeatsWon(F, Done);
+		const int Every = Sum(Done, false);
+		Seated += Won > 0 ? 1 : 0;
+		if (Why.empty() && Ladder && (AllMain || Every <= Won))
+		{
+			Why = "the steps' tickets (" + std::to_string(Every - Won) + ") are not left out";
+		}
+		if (Why.empty() && !Ladder && !AllMain)
+		{
+			Why = "a satellite seats something other than the Main";
+		}
+		if (Why.empty() && !Runs.empty() && Won <= 0)
+		{
+			Why = "no seats after the edition";
+		}
+		if (!Why.empty() && Bad.empty())
+		{
+			Bad = ": " + F.Name + ": " + Why;
+		}
+		const bool Shown = F.Year == 2027 && (F.Which == fest::Brand::Pennant || F.Which == fest::Brand::Reign || F.Which == fest::Brand::RingRush) ||
+			(F.Year == 2026 && F.Which == fest::Brand::Rcop);
+		if (Shown)
+		{
+			Sample += "; " + F.Name + " " + std::to_string(Won) + (Ladder ? " (the steps' " + std::to_string(Every - Won) + " left out)" : std::string());
+		}
+	}
+	// The session half (R-14): a seat won in the RiverLine trio registers the hero into the Main through SeatTicket.
+	const fest::Festival* Ring = nullptr;
+	for (const fest::Festival& F : fest::All())
+	{
+		Ring = !Ring && F.Which == fest::Brand::RingRush && F.Year == 2027 ? &F : Ring;
+	}
+	const net::Network& Home = net::Site(net::SiteId::RiverLine);
+	const net::EventTemplate* Sat = Ring ? Home.FindTemplate(Ring->SeriesId + "-step") : nullptr;
+	net::EventInstance MainE;
+	std::string Session = "no Ring Rush 2027, its Main Satellite or its Main";
+	if (Ring && Sat && Home.Next(Ring->MainId, FestNetAt(Ring->MainDay), MainE) && Home.TemplateOf(MainE).Id == Ring->MainId)
+	{
+		ss::SessionHooks Quiet;
+		ss::Session S(Quiet, "festseats");
+		S.LobbyMinutes = MainE.Start - 120.0 - FestNetAt(net::NightOneDay);
+		S.BankrollCents = 0;
+		++S.Life.Tickets[Sat->SeatTicket];
+		const ss::LobbyEvent L = Home.Listing(MainE, nullptr, S.Unlocks());
+		const bool Afford = S.CanAfford(L);
+		const std::string Why = S.RegisterEvent(L);
+		const bool In = Why.empty() && S.T && S.T->Spec.Id == MainE.Id && S.Life.TicketsFor(Sat->SeatTicket) == 0 && S.BankrollCents == 0;
+		Session = Ring->MainDay == 165 && net::DayOf(S.WorldMinutes()) == 165 && Afford && In ? std::string()
+			: "the hero with " + Sat->Id + "'s seat (" + Sat->SeatTicket + ") on day " + std::to_string(net::DayOf(S.WorldMinutes())) + ": " + (Afford ? "" : "can't afford; ") +
+				(Why.empty() ? (In ? "" : "registered, but not into the Main with the ticket spent") : Why);
+	}
+	std::printf("  FestSeats: %d editions (%d championships with ladders, %d with seats)%s; the session half: %s\n", Editions, Champs, Seated, Sample.c_str(),
+		Session.empty() ? "Ring Rush 2027's Main registered with the trio's seat on day 165" : Session.c_str());
+	Expect(Editions > 100 && Champs == 28 && Seated > 100 && Bad.empty() && Session.empty(),
+		"SeatsWon over every edition (" + std::to_string(Editions) + ", " + std::to_string(Seated) + " with seats) equals Σ max(1, Pool / SeatValue) over its Main-ticket "
+			"satellites finished by then (at Buildup, the Main's start and after the last event); PENNANT's and REIGN's Step 1 and 2 tickets are left out, every other "
+			"festival's satellites all seat its Main; a seat won in Ring Rush 2027's trio registers the hero into its Main through the session on day 165 (ticket spent, "
+			"bankroll untouched)" + Sample + Bad + (Session.empty() ? std::string() : ": " + Session));
 }
 
 // ------------------------------------------------------------------ FestNamesScreened (F-net)
@@ -3734,6 +4088,15 @@ void SegNet()
 	if (Only("FestMainTicket"))
 	{
 		FestMainTicketNet();
+	}
+	// G1, FN-6: tickets and seats.
+	if (Only("FestNextForRepeats"))
+	{
+		FestNextForRepeatsNet();
+	}
+	if (Only("FestSeats"))
+	{
+		FestSeatsNet();
 	}
 	// FN-2a: the rival festivals (FEIGN and GRIT) and the copy.
 	if (Only("FestTemplatesAppended"))

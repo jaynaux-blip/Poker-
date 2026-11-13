@@ -41,6 +41,13 @@
 // G1, FN-4b (F-net; SPEC v1.7 §2.11; PLAN_FNET's Corrections item 1): Inventory is complete: the trophies and the championships' title
 // objects (P1-P12, through TrophyName), the crown Honor's title (C1) and every room word of the six rival plans
 // (G/NetworkFestival.cpp's NetSitesFestRoomWords), after the strings above.
+//
+// G1, FN-6 (F-net; SPEC v1.7 §2.8.3, §2.3.2; PLAN_FNET §4 FN-6): SeatsWon's body. The seats into the edition's Main won by satellite
+// so far: max(1, Pool / SeatValue) an instance, the world's own seat rule, over the satellites in Festival::Satellites whose SeatTicket
+// is the Main's ticket (a championship's Step 1 and 2 seat step tickets, which chain to the Main through the ladder, so they are left
+// out; every other festival's satellites all seat its Main, so its figure is the plain sum), each one-off's runs on its day and a
+// recurring satellite's (RCOP's step4 and mega-rcop) from Buildup to the Main's start, counted once finished. Worked out per world
+// minute and kept per series under a lock (the hub and a desk worker may both ask), the LastEnd precedent.
 #include "ShortStack/Game/Festival.h"
 
 #include "ShortStack/Game/Life.h"
@@ -50,6 +57,7 @@
 #include "ShortStack/Game/WorldFest.h"
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <mutex>
 #include <set>
@@ -265,6 +273,62 @@ std::map<std::string, double>& FestCalEnds()
 	static std::map<std::string, double>* const FestCalEndMap = new std::map<std::string, double>();
 	return *FestCalEndMap;
 }
+
+/** SeatsWon's cache (FN-6): series id -> (the world minute, the seats won by then), under FestSeatsLock. */
+std::mutex& FestSeatsLock()
+{
+	static std::mutex* const FestSeatsMutex = new std::mutex();
+	return *FestSeatsMutex;
+}
+
+std::map<std::string, std::pair<double, int>>& FestSeatsCache()
+{
+	static std::map<std::string, std::pair<double, int>>* const FestSeatsMap = new std::map<std::string, std::pair<double, int>>();
+	return *FestSeatsMap;
+}
+
+/** The seats into F's Main won by satellites finished by the world minute At (§2.8.3): Σ max(1, Pool / SeatValue) over the instances
+ *  of F.Satellites whose SeatTicket is the Main's ticket and whose seat has a value (G/WorldSim.cpp's P.Seats), a one-off's on its
+ *  day, a recurring one's from Buildup to the Main's start; one Window over the days they run. */
+int FestSeatsCount(const Festival& F, double At)
+{
+	const net::Network& N = net::Site(F.Site);
+	const std::string MainTicket = N.TicketOf(F.MainId);
+	const double Buildup = FestCalMinute(F.FirstDay - kBuildupDays);
+	std::map<int, bool> Seating; // template index -> recurring
+	double From = 0.0;
+	double To = 0.0;
+	for (const std::string& Id : F.Satellites)
+	{
+		const net::EventTemplate* T = N.FindTemplate(Id);
+		if (!T || T->SeatTicket != MainTicket || T->SeatValueCents <= 0)
+		{
+			continue;
+		}
+		const bool Recurring = T->OnlyDay == -9999;
+		const double First = Recurring ? Buildup : FestCalMinute(T->OnlyDay);
+		const double Last = Recurring ? F.MainStart : FestCalMinute(T->OnlyDay + 1);
+		From = Seating.empty() ? First : std::min(From, First);
+		To = Seating.empty() ? Last : std::max(To, Last);
+		Seating.emplace(static_cast<int>(T - N.Templates().data()), Recurring);
+	}
+	int Seats = 0;
+	if (Seating.empty() || At <= From)
+	{
+		return Seats;
+	}
+	for (const net::EventInstance& E : N.Window(From, std::min(To, At)))
+	{
+		const auto S = Seating.find(E.Template);
+		if (S == Seating.end() || E.Start + E.Duration > At || (S->second && (E.Start < Buildup || E.Start >= F.MainStart)))
+		{
+			continue;
+		}
+		const Chips Value = N.Templates()[static_cast<size_t>(E.Template)].SeatValueCents;
+		Seats += std::max<int>(1, static_cast<int>(E.Pool / Value));
+	}
+	return Seats;
+}
 } // namespace fest_detail
 
 Brand BrandOf(const std::string& Key)
@@ -398,9 +462,21 @@ FieldRecord RecordOf(const net::Network& /*N*/, const net::EventInstance& /*E*/,
 	return FieldRecord();
 }
 
-int SeatsWon(const Festival& /*F*/, double /*Now*/)
+int SeatsWon(const Festival& F, double Now)
 {
-	return 0;
+	// Update 4 G1 (SPEC v1.7 §2.8.3; F-net, FN-6): the satellites finished by Now's world minute, worked out once a minute per series
+	// (FestSeatsCount: one Window over the days the satellites run) and kept under the lock.
+	const double Minute = std::floor(Now);
+	std::lock_guard<std::mutex> Guard(fest_detail::FestSeatsLock());
+	std::map<std::string, std::pair<double, int>>& Cache = fest_detail::FestSeatsCache();
+	const auto Found = Cache.find(F.SeriesId);
+	if (Found != Cache.end() && Found->second.first == Minute)
+	{
+		return Found->second.second;
+	}
+	const int Seats = fest_detail::FestSeatsCount(F, Minute);
+	Cache[F.SeriesId] = std::make_pair(Minute, Seats);
+	return Seats;
 }
 
 double RacePoints(int Place, int Entries, Chips BuyInCents, PayoutCurve Curve)

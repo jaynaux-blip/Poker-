@@ -98,6 +98,39 @@ NetSiteRegistry& NetSites()
 	static NetSiteRegistry Registry;
 	return Registry;
 }
+
+/**
+ * Update 4 G1 (SPEC v1.7 §2.3.2; F-net, FN-6): the first run of one-off T on its day starting at or after Floor (minutes into the
+ * day; -1: none), over the runs Instances lists for it: StartMinute alone when it doesn't repeat; else, when its last start wraps
+ * past midnight, the early-morning runs first (StartMinute - 1440 by EveryMinutes to LastMinute, from 00:00), then StartMinute by
+ * EveryMinutes to LastMinute before midnight (the runs past midnight would fall on the next day, where a one-off has no list).
+ */
+int NetNextForRun(const EventTemplate& T, double DayStart, double Floor)
+{
+	if (T.EveryMinutes <= 0)
+	{
+		return DayStart + static_cast<double>(T.StartMinute) >= Floor ? T.StartMinute : -1;
+	}
+	if (T.LastMinute < T.StartMinute)
+	{
+		for (int M = T.StartMinute - 1440; M <= T.LastMinute; M += T.EveryMinutes)
+		{
+			if (M >= 0 && DayStart + static_cast<double>(M) >= Floor)
+			{
+				return M;
+			}
+		}
+	}
+	const int Last = std::min(1439, T.LastMinute >= T.StartMinute ? T.LastMinute : T.LastMinute + 1440);
+	for (int M = T.StartMinute; M <= Last; M += T.EveryMinutes)
+	{
+		if (DayStart + static_cast<double>(M) >= Floor)
+		{
+			return M;
+		}
+	}
+	return -1;
+}
 } // namespace network_detail
 
 using namespace network_detail;
@@ -467,10 +500,16 @@ bool Network::NextFor(const std::string& Ticket, double From, EventInstance& Out
 		{
 			continue;
 		}
-		const EventInstance E = Make(K, static_cast<double>(T.OnlyDay) * MinutesPerDay + static_cast<double>(T.StartMinute));
-		if (E.Start >= From && E.Start >= Launch)
+		// Update 4 G1 (SPEC v1.7 §2.3.2; F-net, FN-6): every run of the one-off on its day, as Instances lists them (a championship's
+		// Step 1 every 90 or 120 minutes from 12:00, its Step 2 at 14:00, 17:00, 20:00 and 23:00), not its first alone, so a step
+		// ticket held after a step's first run still finds the next and WorldSim's ExpireTickets credits no step ticket while runs
+		// remain. The order holds: the first template with a run at or after From answers, so a ticket whose events never repeat
+		// (every ticket a satellite seats outside the championships' steps; GRIT's shows take none) gets the answer it always did.
+		const double DayStart = static_cast<double>(T.OnlyDay) * MinutesPerDay;
+		const int Run = network_detail::NetNextForRun(T, DayStart, std::max(From, Launch));
+		if (Run >= 0)
 		{
-			Out = E;
+			Out = Make(K, DayStart + static_cast<double>(Run));
 			return true;
 		}
 	}
