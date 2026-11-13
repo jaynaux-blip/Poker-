@@ -9,7 +9,9 @@
 // FestRollFromHonors, FestBlankHonesty, FestDefending, FestDiscoverWidened, FestHeroPinsDerived (with HeroFestPins' budget line),
 // FestHeadline, FestTitleOrder, and FestChampTitles' and FestMajorFloor's world halves; FW-4: WHO'S IN: FestFieldStories,
 // FestStoryHooks, on Honors and fields planted through the world text; FW-5: the session's texts, moments and Rerun: FestTexts,
-// FestMoments, FestRerunStories, through SessionFestDetail.h and one session run on marks planted through its world). Every helper here
+// FestMoments, FestRerunStories, through SessionFestDetail.h and one session run on marks planted through its world; FW-6: FestStep's
+// tickets, refunds and letter and ss.Fest.*: FestCrownTickets (a session run into RCOP 2026's window, its marks planted), FestStepCredit
+// (FestStepCredits at any minute on a world with crowns planted), FestMainTicket's world half). Every helper here
 // is in an anonymous namespace (PLAN_G1 §1 item 8: festivals_main.cpp shares the executable); each check runs alone as "festivals_test
 // <Check>" (the kit's Only, FN-1). The race checks build one Blank world before RCOP 2026 opens and run it through the edition (about
 // 18 ms a world day), planting races through the world text; the crown's run it on through FEIGN 2026, the first rival festival, to
@@ -40,6 +42,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -3372,6 +3375,343 @@ void FestRerunStories()
 		"FestRerunStories: after a reload the story's facts are read again at the next step (" + Run.StoryLoaded + " -> " + Run.StoryBack + ")");
 	std::printf("  FestRerunStories: noted \"%s\", reloaded \"%s\", stepped \"%s\"\n", Run.Story.c_str(), Run.StoryLoaded.c_str(), Run.StoryBack.c_str());
 }
+
+// ------------------------------------------------------------------ FW-6: FestStep's tickets, refunds and letter; ss.Fest.*
+
+/** One mark planted with its crown ticket unpaid (world\tfest\tmark's trailing t, §2.13). */
+void FestPlantTicketWorld(ss::world::World& W, const std::string& Key, ss::world::FestMark Mark, int Rank, int Scorers, int Points)
+{
+	W.Read({"world", "fest", "mark", Key, std::to_string(static_cast<int>(Mark)), std::to_string(Rank), std::to_string(Scorers), std::to_string(Points), "t"});
+}
+
+/** A session's wallet as one line: its tickets ("<id>x<n>") and the Guest List's holds ("hold:<key>"). */
+std::string FestWalletWorld(const ss::Session& S)
+{
+	std::string Out;
+	for (const std::pair<const std::string, int>& T : S.Life.Tickets)
+	{
+		Out += T.second > 0 ? (Out.empty() ? "" : " ") + T.first + "x" + std::to_string(T.second) : std::string();
+	}
+	for (const ss::site::play::Hold& H : S.Life.SitePlay.Holds)
+	{
+		Out += (Out.empty() ? "" : " ") + std::string("hold:") + H.Key;
+	}
+	return Out;
+}
+
+/** The crown letters in a session's Mail ("<thread>:<subject>", "|"-joined, oldest first). */
+std::string FestCrownLettersWorld(const ss::Session& S)
+{
+	std::string Out;
+	for (const ss::life::Letter& M : S.Life.Inbox)
+	{
+		Out += M.Subject.find(": the belt is yours") != std::string::npos ? (Out.empty() ? "" : "|") + M.Thread + ":" + M.Subject : std::string();
+	}
+	return Out;
+}
+
+/** The marks in a world still holding an unpaid crown ticket. */
+int FestUnpaidWorld(const ss::world::World& W)
+{
+	int N = 0;
+	for (const ss::world::HeroFestMark& K : ss::world::HeroMarks(W))
+	{
+		N += K.Ticket ? 1 : 0;
+	}
+	return N;
+}
+
+/** The session half of FestCrownTickets and FestMainTicket's world half, run once: a career skipped into RCOP 2026's window (day 19);
+ *  ss.Fest.Result pennant cash before PENNANT exists; eight marks planted through the world text (six with their t: RCOP 2026's and
+ *  PENNANT 2027's belts, Ring Rush 2027's PODIUM, the Championship Online 2027's FINALIST at rank 4 of 600, WRIT 2027's FINALIST,
+ *  Summer Slam 2027's PODIUM; GRIT 2027's TOP 10% at rank 26 of 600 and PUSH 2027's FINALIST without its t, as a crown with
+ *  kCrownTickets false writes it); a step, a second step and a skip; ss.Fest.Describe; a reload from the save's text and a step;
+ *  ss.Fest.Result rcop cash; ss.Fest.Moment rcop mark podium, dismissed. */
+struct FestTicketRunWorld
+{
+	std::string NotYet, Describe, Result, MomentAnswer, Peek, PeekAfter;
+	std::string Wallet1, Wallet2, WalletBack;    // the tickets and holds after the first step, after more, after the reload
+	std::string Letters1, Letters2, LettersBack; // the crown letters
+	std::string LetterBody;                      // RCOP 2026's crown letter
+	std::string Keys;                            // the festticket: keys in the last save
+	int Unpaid1 = -1, Unpaid2 = -1, UnpaidBack = -1;
+	bool Parsed = false, NoDevKey = false;
+	int ResultPlace = 0, ResultPaid = -1, Rank = 0;
+	double Ms = 0.0;
+};
+FestTicketRunWorld& FestTicketsWorld()
+{
+	static std::unique_ptr<FestTicketRunWorld> Run;
+	if (Run)
+	{
+		return *Run;
+	}
+	Run = std::make_unique<FestTicketRunWorld>();
+	namespace world = ss::world;
+	const auto T0 = std::chrono::steady_clock::now();
+	FestHooksWorld H0;
+	ss::SaveData D;
+	{
+		ss::Session S0(H0, "festtickets");
+		S0.WorldSkip(18); // into RCOP 2026's window (days 17-34)
+		D = H0.Last;
+	}
+	FestHooksWorld H1;
+	{
+		ss::Session S(H1, "festtickets", &D);
+		Run->NotYet = S.DebugFest("result pennant cash");
+		world::World& W = S.Living();
+		FestPlantTicketWorld(W, "rcop", world::FestMark::Title, 1, 608, 1700);
+		FestPlantTicketWorld(W, "ignite.pennant27", world::FestMark::Title, 1, 700, 2100);
+		FestPlantTicketWorld(W, "ring27", world::FestMark::Podium, 2, 500, 900);
+		FestPlantTicketWorld(W, "tco27", world::FestMark::Finalist, 4, 600, 650);
+		FestPlantTicketWorld(W, "runittwice.writ27", world::FestMark::Finalist, 3, 150, 300);
+		FestPlantTicketWorld(W, "slam27", world::FestMark::Podium, 3, 400, 500);
+		FestPlantMarkWorld(W, "runittwice.grit27", world::FestMark::Top10, 26, 600, 200);
+		FestPlantMarkWorld(W, "ignite.push27", world::FestMark::Finalist, 5, 300, 400);
+		S.FestStep(S.WorldMinutes(), S.WorldMinutes() + 60.0);
+		Run->Wallet1 = FestWalletWorld(S);
+		Run->Letters1 = FestCrownLettersWorld(S);
+		Run->Unpaid1 = FestUnpaidWorld(S.Living());
+		S.FestStep(S.WorldMinutes(), S.WorldMinutes() + 60.0);
+		S.WorldSkip(1);
+		Run->Wallet2 = FestWalletWorld(S);
+		Run->Letters2 = FestCrownLettersWorld(S);
+		Run->Unpaid2 = FestUnpaidWorld(S.Living());
+		Run->Describe = S.DebugFest("describe");
+		for (const ss::life::Letter& M : S.Life.Inbox)
+		{
+			Run->LetterBody = M.Subject == "RCOP 2026: the belt is yours" ? M.Body : Run->LetterBody;
+		}
+	}
+	FestHooksWorld H2;
+	ss::SaveData Back;
+	Run->Parsed = ss::SaveData::Parse(H1.Last.Serialize(), Back);
+	{
+		ss::Session S2(H2, "festtickets", &Back);
+		S2.FestStep(S2.WorldMinutes(), S2.WorldMinutes() + 60.0);
+		Run->WalletBack = FestWalletWorld(S2);
+		Run->LettersBack = FestCrownLettersWorld(S2);
+		Run->UnpaidBack = FestUnpaidWorld(S2.Living());
+		Run->Result = S2.DebugFest("result rcop cash");
+		const std::vector<world::HeroFestResult> Rows = world::HeroFestResults(S2.Living(), "rcop");
+		if (!Rows.empty())
+		{
+			ss::net::EventInstance E;
+			Run->ResultPlace = Rows.front().Place; // newest first
+			Run->ResultPaid = ss::net::Shared().FindInstance(Rows.front().EventId, E) ? static_cast<int>(ss::net::Shared().Payouts(E).size()) : -1;
+		}
+		Run->Rank = world::FestStanding(S2.Living(), -1).first;
+		Run->MomentAnswer = S2.DebugFest("moment rcop mark podium");
+		Run->Peek = FestMomentLineWorld(S2.PeekFestMoment());
+		S2.DoneFestMoment();
+		Run->PeekAfter = FestMomentLineWorld(S2.PeekFestMoment());
+		Run->NoDevKey = S2.Life.Sites.Done.count("festmark:rcop") == 0;
+		for (const std::string& K : H2.Last.Life.Sites.Done)
+		{
+			Run->Keys += K.rfind("festticket:", 0) == 0 ? (Run->Keys.empty() ? "" : " ") + K : std::string();
+		}
+	}
+	Run->Ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count();
+	return *Run;
+}
+
+/**
+ * FestCrownTickets (§2.15.1, §2.6.1 step 7, §2.13): FestStep pays each crown ticket once, keyed festticket:<key> in the sites' book, and
+ * drops the mark's t: THE BELT the next edition's Main ticket (RCOP's rcop-main into the wallet though its Main is locked; PENNANT's
+ * year-free ignite.pennant-main through the Value Governor, over the cap on the Guest List), PODIUM its Mega (ring28-mega), FINALIST its
+ * Last Chance (rank 4 of 600: tco28-last; WRIT's The Summons), Summer Slam's PODIUM nothing (no satellite) but its key; rank 26 (TOP
+ * 10%) and a FINALIST without its t (kCrownTickets false) none. Nothing again after a second step, a skip, or a save-and-reload; the
+ * crown letter once for each belt, from the host (L5-L6). ss.Fest.Describe and ss.Fest.Result rcop cash answer, and the race reacts;
+ * ss.Fest.Moment rcop mark podium plays a DEV PODIUM moment that keeps no key; "not yet" before the brand's festival exists.
+ * Planted bugs: a ticket for every mark (the grade and the t ignored); the key not written; FestTicketPaid not called; the PODIUM and
+ * FINALIST seats swapped; a rival's ticket straight into the wallet (no Governor); the crown letter missing; DebugFest's result not
+ * told to the world; Describe without the marks; the mark verb's grade misread.
+ */
+void FestCrownTickets()
+{
+	const FestTicketRunWorld& Run = FestTicketsWorld();
+	const std::string Want = "rcop-mainx1 ring28-megax1 tco28-lastx1";
+	const bool Writ = (Run.Wallet1.find("runittwice.writ28-sat1x1") != std::string::npos) !=
+		(Run.Wallet1.find(":t:runittwice.writ28-sat1:festticket:runittwice.writ27") != std::string::npos);
+	const bool Pennant = Run.Wallet1.find(":t:ignite.pennant-main:festticket:ignite.pennant27") != std::string::npos &&
+		Run.Wallet1.find("ignite.pennant-mainx") == std::string::npos;
+	const std::string& Bare = Run.Wallet1;
+	std::string Plain; // the wallet without its WRIT and PENNANT entries
+	size_t From = 0;
+	while (From <= Bare.size())
+	{
+		size_t End = Bare.find(' ', From);
+		End = End == std::string::npos ? Bare.size() : End;
+		const std::string Item = Bare.substr(From, End - From);
+		if (!Item.empty() && Item.find("writ28") == std::string::npos && Item.find("pennant") == std::string::npos)
+		{
+			Plain += (Plain.empty() ? "" : " ") + Item;
+		}
+		From = End + 1;
+	}
+	Expect(Plain == Want && Writ && Pennant && Run.Unpaid1 == 0,
+		"FestCrownTickets: each mark's ticket once: THE BELT the next Main's (rcop-main into the wallet, locked Main or not; PENNANT's year-free "
+		"ignite.pennant-main held on the Guest List over the cap), PODIUM the Mega (ring28-mega), FINALIST the Last Chance (rank 4 of 600: "
+		"tco28-last; WRIT's The Summons), Summer Slam's none; rank 26 of 600 and a FINALIST without its t none; every t dropped (" + Run.Wallet1 +
+		"; unpaid " + std::to_string(Run.Unpaid1) + ")");
+	Expect(Run.Wallet2 == Run.Wallet1 && Run.Parsed && Run.WalletBack == Run.Wallet1 && Run.Unpaid2 == 0 && Run.UnpaidBack == 0,
+		"FestCrownTickets: a second step, a skip and a save-and-reload pay nothing again (after: '" + Run.Wallet2 + "'; reloaded: '" + Run.WalletBack + "')");
+	Expect(Run.Keys == "festticket:ignite.pennant27 festticket:rcop festticket:ring27 festticket:runittwice.writ27 festticket:slam27 festticket:tco27",
+		"FestCrownTickets: the paid tickets' keys are in the save's site\\tdone line, Summer Slam's too, GRIT's and PUSH's not (" + Run.Keys + ")");
+	const std::string Letters = "riverline:RCOP 2026: the belt is yours|ignite:PENNANT 2027: the belt is yours";
+	Expect(Run.Letters1 == Letters && Run.Letters2 == Letters && Run.LettersBack == Letters &&
+			   Run.LetterBody == "Congratulations. You finished first in the RCOP 2026 race with 1,700 points, and the belt is yours. Your seat in the next RCOP Main Event "
+								 "comes with it. See you at the next one.",
+		"FestCrownTickets: the crown letter once for each belt, from its host, through a second step, a skip and a reload (" + Run.Letters1 + " | " + Run.LettersBack +
+			"; '" + Run.LetterBody + "')");
+	const bool Described = Run.Describe.find("Your marks: RCOP 2026 THE BELT, 1 of 608, 1,700 pts, crown ticket paid") != std::string::npos &&
+		Run.Describe.find("Race: RCOP 2026") != std::string::npos && Run.Describe.find("Ignite's Pass: rents ") != std::string::npos &&
+		Run.Describe.find("RunItTwice's Pass: rents ") != std::string::npos && Run.Describe.find("2026's windows:\n  RCOP 2026 (RiverLine): Oct 18 - ") != std::string::npos;
+	Expect(Described && Run.NotYet.rfind("not yet: ", 0) == 0,
+		"FestCrownTickets: ss.Fest.Describe lists this year's windows, the live race, the marks with their tickets and each rival's Pass; a brand's verb says "
+		"'not yet' before its festival exists ('" + Run.NotYet + "')");
+	std::printf("  [FestCrownTickets] describe:\n%s\n", Run.Describe.c_str());
+	Expect(Run.Result.rfind("result rcop cash: ", 0) == 0 && Run.Result.find("(dev)") != std::string::npos && Run.ResultPlace > 0 && Run.ResultPlace == Run.ResultPaid &&
+			   Run.Rank > 0,
+		"FestCrownTickets: ss.Fest.Result rcop cash plants a min cash in RCOP 2026's next numbered event through the world's result path, logged as dev, and the "
+		"race ranks the hero ('" + Run.Result + "'; place " + std::to_string(Run.ResultPlace) + " of " + std::to_string(Run.ResultPaid) + " paid, rank " +
+			std::to_string(Run.Rank) + ")");
+	Expect(Run.MomentAnswer.find("(dev)") != std::string::npos && Run.Peek == "4 rcop 600 m4 2/500 dev" && Run.PeekAfter != Run.Peek && Run.NoDevKey,
+		"FestCrownTickets: ss.Fest.Moment rcop mark podium plays a DEV PODIUM moment (Kind 4) that grants nothing and keeps no key (" + Run.Peek + " -> " + Run.PeekAfter + ")");
+	std::printf("  [FestCrownTickets] session run %.0f ms\n", Run.Ms);
+}
+
+/** A life with an Ignite account (the step refunds' wallet). */
+ss::life::State FestIgniteLifeWorld()
+{
+	ss::life::State L;
+	ss::site::Account A;
+	A.Site = ss::net::SiteId::Ignite;
+	L.Sites.Accounts.push_back(A);
+	return L;
+}
+
+/**
+ * FestStepCredit (§2.15.1, §2.6.1 item 8, v1.6): after PENNANT 2027's crown, a hero holding an unused Step 3 ticket and two Step 2
+ * tickets gets their SeatValue in Ignite's wallet once each (keyed festcredit:<ticket>, one ledger line each, "Unused PENNANT 2027 Step
+ * {K} ticket refunded"), however many hours the credit runs; nothing before the crown; a reload after the crown pays nothing more, the
+ * ticket handed back or not; the held Main ticket (and PENNANT 2028's step ticket) untouched; after PENNANT 2040's crown, with no Main
+ * left, the Main ticket still untouched.
+ * Planted bugs: the credit run every hour (the key unchecked and the ticket kept: paid twice); the Main ticket credited (FestStepOf's
+ * Main exclusion dropped); the credit before the crown.
+ */
+void FestStepCredit()
+{
+	namespace sfd = ss::session_fest_detail;
+	namespace world = ss::world;
+	using ss::fest::Brand;
+	const ss::fest::Festival* P27 = FestEditionWorld(Brand::Pennant, 2027);
+	const ss::fest::Festival* P28 = FestEditionWorld(Brand::Pennant, 2028);
+	const ss::fest::Festival* P40 = FestEditionWorld(Brand::Pennant, 2040);
+	if (!P27 || !P28 || !P40)
+	{
+		Expect(false, "FestStepCredit: PENNANT 2027, 2028 and 2040 exist");
+		return;
+	}
+	const ss::net::Network& Ig = ss::net::Site(ss::net::SiteId::Ignite);
+	const ss::net::EventTemplate* S1 = Ig.FindTemplate(P27->SeriesId + "-s1a");
+	const ss::net::EventTemplate* S2 = Ig.FindTemplate(P27->SeriesId + "-s2a");
+	const ss::net::EventTemplate* S2Next = Ig.FindTemplate(P28->SeriesId + "-s2a");
+	const std::string Main = Ig.TicketOf(P27->MainId);
+	const std::string Step2 = S1 ? S1->SeatTicket : std::string(), Step3 = S2 ? S2->SeatTicket : std::string();
+	const std::string Step3Next = S2Next ? S2Next->SeatTicket : std::string();
+	const double Crown27 = ss::fest::LastEnd(*P27) + 60.0, Crown40 = ss::fest::LastEnd(*P40) + 60.0;
+	const world::World Fresh = FestFreshWorld();
+	const world::Npc* Champ = Fresh.Get(3);
+	const std::string Name = Champ ? Champ->Name : std::string("x");
+	world::World W;
+	FestLoadWorld(W, FestPlantFirstWorld(FestTextWorld(Fresh), FestHonorLineWorld(2027, P27->Name + " Player of the Series", P27->SeriesId + "#pos", 3, Name, 0, 2100, Crown27) +
+															  FestHonorLineWorld(2040, P40->Name + " Player of the Series", P40->SeriesId + "#pos", 3, Name, 0, 2100, Crown40)));
+	ss::life::State L = FestIgniteLifeWorld();
+	L.Tickets[Step3] = 1;
+	L.Tickets[Step2] = 2;
+	L.Tickets[Main] = 1;
+	L.Tickets[Step3Next] = 1;
+	const int Before = sfd::FestStepCredits(L, W, P27->MainStart + 30.0); // the steps are over, the crown not yet
+	int Credited = 0;
+	for (int Hour = 0; Hour < 24; ++Hour)
+	{
+		Credited += sfd::FestStepCredits(L, W, Crown27 + 60.0 * Hour);
+	}
+	const ss::site::Account* A = ss::site::AccountOf(L.Sites, ss::net::SiteId::Ignite);
+	const ss::Chips Want = Ig.SeatValue(Step3) + 2 * Ig.SeatValue(Step2);
+	std::string Lines;
+	for (const ss::site::Line& Ln : A ? A->Lines : std::vector<ss::site::Line>())
+	{
+		Lines += (Lines.empty() ? "" : "|") + Ln.Label + " " + ss::Money(Ln.Cents);
+	}
+	const std::string WantLines = "Unused PENNANT 2027 Step 2 ticket refunded " + ss::Money(2 * Ig.SeatValue(Step2)) + "|Unused PENNANT 2027 Step 3 ticket refunded " +
+		ss::Money(Ig.SeatValue(Step3));
+	const bool Kept = L.Tickets.count(Step3) == 0 && L.Tickets.count(Step2) == 0 && L.Tickets[Main] == 1 && L.Tickets[Step3Next] == 1;
+	Expect(!Step3.empty() && !Step2.empty() && Step3 != Main && Before == 0 && Credited == 2 && A && A->Cents == Want && Lines == WantLines && Kept &&
+			   L.Sites.Done.count("festcredit:" + Step3) > 0 && L.Sites.Done.count("festcredit:" + Step2) > 0,
+		"FestStepCredit: after PENNANT 2027's crown the unused Step 3 ticket (" + Step3 + ") and two Step 2 tickets are credited at their SeatValue once, "
+		"however many hours the credit runs, one ledger line each, keyed festcredit:<ticket>; nothing before the crown (" + std::to_string(Before) +
+			"); the Main ticket and PENNANT 2028's step ticket untouched (credited " + std::to_string(Credited) + ", wallet " + ss::Money(A ? A->Cents : 0) + " of " +
+			ss::Money(Want) + "; '" + Lines + "')");
+	// A reload after the crown: the save's text read back, the ticket handed back as an old save might hold it.
+	ss::SaveData D;
+	D.Life = L;
+	ss::SaveData Back;
+	const bool Parsed = ss::SaveData::Parse(D.Serialize(), Back);
+	Back.Life.Tickets[Step3] = 1;
+	const int Again = sfd::FestStepCredits(Back.Life, W, Crown27 + 3.0 * 1440.0);
+	const ss::site::Account* B = ss::site::AccountOf(Back.Life.Sites, ss::net::SiteId::Ignite);
+	Expect(Parsed && Again == 0 && B && B->Cents == Want && Back.Life.Tickets[Step3] == 1,
+		"FestStepCredit: a reload after the crown pays nothing more, even with the ticket back in the wallet (credited " + std::to_string(Again) + ")");
+	// PENNANT 2040: no Main is left to place the year-free Main ticket, and still it is never credited.
+	ss::life::State L40 = FestIgniteLifeWorld();
+	L40.Tickets[Main] = 1;
+	ss::net::EventInstance None;
+	const bool NoMain = !Ig.NextFor(Main, P40->MainStart + 1.0, None);
+	const int Last = sfd::FestStepCredits(L40, W, Crown40 + 60.0);
+	Expect(NoMain && Last == 0 && L40.Tickets[Main] == 1,
+		"FestStepCredit: after PENNANT 2040's crown, with no Main left to take it, the held Main ticket is still untouched (credited " + std::to_string(Last) + ")");
+}
+
+/**
+ * FestMainTicket, F-world's half (§2.15.1, v1.6): THE BELT of a championship edition earns the year-free Main ticket, so a seat covered
+ * after the next edition's Main has run registers on the one after: PENNANT 2027's belt ticket, asked after PENNANT 2028's Main started,
+ * enters PENNANT 2029's Main (Network::NextFor, and the lobby's ticket count through Life::TicketsFor); REIGN's the same.
+ * Planted bug: the Main keyed by its edition's id (the late seat is dead).
+ */
+void FestMainTicketWorld()
+{
+	namespace sfd = ss::session_fest_detail;
+	using ss::fest::Brand;
+	std::string Bad;
+	for (const Brand B : {Brand::Pennant, Brand::Reign})
+	{
+		const ss::fest::Festival* F27 = FestEditionWorld(B, 2027);
+		const ss::fest::Festival* F28 = FestEditionWorld(B, 2028);
+		const ss::fest::Festival* F29 = FestEditionWorld(B, 2029);
+		if (!F27 || !F28 || !F29)
+		{
+			Bad += " no 2027-2029 editions";
+			continue;
+		}
+		const std::string Ticket = sfd::FestCrownTicket(*F27, static_cast<int>(ss::world::FestMark::Title));
+		const ss::net::Network& N = ss::net::ForEvent(F27->MainId);
+		ss::net::EventInstance E;
+		const bool Placed = N.NextFor(Ticket, F28->MainStart + 1.0, E);
+		const std::string Template = Placed ? E.Id.substr(0, E.Id.find('@')) : std::string();
+		ss::life::State L;
+		L.Tickets[Ticket] = 1;
+		const bool Registers = Placed && Template == F29->MainId && L.TicketsFor(N.TicketOf(Template)) == 1;
+		if (!Registers)
+		{
+			Bad += " " + std::string(ss::fest::BrandKey(B)) + ": '" + Ticket + "' -> '" + Template + "'";
+		}
+	}
+	Expect(Bad.empty(), "FestMainTicket: a championship belt's year-free Main ticket, covered after the next Main ran, registers on the one after (PENNANT and REIGN 2027's "
+						"belts on the 2029 Mains)" + Bad);
+}
 } // namespace
 
 void SegWorld()
@@ -3494,6 +3834,19 @@ void SegWorld()
 	if (Only("FestRerunStories"))
 	{
 		FestRerunStories();
+	}
+	// FW-6: FestStep's tickets, refunds and letter; ss.Fest.*
+	if (Only("FestCrownTickets"))
+	{
+		FestCrownTickets();
+	}
+	if (Only("FestStepCredit"))
+	{
+		FestStepCredit();
+	}
+	if (Only("FestMainTicket"))
+	{
+		FestMainTicketWorld(); // F-world's world half (F-net's in festivals_main.cpp)
 	}
 }
 } // namespace festivals_test

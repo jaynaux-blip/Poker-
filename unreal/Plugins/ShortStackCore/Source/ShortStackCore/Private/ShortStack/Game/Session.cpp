@@ -3664,7 +3664,7 @@ void Session::ShowResults()
 		// Update 4 G1 (SPEC v1.7 §2.9.3, T11; FW-5): a seat into another festival Main by its Main ticket has its own line; a
 		// championship's Step 1 or Step 2 seat (a step ticket) keeps the ladder's, so a step win never reads as a Main seat.
 		const std::string FestSeat = session_fest_detail::FestSeatText(T->Spec.Id, T->Spec.SeatTicket, T->Spec.BuyInCents);
-		StoryText("seat-" + T->Spec.SeatTicket, "Dee", T->Spec.SeatTicket == "rcop-main" ? "You WON A SEAT TO THE MAIN EVENT?? $5,250 for nothing. Twenty-five million guaranteed. Kid." : !FestSeat.empty() ? FestSeat : "A ticket up the ladder. Keep climbing.");
+		StoryText("seat-" + T->Spec.SeatTicket, "Dee", T->Spec.SeatTicket == "rcop-main" ? "You WON A SEAT TO THE MAIN EVENT?? $5,250 for nothing. Twenty-five million guaranteed. Kid." : !FestSeat.empty() ? FestSeat : session_fest_detail::FestLadderLine());
 	}
 	if (BustPrize + BountyWon > 0 && Pot.Site == 0)
 	{
