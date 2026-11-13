@@ -30,8 +30,8 @@
 // fest_takeover_ig_play, fest_takeover_ig_afterburner, fest_takeover_rit_board, fest_table_rl, fest_table_ig and fest_table_rit.
 // G1 FL-final (F-look; PLAN_G1 item 17): FestBandBudget's PLAY half, FestBandPlayLook: Ignite's PLAY at most 34k vertices and 400
 // text runs with each attraction (FEIGN's arch, PUSH's tower, PENNANT's pavilion) on every evening of its first edition, on one
-// laptop visiting the three in date order. Asserted wherever the attraction is on the page (F-hubs' band fill, FH-3b, merged: the
-// integration's trees); a tree without the fill prints PLAY today and stops after FEIGN. Runs last (after the takeover pages).
+// laptop visiting the three in date order. F-hubs' band fill (FH-3b) is merged read only: each attraction is owed on PLAY at every
+// moment of its edition and the budget is asserted for each edition, whatever the others show. Runs last (after the takeover pages).
 // G1 FL-final: FestSkinRule's Afterburner page reads the skin without the attraction's foot sign (FH-3b's fill puts FEIGN's arch
 // and its Mirror Mint sign on FEIGN's day 2 at 02:00; the attraction keeps its look every hour, only the palette yields). Test-only.
 #include "UiSeg.h"
@@ -3045,14 +3045,16 @@ bool AttrOnPageLook(Brand B, const std::set<uint64_t>& Rows, const ss::ui::DrawL
  * §2.8.10 / §8.5; G1 FL-final, PLAN_G1 item 17): Ignite's PLAY (the lobby, scale 1, settled, as tests/ui_seg_ignite.cpp's bench draws
  * it) during each attraction's first edition on Ignite (FEIGN's arch, PUSH's tower, PENNANT's pavilion), on one laptop that visits
  * the three in date order (its world starts at the first; each later edition is a day's catching up, not a new world's): on day 1 at
- * 12:00, day 2 at 02:00 (Afterburner) and every day at 19:30, 20:30 and 21:00 (the evening's busiest, the bench's hour). Wherever the
- * attraction is on the page (AttrOnPageLook: F-hubs' band fill, FH-3b, in the tree) PLAY is at most 34,000 vertices and 400 text
- * runs, and the attraction is on the page at every moment. A tree without the fill (F-look's branch alone) has no attraction on PLAY:
- * the counts of PLAY today are printed, and after FEIGN's edition the laptop stops (PUSH's and PENNANT's would cost the same nothing).
- * Once an edition has shown its attraction (the fill is in the tree), a later edition's attraction is owed at every moment too.
- * The probe itself is checked in every tree on the band drawn directly. Printed: each edition's busiest counts and their moments.
- * Planted bugs (run where the fill is merged): the arch's candy stripe in 0.6-unit dashes (inside the band's 15k, over PLAY's 34k);
- * the pavilion's pennant lines ten times as dense; the arch's foot sign lettered a run a glyph at each of its bulbs (the runs).
+ * 12:00, day 2 at 02:00 (Afterburner) and every day at 19:30, 20:30 and 21:00 (the evening's busiest, the bench's hour). F-hubs'
+ * band fill (FH-3b, merged read only into F-look's branch at FL-final) puts the attraction on the page while its festival is Live, so
+ * for each edition, unconditionally: the attraction is on PLAY at every moment (AttrOnPageLook), and PLAY is at most 34,000 vertices
+ * and 400 text runs at its busiest. An edition whose attraction is on no page fails its own line and the laptop still measures the
+ * others (no edition's result depends on another's). The probe itself is checked on the band drawn directly. Printed: each edition's
+ * busiest counts and their moments.
+ * Planted bugs: the arch's candy stripe in 0.6-unit dashes (inside the band's 15k, over PLAY's 34k); the pavilion's pennant lines ten
+ * times as dense; PUSH's tower rungs dense (the band inside 15k, PLAY over 34k); the arch's foot sign lettered a run a glyph at each of
+ * its bulbs (the runs); F-hubs' fill leaving out FEIGN only (FEIGN's line fails, PENNANT's and PUSH's still measured); the calendar
+ * without PUSH (its edition line); Ignite's lobby left undrawn in the evening (PLAY draws at every moment).
  */
 void FestBandPlayLook()
 {
@@ -3095,19 +3097,12 @@ void FestBandPlayLook()
 	}
 	std::sort(Order.begin(), Order.end());
 	std::unique_ptr<LaptopLook> Lap;
-	bool Fill = true;
-	bool FillSeen = false; // an earlier edition had its attraction on PLAY
 	for (const std::pair<int, int>& O : Order)
 	{
 		const int Ai = O.second;
 		const Brand B = AttractionsLook[Ai];
 		const ss::fest::Festival& F = *FirstOnLook(SiteId::Ignite, B);
 		const int Days = F.LastDay - F.FirstDay + 1;
-		if (!Fill)
-		{
-			std::printf("  band: PLAY with %s (%s): not measured, no band fill in this tree (FEIGN's arch was on no page)\n", What[Ai], F.Name.c_str());
-			continue;
-		}
 		// Day D's moments, in the order of the clock: 02:00 (day 2), 12:00 (day 1), 19:30, 20:30, 21:00.
 		std::vector<double> At;
 		for (int D = 1; D <= Days; ++D)
@@ -3165,16 +3160,6 @@ void FestBandPlayLook()
 		};
 		const int N = static_cast<int>(At.size());
 		ExpectLook(Pages, std::string("FestBandBudget: Ignite's PLAY draws at every moment of ") + F.Name);
-		if (On == 0 && !FillSeen)
-		{
-			// No band fill in this tree (F-look's branch alone): PLAY today, printed.
-			std::printf("  band: PLAY during %s (%d days, %d moments): %s on no page (no band fill in this tree: F-hubs' FH-3b fills IgniteBand); PLAY today "
-						"at its busiest %zu vertices (%s), %zu runs (%s), printed only\n",
-				F.Name.c_str(), Days, N, What[Ai], MostV, When(MostVAt).c_str(), MostR, When(MostRAt).c_str());
-			Fill = false;
-			continue;
-		}
-		FillSeen = true;
 		std::printf("  band: PLAY with %s during %s (%d days, %d moments, on the page at %d): busiest %zu vertices (%s), %zu runs (%s); budget 34,000 and 400\n",
 			What[Ai], F.Name.c_str(), Days, N, On, MostV, When(MostVAt).c_str(), MostR, When(MostRAt).c_str());
 		ExpectLook(On == N, std::string("FestBandBudget: ") + What[Ai] + " is on PLAY at every moment of " + F.Name + " (its days are Live)");
