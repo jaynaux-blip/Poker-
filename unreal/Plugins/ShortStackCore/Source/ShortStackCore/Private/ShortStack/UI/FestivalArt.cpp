@@ -30,6 +30,8 @@
 // drawn fourteen times at a table, the crest drops its motif too and is its frame's silhouette in Accent2 (the low-detail crest alone
 // measures 227-827 vertices, the back's budget is 300: FestTableBudgets prints each).
 // UI/RiverLineSites.cpp dresses the skin and the festival tables; UI/RiverLine.cpp draws the felt mark and REIGN's rail.
+// G1 FL-9 (F-look): FestArtInventory gains U39, the shelf's empty plinth plate "{SHORT} · not yet" (§2.11, §9.2; PLAN_FLOOK's
+// Corrections item 12, cov2 C14), which the game module's shelf (game/FestShelf.cpp) engraves with {SHORT} the brand's series Short.
 #include "ShortStack/UI/FestivalArt.h"
 
 #include "RitArt.h"
@@ -862,9 +864,11 @@ namespace fest
 {
 // Step A-2 (LEAD_CALLS Q-5; moved here from G/Festival.cpp by the integrator): the words the festival art prints, empty in Phase A.
 // G1 FL-5 (F-look): each entry with its kind (§2.11: label, sentence, ...), as FestCopyUi's art half reads them.
+// G1 FL-9 (F-look): U39, the empty plinth's brass plate ("RCOP · not yet"): the game module's shelf finds it by its {SHORT} lead and
+// its "not yet", and fills {SHORT}.
 std::vector<std::string> FestArtInventory()
 {
-	return {std::string("label\t") + ui::festart::festart_detail::FestHubSign()};
+	return {std::string("label\t") + ui::festart::festart_detail::FestHubSign(), std::string("label\t{SHORT} \xC2\xB7 not yet")};
 }
 } // namespace fest
 
