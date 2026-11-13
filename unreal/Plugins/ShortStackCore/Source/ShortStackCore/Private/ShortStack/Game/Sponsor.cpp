@@ -1288,6 +1288,13 @@ std::string Gate(const Brand& Br, const Book& B, const life::State& L, const rep
 	return T >= Br.Tier ? std::string() : std::string(StandingWords(Br.Tier)) + " first.";
 }
 
+/** Update 4 G1 (SPEC v1.7 §2.15.1 FestReignCopy, APPLY_CHAMPS §5.2): an event of REIGN, RunItTwice's yearly championship (its Short,
+ *  "REIGN", starts every REIGN event's and edition's name, §2.11 H14). An Energy brand never names one in its why line. */
+bool SponsorReignEvent(const std::string& Name)
+{
+	return Name.rfind("REIGN ", 0) == 0;
+}
+
 /** Why the brand is calling now: the first sentence of its offer. */
 std::string WhyLine(const Brand& Br, const Book& B, const life::State& L, const rep::Public& P, const gear::Owned* Gear)
 {
@@ -1310,6 +1317,9 @@ std::string WhyLine(const Brand& Br, const Book& B, const life::State& L, const 
 		}
 	}
 	V["Event"] = LastTitle.empty() ? std::string("Embercrest Nightly") : LastTitle;
+	// REIGN's sponsor rule (update 4 §2.15.1): an Energy brand never takes why:title filled with a REIGN event; it falls to its
+	// chain's next key.
+	const bool TitleSays = !LastTitle.empty() && !(Br.Cat == Category::Energy && SponsorReignEvent(LastTitle));
 	if (Br.Id == "voltrush")
 	{
 		const auto It = L.Bought.find("volt-rush");
@@ -1328,13 +1338,13 @@ std::string WhyLine(const Brand& Br, const Book& B, const life::State& L, const 
 	}
 	else if (Br.Id == "stacked")
 	{
-		Key = !LastTitle.empty() && P.Followers < 2500 ? "why:title" : "why:channel";
+		Key = TitleSays && P.Followers < 2500 ? "why:title" : "why:channel";
 	}
 	else if (Br.Id == "rangewise" || Br.Id == "riverline")
 	{
 		// Team RiverLine short of its stream gate opened on standing (on the circuit): when Rerun lifted it, Rerun says why.
 		const bool ByRerun = Br.Id == "riverline" && Creator && !(P.Partner && P.Followers >= 2500 && P.Avg30 >= 75.0);
-		Key = ByRerun ? Key : P.Partner ? "why:partner" : !LastTitle.empty() ? "why:title" : "why:tier";
+		Key = ByRerun ? Key : P.Partner ? "why:partner" : TitleSays ? "why:title" : "why:tier";
 	}
 	else if (SiteTeamGate(Br, B, L))
 	{
