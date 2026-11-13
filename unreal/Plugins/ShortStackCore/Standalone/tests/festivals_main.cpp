@@ -33,6 +33,13 @@
 // (FEIGN, PUSH, PENNANT; WRIT, GRIT, REIGN: Ignite 2,198 and RunItTwice 2,487, PENNANT's, GRIT's and REIGN's indices shifted once),
 // the starts (WRIT's numbered never at its Main's 18:00), the caps (Standing Room Only 2,875, The Summons 2,963), the room words,
 // the codes (SPEC's PUSH and WRIT samples and PIE's "WRIT 03: $2,100 Strong Room PKO"), the screens and the copy.
+//
+// G1, FN-4a (F-net; PLAN_FNET §4 FN-4 and its Corrections item 1): RiverLine's dress. FestTemplatesAppended walks RiverLine's 84
+// appended satellites (8,537 templates; the first 8,453 still 5bc7d44's), two checks land with F-net's halves, FestRcopGtdSum (RCOP
+// 2026's computed guarantee in its series, its tagline and the schedule post) and FestBlurbsFilled (no blurb spells a number; every
+// figure from the template: the rival festivals' B1-B15 and RiverLine's three W5 blurbs), and fest::Inventory's new RiverLine strings
+// reach FestNamesScreened and FestCopy (which also holds X2: "festival" names the tier only, so the five renamed series keep out of
+// any series name). RiverLineFestivalPinned, the appended block's pin, is in rival_sites (tests/sites_main.cpp).
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
 #include "CopyLint.h"
 #include "Trademarks.h"
@@ -45,6 +52,7 @@
 #include "ShortStack/Tournament.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -438,7 +446,8 @@ void FestCalendarFactsNet()
 	const std::vector<fest::Festival>& All = fest::All();
 
 	// Each brand's site, window, Main day and start, first edition and edition numbers, ids, names and flags (a rival's ids are its
-	// site's key, the brand and the year: "ignite.feign26"; its satellites the edition's Mega and Last Chance, WRIT's The Summons).
+	// site's key, the brand and the year: "ignite.feign26"; its satellites the edition's Mega and Last Chance, WRIT's The Summons; Ring
+	// Rush's and the Championship Online's the trio FN-4a appends).
 	for (const FestNetFacts& B : FestNetRiverLine)
 	{
 		std::vector<const fest::Festival*> Rows;
@@ -463,6 +472,7 @@ void FestCalendarFactsNet()
 				: fest::IsChampionship(B.Which) ? FestNetLadder(Id)
 				: B.Which == fest::Brand::Writ ? std::vector<std::string>{Id + "-sat1"}
 				: B.Site != net::SiteId::RiverLine ? std::vector<std::string>{Id + "-sat1", Id + "-sat2"}
+				: B.Which == fest::Brand::RingRush || B.Which == fest::Brand::Tco ? std::vector<std::string>{Id + "-step", Id + "-mega", Id + "-last"} // FN-4a's trio
 												   : std::vector<std::string>{};
 			const bool Ok = F.Site == B.Site && F.Year == Year && F.Edition == Year - B.FirstYear + 1 && F.FirstDay == First && F.LastDay == First + B.Days - 1 &&
 				F.MainDay == MainDay && F.MainStart == FestNetAt(MainDay, B.MainMinute) && F.SeriesId == Id && F.Name == std::string(B.Name) + " " + std::to_string(Year) &&
@@ -876,6 +886,14 @@ uint64_t FestNetPrefixFnv(const ss::net::Network& N, size_t Count)
 	return H;
 }
 
+/** "0x38f22b3af5ae3e70" (sites_main.cpp's SitesHex, for the messages). */
+std::string SitesHexNet(uint64_t H)
+{
+	char B[32];
+	std::snprintf(B, sizeof(B), "0x%016llx", static_cast<unsigned long long>(H));
+	return B;
+}
+
 // ------------------------------------------------------------------ FestTemplatesAppended (F-net; FN-2a's siblings)
 
 /** FinalTarget's rule (G/WorldSim.cpp:76-90, F-world's; restated for the checks): from a ticket, template by template while it is a
@@ -998,6 +1016,74 @@ void FestTemplatesAppendedNet()
 		"REIGN's 14 x 38 = 532 (2,487), after every existing template, plan by plan (FEIGN 2026 at Ignite's 783-811, PUSH 2027 at 1,218-1,240, PENNANT 2027 from 1,540; WRIT "
 		"2027 at RunItTwice's 1,521-1,534, GRIT 2027 from 1,717, REIGN 2027 from 1,955), each edition in order: numbered No 1..N, the headliners in calendar order numbered "
 		"after them, the satellites in ladder order, each seat chaining to its Main's ticket at the rung's buy-in (no series, no number, no seat guarantee)" + Bad);
+
+	// FN-4a (§2.2.3, §2.2.4): RiverLine's 84 satellites after every existing template (its first 8,453 hash to RiverLinePinned's
+	// 5bc7d44 constant), year by year 2027-2040, Ring Rush's then the Championship Online's, each Main's Satellite, Mega and Last
+	// Chance with §2.2.3's facts; each edition's Festival::Satellites is exactly its three, RCOP 2026's stays its step4 and Mega, and
+	// Summer Slam's editions have none until G3.
+	struct FestNetTrioWant
+	{
+		const char* Stem;
+		const char* Name;
+		ss::Chips BuyIn;
+		int DaysOut;
+		int Start[2]; // Ring Rush, the Championship Online (minutes)
+		const char* Speed;
+		double Level;
+		int Stack, LateReg;
+		int Field[2];
+		int Seats, Opens;
+	};
+	const FestNetTrioWant Trio[] = {{"step", "Main Satellite", 5500, 2, {20 * 60, 20 * 60}, "Turbo", 6.0, 20000, 60, {120, 300}, 0, 72},
+		{"mega", "Main Mega Satellite", 10900, 1, {20 * 60, 20 * 60}, "Turbo", 6.0, 20000, 60, {130, 650}, 10, 168},
+		{"last", "Main Last Chance", 21500, 0, {14 * 60, 16 * 60}, "Hyper", 3.0, 10000, 15, {60, 90}, 0, 72}};
+	const net::Network& Rl = net::Site(net::SiteId::RiverLine);
+	const uint64_t RlFnv = FestNetPrefixFnv(Rl, 8453);
+	std::string RlBad;
+	size_t RlAt = 8453;
+	for (int Year = 2027; Year <= 2040; ++Year)
+	{
+		for (int P = 0; P < 2; ++P)
+		{
+			const std::string Series = std::string(P == 0 ? "ring" : "tco") + std::to_string(Year % 100);
+			const std::string Festival = P == 0 ? "Ring Rush" : "The Championship Online";
+			const fest::Festival* F = fest::FestivalOf(Series);
+			const net::EventTemplate* Main = Rl.FindTemplate(Series + "-main");
+			std::vector<std::string> Want;
+			bool Ok = F && Main;
+			for (const FestNetTrioWant& W : Trio)
+			{
+				const net::EventTemplate* T = RlAt < Rl.Templates().size() ? &Rl.Templates()[RlAt] : nullptr;
+				++RlAt;
+				Want.push_back(Series + "-" + W.Stem);
+				Ok = Ok && T && T->Id == Want.back() && T->Name == Festival + " " + W.Name && T->Series.empty() && T->EventNo == 0 && T->Fmt == net::Format::Satellite &&
+					!T->Main && T->Ticket.empty() && T->Blurb.empty() && T->BuyInCents == W.BuyIn && T->Speed == W.Speed && T->LevelMinutes == W.Level &&
+					T->StartStack == W.Stack && T->LateRegMinutes == W.LateReg && T->TableSize == 8 && T->Field == W.Field[P] && T->OnlyDay == Main->OnlyDay - W.DaysOut &&
+					T->StartMinute == W.Start[P] && T->OpensHours == W.Opens && T->GtdCents == static_cast<ss::Chips>(W.Seats) * Main->BuyInCents &&
+					T->SeatTicket == Rl.TicketOf(Main->Id) && T->SeatValueCents == Main->BuyInCents && T->Seats == std::string(P == 0 ? "RING" : "TCO") + " Main Event seats" &&
+					T->Days == 0x7f && T->EveryMinutes == 0;
+			}
+			Ok = Ok && Main->StartMinute == (P == 0 ? 16 * 60 : 18 * 60) && F->Satellites == Want;
+			if (!Ok && RlBad.empty())
+			{
+				RlBad = ": first out of place " + Series;
+			}
+		}
+	}
+	const fest::Festival* Rcop26 = fest::FestivalOf("rcop");
+	const bool RcopSats = Rcop26 && Rcop26->Satellites == std::vector<std::string>{"step4", "mega-rcop"};
+	bool SlamNone = true;
+	for (int Year = 2027; Year <= 2040; ++Year)
+	{
+		const fest::Festival* Slam = fest::FestivalOf("slam" + std::to_string(Year % 100));
+		SlamNone = SlamNone && Slam && Slam->Satellites.empty();
+	}
+	Expect(Rl.Templates().size() == 8537 && RlAt == 8537 && RlFnv == 0x38f22b3af5ae3e70ull && RlBad.empty() && RcopSats && SlamNone,
+		"RiverLine gains 84 satellites (8,537 templates) after its first 8,453, which still hash to 5bc7d44's constant (" + SitesHexNet(RlFnv) +
+			"): 2027-2040, Ring Rush's then the Championship Online's, each Main's Satellite ($55, two days out at 20:00, Turbo, 120/300), Mega ($109, the night "
+			"before at 20:00, Turbo, 130/650, ten seats at the Main's buy-in) and Last Chance ($215, two hours before the Main: 14:00 / 16:00, Hyper, 60/90), no "
+			"series, no number, seating the Main's ticket at its buy-in; each edition's Satellites are its three, RCOP 2026's its step4 and Mega, Summer Slam's none (" +
+			std::to_string(Rl.Templates().size()) + " templates)" + RlBad);
 
 	// Ids unique across the three sites.
 	std::set<std::string> Ids;
@@ -2029,6 +2115,40 @@ void FestCopyNet()
 	Expect(Rival > 0 && Champ.empty(), "no rival festival name, Short, Title, tagline, event name, blurb, seats text or trophy holds \"championship\" (" + std::to_string(Rival) +
 										   " strings; FestChampWord, §2.11)" + Champ);
 
+	// FN-4a (§2.2.2, X2): "festival" names the tier only. The five renamed RiverLine seasonal series print their new names, each a series
+	// in the calendar and an entry of fest::Inventory, and no series on any site that is not a festival edition has "festival" in its name.
+	std::set<std::string> Listed;
+	for (const std::string& Entry : fest::Inventory())
+	{
+		Listed.insert(Entry);
+	}
+	std::set<std::string> RiverLineNames;
+	std::string Tier;
+	int Series = 0;
+	for (int S = 0; S < static_cast<int>(net::SiteId::Count); ++S)
+	{
+		for (const net::SeriesInfo& Sr : net::Site(static_cast<net::SiteId>(S)).Series())
+		{
+			++Series;
+			if (S == static_cast<int>(net::SiteId::RiverLine))
+			{
+				RiverLineNames.insert(Sr.Name);
+			}
+			if (!Sr.Festival && trademarks::HasWord(trademarks::Lower(Sr.Name), "festival") && Tier.empty())
+			{
+				Tier = ": \"" + Sr.Name + "\" (" + Sr.Id + ")";
+			}
+		}
+	}
+	std::string Renamed;
+	for (const char* Name : {"Polar Night Series", "Deep Freeze Classic", "Spring Fever Series", "Greenlight Open", "Fireside Classic"})
+	{
+		Renamed += RiverLineNames.count(Name) && Listed.count(std::string("label\t") + Name) ? "" : std::string(" missing: ") + Name;
+	}
+	Expect(Series > 0 && Tier.empty() && Renamed.empty(),
+		"X2: the five RiverLine seasonal series renamed off \"Festival\" (Polar Night Series, Deep Freeze Classic, Spring Fever Series, Greenlight Open, Fireside "
+		"Classic) are in the calendar and fest::Inventory, and none of " + std::to_string(Series) + " series that is not a festival holds the word" + Tier + Renamed);
+
 	// The helpers (§1.2 item 13; H0's declarations, F-net's bodies): the article and the date forms, and the fill that uses them.
 	const bool Article = fest::NameAfterArticle("The Championship Online 2027") == "Championship Online 2027" && fest::NameAfterArticle("FEIGN 2026") == "FEIGN 2026" &&
 		fest::NameAfterArticle("RCOP 2026") == "RCOP 2026" && fest::NameAfterArticle("Theatre Royal") == "Theatre Royal" && fest::NameAfterArticle("The") == "The" &&
@@ -2045,6 +2165,189 @@ void FestCopyNet()
 	Expect(Article && Fill && Dates,
 		"NameAfterArticle drops a leading \"The \" only (\"The Championship Online 2027\" -> \"Championship Online 2027\"), so \"the {Festival}\" never prints \"the The\"; "
 		"DateInSentence prints \"Nov 30\" inside Today's world year and \"Mar 30, 2027\" outside it (" + Final + ")");
+}
+
+// ------------------------------------------------------------------ FestRcopGtdSum (F-net's half)
+
+/** §2.2.2 (the W5 fixes; PLAN_FNET Q12), §2.15.1 (F-net's half; slide 0 is F-hubs' FestHonestLines): RCOP 2026's SeriesInfo::GtdCents
+ *  is the sum of its 154 templates' guarantees ($78,203,400) in both RiverLine construction paths (Network() and Network(RiverLine's
+ *  SiteDef)); its tagline prints it ("The RiverLine Championship of Online Poker. $78,203,400 guaranteed."), and so does the day -6
+ *  schedule post; its name, Short and Events stay; no RiverLine tagline or News body types "$100,000,000". Planted: Cents(1.0e8) kept. */
+void FestRcopGtdSumNet()
+{
+	namespace net = ss::net;
+	const net::Network& Rl = net::Site(net::SiteId::RiverLine);
+	ss::Chips Sum = 0;
+	int Events = 0;
+	for (const net::EventTemplate& T : Rl.Templates())
+	{
+		if (T.Series == "rcop")
+		{
+			Sum += T.GtdCents;
+			++Events;
+		}
+	}
+	const std::string Tagline = "The RiverLine Championship of Online Poker. $78,203,400 guaranteed.";
+	const net::Network ByDef(net::Def(net::SiteId::RiverLine));
+	const net::SeriesInfo* Rc = Rl.FindSeries("rcop");
+	const net::SeriesInfo* RcDef = ByDef.FindSeries("rcop");
+	const bool Series = Rc && RcDef && Rc->GtdCents == Sum && RcDef->GtdCents == Sum && Rc->Tagline == Tagline && RcDef->Tagline == Tagline && Rc->Name == "RCOP 2026" &&
+		Rc->Short == "RCOP" && Rc->Events == 154;
+	Expect(Events == 154 && Sum == static_cast<ss::Chips>(7820340000ll) && Series,
+		"RCOP 2026's guarantee is its 154 templates' sum, $78,203,400, in both RiverLine networks, and its tagline prints it (" + std::to_string(Events) + " templates, " +
+			ss::net::BuyIn(Sum) + "; series " + (Rc ? ss::net::BuyIn(Rc->GtdCents) + " \"" + Rc->Tagline + "\"" : std::string("missing")) + ")");
+
+	// The schedule post (day -6, 10:00) and every RiverLine headline to day 2 (Night One's News): the figure, never $100,000,000.
+	net::HeroStats NoHero;
+	std::string Post, Typed;
+	for (const net::NewsItem& It : Rl.News(FestNetAt(2, 12 * 60), NoHero, 400))
+	{
+		Post = It.Title == "RCOP 2026: the schedule" ? It.Body : Post;
+		Typed = It.Body.find("$100,000,000") != std::string::npos || It.Title.find("$100,000,000") != std::string::npos ? It.Title : Typed;
+	}
+	for (const net::SeriesInfo& Sr : Rl.Series())
+	{
+		Typed = Sr.Tagline.find("$100,000,000") != std::string::npos ? Sr.Name : Typed;
+	}
+	Expect(Post == "154 events. $78,203,400 guaranteed. October 18 to November 8. Satellites run every day from $2.20." && Typed.empty(),
+		"the RCOP 2026 schedule post reads the computed guarantee (\"" + Post + "\") and no RiverLine tagline or headline types $100,000,000" +
+			(Typed.empty() ? std::string() : ": " + Typed));
+}
+
+// ------------------------------------------------------------------ FestBlurbsFilled (F-net's half)
+
+/** The figures a blurb prints: "$2.20", "$1,050", "$1M", "3:00" (a time's digits), "2" (a step); each maximal run of $ , . : and
+ *  digits holding a digit (a K or M right after it joins), trailing punctuation dropped. */
+std::vector<std::string> FestNetFigures(const std::string& Text)
+{
+	std::vector<std::string> Out;
+	const auto Part = [&Text](size_t K) {
+		const char C = Text[K];
+		return (C >= '0' && C <= '9') || C == '$' || C == ',' || C == '.' || C == ':';
+	};
+	size_t I = 0;
+	while (I < Text.size())
+	{
+		if (!Part(I))
+		{
+			++I;
+			continue;
+		}
+		size_t J = I;
+		while (J < Text.size() && Part(J))
+		{
+			++J;
+		}
+		if (J < Text.size() && (Text[J] == 'K' || Text[J] == 'M') && (J + 1 == Text.size() || !std::isalnum(static_cast<unsigned char>(Text[J + 1]))))
+		{
+			++J;
+		}
+		std::string Tok = Text.substr(I, J - I);
+		while (!Tok.empty() && (Tok.back() == '.' || Tok.back() == ',' || Tok.back() == ':'))
+		{
+			Tok.pop_back();
+		}
+		if (Tok.find_first_of("0123456789") != std::string::npos)
+		{
+			Out.push_back(Tok);
+		}
+		I = J;
+	}
+	return Out;
+}
+
+/** Why a blurb fails §2.11's rule ("" if it passes): a number spelled out (two to twenty, the tens, hundred, thousand, million,
+ *  billion, dozen; "one for every" and the ordinals are words, not figures), a typed past, or a figure that isn't one of the
+ *  template's own (its buy-in, guarantee, added money and seat value; its Main's buy-in; its start time; the step its seat climbs to). */
+std::string FestNetBlurbWhy(const ss::net::EventTemplate& T, ss::Chips MainBuyIn)
+{
+	namespace net = ss::net;
+	if (T.Blurb.empty())
+	{
+		return std::string();
+	}
+	std::string Why;
+	const std::string Low = trademarks::Lower(T.Blurb);
+	for (const char* W : {"two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+			 "seventeen", "eighteen", "nineteen", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand", "million",
+			 "billion", "dozen"})
+	{
+		Why += trademarks::HasWord(Low, W) ? std::string(" spells \"") + W + "\"" : std::string();
+	}
+	for (const char* Past : {"last year", "last week", "last night", "champion won"})
+	{
+		Why += Low.find(Past) != std::string::npos ? std::string(" a typed past: ") + Past : std::string();
+	}
+	std::set<std::string> Own = {net::BuyIn(T.BuyInCents), net::BuyIn(MainBuyIn)};
+	for (const ss::Chips C : {T.GtdCents, T.AddedCents, T.SeatValueCents})
+	{
+		if (C > 0)
+		{
+			Own.insert(net::BuyIn(C));
+			Own.insert(net::MoneyShort(C));
+		}
+	}
+	const std::string Start = net::TimeLabel(static_cast<double>(T.StartMinute));
+	Own.insert(Start.substr(0, Start.find(' ')));
+	// A step's seat climbs to "Step K" (its seats text names the rung: "Step 2 tickets ($5.50)").
+	if (T.Seats.rfind("Step ", 0) == 0)
+	{
+		Own.insert(T.Seats.substr(5, T.Seats.find(' ', 5) - 5));
+	}
+	for (const std::string& Fig : FestNetFigures(T.Blurb))
+	{
+		Why += Own.count(Fig) ? std::string() : " a figure not the template's: " + Fig;
+	}
+	return Why;
+}
+
+/** §2.11 (B1-B15; rev-plan minor 11), §2.2.2, §2.15.1 (F-net's half; U2/U15 are F-hubs' FestCopyUi): no festival blurb spells a number
+ *  out and every figure in one comes from its template: every rival festival event's blurb (B1-B15: its buy-in, its start, its Main's
+ *  buy-in, the step its seat climbs to), and RiverLine's three W5 blurbs (rcop-main's "$25,000,000 guaranteed." from its guarantee, the
+ *  Mega's "$5,250" twice from its seat's value and the Main's buy-in, Sunday Showdown's "$1M" from its guarantee), which type no past
+ *  either. RiverLine's other blurbs are today's strings (§2.2.2: untouched, U9). Planted: "Twenty-two dollars" restored (The Summons). */
+void FestBlurbsFilledNet()
+{
+	namespace fest = ss::fest;
+	namespace net = ss::net;
+	int Blurbs = 0, Bad = 0;
+	std::string First;
+	for (const fest::Festival* F : FestNetRivalEditions())
+	{
+		const net::Network& N = net::Site(F->Site);
+		const net::EventTemplate* Main = N.FindTemplate(F->MainId);
+		for (const net::EventTemplate* T : FestNetEditionTemplates(*F))
+		{
+			Blurbs += T->Blurb.empty() ? 0 : 1;
+			const std::string Why = FestNetBlurbWhy(*T, Main ? Main->BuyInCents : 0);
+			if (!Why.empty())
+			{
+				++Bad;
+				First = First.empty() ? ": \"" + T->Blurb + "\" (" + T->Id + ")" + Why : First;
+			}
+		}
+	}
+	const net::Network& Rl = net::Site(net::SiteId::RiverLine);
+	const net::EventTemplate* RcopMain = Rl.FindTemplate("rcop-main");
+	const std::pair<const char*, const char*> W5[] = {{"rcop-main", "The one that changes a life. $25,000,000 guaranteed."},
+		{"mega-rcop", "Seats to the $5,250 RCOP Main Event: one for every $5,250 in the pool."}, {"sunday-showdown", "The people's major. $1M guaranteed every Sunday."}};
+	int Fixed = 0;
+	for (const auto& Row : W5)
+	{
+		const net::EventTemplate* T = Rl.FindTemplate(Row.first);
+		const std::string Why = !T ? std::string(" missing") : FestNetBlurbWhy(*T, RcopMain ? RcopMain->BuyInCents : 0) + (T->Blurb == Row.second ? "" : " not §2.2.2's text");
+		Fixed += T ? 1 : 0;
+		if (!Why.empty())
+		{
+			++Bad;
+			First = First.empty() ? ": \"" + (T ? T->Blurb : std::string()) + "\" (" + Row.first + ")" + Why : First;
+		}
+	}
+	const net::EventTemplate* Mega = Rl.FindTemplate("mega-rcop");
+	const bool MegaSeats = Mega && Mega->Seats == "RCOP Main Event seats" && Mega->GtdCents == 0 && RcopMain && Mega->SeatValueCents == RcopMain->BuyInCents;
+	Expect(Blurbs > 0 && Fixed == 3 && Bad == 0 && MegaSeats,
+		"no festival blurb spells a number out, and every figure in one is its template's (" + std::to_string(Blurbs) +
+			" rival festival blurbs, B1-B15, and RiverLine's three W5 blurbs; the Mega's seats text is \"RCOP Main Event seats\", no seat guaranteed)" + First);
 }
 
 /** fest::All()'s first build, timed once the networks exist (SPEC §2.14: built once, <= 1 ms; asserted under SS_PERF=1 only). */
@@ -2128,6 +2431,15 @@ void SegNet()
 	if (Only("FestCopy"))
 	{
 		FestCopyNet();
+	}
+	// FN-4a: RiverLine's dress.
+	if (Only("FestRcopGtdSum"))
+	{
+		FestRcopGtdSumNet();
+	}
+	if (Only("FestBlurbsFilled"))
+	{
+		FestBlurbsFilledNet();
 	}
 }
 } // namespace festivals_test
