@@ -32,6 +32,8 @@
 // text runs with each attraction (FEIGN's arch, PUSH's tower, PENNANT's pavilion) on every evening of its first edition, on one
 // laptop visiting the three in date order. Asserted wherever the attraction is on the page (F-hubs' band fill, FH-3b, merged: the
 // integration's trees); a tree without the fill prints PLAY today and stops after FEIGN. Runs last (after the takeover pages).
+// G1 FL-final: FestSkinRule's Afterburner page reads the skin without the attraction's foot sign (FH-3b's fill puts FEIGN's arch
+// and its Mirror Mint sign on FEIGN's day 2 at 02:00; the attraction keeps its look every hour, only the palette yields). Test-only.
 #include "UiSeg.h"
 #include "CopyLint.h"
 #include "Trademarks.h"
@@ -2704,6 +2706,21 @@ bool TextWearsLook(const ss::ui::DrawList& L, uint32_t Rgb)
 	return false;
 }
 
+/** TextWearsLook for the page's skin: the attraction's foot sign ("STEP INSIDE · THE HUB", §2.11 U32) left out. The attraction stands
+ *  in its look's colours every hour its festival is Live (§2.7.4), Afterburner Hours included; only the palette yields to the night
+ *  (§2.7.3). G1 FL-final: with F-hubs' band fill (FH-3b) merged, FEIGN's day 2 at 02:00 shows the arch and its Mirror Mint sign. */
+bool SkinTextWearsLook(const ss::ui::DrawList& L, uint32_t Rgb)
+{
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Col.A > 0.5f && RgbLook(Cmd.Text.Col) == Rgb && Cmd.Text.Text != festart::festart_detail::FestHubSign())
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 /**
  * The seven pages (§2.15.2, QF-18: F-look's fest_takeover_* and fest_table_*), each drawn at both scales and emitted, on one session a
  * host (its world starts at the festival's first event: no days to catch up): RiverLine's lobby during RCOP 2026 (its 29.9k + 2k
@@ -2833,7 +2850,8 @@ TakeoverLook TakeoverPagesLook()
 			continue;
 		}
 		const festart::FestivalLook& F = festart::LookOf(P.Look == Brand::None ? Brand::Feign : P.Look);
-		bool Worn = TextWearsLook(P.L1, NightAccent) && !TextWearsLook(P.L1, F.Accent) && !TextWearsLook(P.L1, F.Accent2) && !TextWearsLook(P.L1, F.Gold);
+		// Afterburner's page: the night's accent on its text and none of FEIGN's skin (the arch's own sign wears FEIGN's look while Live).
+		bool Worn = TextWearsLook(P.L1, NightAccent) && !SkinTextWearsLook(P.L1, F.Accent) && !SkinTextWearsLook(P.L1, F.Accent2) && !SkinTextWearsLook(P.L1, F.Gold);
 		if (P.Look != Brand::None)
 		{
 			// The look's swapped tokens (those it changes on its host: REIGN's Accent2 alone).
