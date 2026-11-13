@@ -82,6 +82,10 @@
 //   cash), the mark and "A seat in the next Main Event" after the crown (U28's line, a FINALIST or better), U10's line from
 //   fest::YourLine (singular at one), U37's "Good on {Dates}." while a step ticket of the edition is in the wallet (R-18: the YOUR
 //   panel's half), and the hero's results in the edition from world::HeroFestResults (six, four on Ignite).
+// - FH-4A fix round 1 (U35, §2.8.2): a championship's step rows (PENNANT's and REIGN's Step 1-3, the edition's own one-off ladder,
+//   HubSteps) carry "STEP {K}" in the number's place on the row's first line (a satellite has no number) and "FOR A STEP {K} TICKET"
+//   or "FOR A MAIN EVENT SEAT" in SATELLITE's place, each figure from the ladder itself (the rung counted from the bottom; the rung its
+//   seat is), never typed. RCOP's recurring step1-4 are no edition's own ladder and keep SATELLITE (U35 lists STEP 1-3).
 #include "ShortStack/UI/RiverLine.h"
 
 #include "../Game/SitesDetail.h"
@@ -173,6 +177,12 @@ std::vector<std::string> FestUiInventory()
 		"label\tMINI MAIN EVENT",
 		"label\tMICRO MAIN EVENT",
 		"label\tSATELLITE",
+		// U35 (FH-4A fix round 1): a championship's step rows, the pill numbers the ladder's own (HubStepPills).
+		"label\tSTEP 1",
+		"label\tSTEP 2",
+		"label\tSTEP 3",
+		"label\tFOR A STEP {K} TICKET",
+		"label\tFOR A MAIN EVENT SEAT",
 		"sentence\tA seat won here waits in your wallet until big fields open.",
 		// The overlay ticker (§2.4.4): U26's three forms, and the Main's registrations so far (U3's MAIN EVENT with U4's "registered").
 		"sentence\t{Site} added {Overlay} to cover {Event}'s guarantee.",
@@ -716,6 +726,7 @@ struct HubUi
 	} Popover;
 	// The day's rows, rebuilt once a world minute or when the edition or the day changes.
 	std::vector<std::string> Ladder; // the edition's satellites and the ladder up to them (built once an edition)
+	std::map<std::string, std::pair<int, int>> Steps; // FH-4A fix round 1, U35: a step row's template -> {its rung, the rung its seat is (0: the Main)}
 	bool LadderBuilt = false;
 	long long RowsMinute = -1;
 	int RowsDay = -9999;
@@ -1063,6 +1074,71 @@ std::vector<std::string> HubLadder(const net::Network& Net, const fest::Festival
 	return Out;
 }
 
+/** A championship's step ladder (§2.8.2, U35; FH-4A fix round 1): the edition's own one-off satellites (F.Satellites) that seat
+ *  another of them or that another of them seats (Step 1 seats a Step 2 ticket, Step 2 a Step 3 ticket, Step 3 the Main's), each
+ *  with its rung counted from the bottom and the rung its seat is (0: the Main); a step's two runs take one ticket, so they share
+ *  their rung. The Mega and the Last Chance seat the Main with no rung below them, and a recurring ladder (RCOP's step1-4, every
+ *  four hours) is no edition's own: none of them is a step row. Built once an edition (HubUi::Steps). */
+std::map<std::string, std::pair<int, int>> HubSteps(const net::Network& Net, const fest::Festival& F)
+{
+	std::vector<const net::EventTemplate*> Own;
+	for (const std::string& Id : F.Satellites)
+	{
+		const net::EventTemplate* T = Net.FindTemplate(Id);
+		if (T && T->Fmt == net::Format::Satellite && T->OnlyDay != -9999 && !T->SeatTicket.empty())
+		{
+			Own.push_back(T);
+		}
+	}
+	// The rung below T (one seating T's ticket) and the rung T's seat is (one taking T's seat ticket).
+	auto Below = [&Net, &Own](const net::EventTemplate* T) -> const net::EventTemplate* {
+		const std::string Ticket = Net.TicketOf(T->Id);
+		for (const net::EventTemplate* V : Own)
+		{
+			if (V != T && V->SeatTicket == Ticket)
+			{
+				return V;
+			}
+		}
+		return nullptr;
+	};
+	auto Into = [&Net, &Own](const net::EventTemplate* T) -> const net::EventTemplate* {
+		for (const net::EventTemplate* V : Own)
+		{
+			if (V != T && Net.TicketOf(V->Id) == T->SeatTicket)
+			{
+				return V;
+			}
+		}
+		return nullptr;
+	};
+	auto Rung = [&Below](const net::EventTemplate* T) {
+		int K = 1;
+		for (const net::EventTemplate* V = Below(T); V && K < 8; V = Below(V))
+		{
+			++K;
+		}
+		return K;
+	};
+	std::map<std::string, std::pair<int, int>> Out;
+	for (const net::EventTemplate* T : Own)
+	{
+		const net::EventTemplate* Up = Into(T);
+		if (Up || Below(T))
+		{
+			Out[T->Id] = {Rung(T), Up ? Rung(Up) : 0};
+		}
+	}
+	return Out;
+}
+
+/** U35's two pills for a step row (§2.8.2, §2.11): "STEP {K}" and "FOR A STEP {Next} TICKET", or "FOR A MAIN EVENT SEAT" when its
+ *  seat is the Main's (Next 0). Pure (u4_ui's FestCopyUi calls it). */
+std::pair<std::string, std::string> HubStepPills(int K, int Next)
+{
+	return {"STEP " + std::to_string(K), Next > 0 ? "FOR A STEP " + std::to_string(Next) + " TICKET" : std::string("FOR A MAIN EVENT SEAT")};
+}
+
 /** The day's rows (§2.8.2): the edition's events that day in start order (a GRIT show's two runs in one row, FH-2), then one row for
  *  each satellite into its Main running that day (its first instance not yet finished, else the day's last), rebuilt once a world
  *  minute or on a new day. */
@@ -1076,6 +1152,7 @@ void HubDayRows(const net::Network& Net, const fest::Festival& F, HubUi& U, int 
 	if (!U.LadderBuilt)
 	{
 		U.Ladder = HubLadder(Net, F);
+		U.Steps = HubSteps(Net, F);
 		U.LadderBuilt = true;
 	}
 	U.RowsDay = Day;
@@ -1157,8 +1234,9 @@ std::string HubShowTime(double Start)
 
 /** The day's rows (§2.8.2; FH-1b): seven at 72 in view (the wheel scrolls the rest; Ignite's seventh peeks under its frame), each
  *  `ev:<id>` (a click opens the lobby's event panel on it), written to Listed: the start, the low-detail emblem at 30, the number and
- *  the name, GTD or pool and the buy-in, the pills (MAIN EVENT, a title's MINI or MICRO MAIN EVENT, SATELLITE), the status and the
- *  entries; a satellite into a Main that isn't joinable shows the Main's lock line and U31 instead of its money line. The button is
+ *  the name, GTD or pool and the buy-in, the pills (MAIN EVENT, a title's MINI or MICRO MAIN EVENT, SATELLITE; a championship's step
+ *  row its U35 pair, STEP {K} in the number's place and its seat in SATELLITE's, FH-4A fix round 1), the status and the entries;
+ *  a satellite into a Main that isn't joinable shows the Main's lock line and U31 instead of its money line. The button is
  *  RegisterBlock's (SitesTwoPress, the clause's second press, core's strike gate: FestStrikeGate): on every unfinished row until one
  *  is armed, then on that row alone, which a press on its button selects first (Session::ConfirmRegister is one per session); a
  *  finished row shows its winner in the button's place.
@@ -1243,6 +1321,10 @@ void HubRows(HubCtx& X, HubUi& U, int Day)
 		const bool IsMain = T.Id == F.MainId;
 		const bool TitleEvent = !IsMain && TitleIt != F.TitleIds.end();
 		const bool IsSat = T.Fmt == net::Format::Satellite;
+		// FH-4A fix round 1, U35: a championship's step row (HubSteps) and its two pills.
+		const auto StepIt = IsSat ? U.Steps.find(T.Id) : U.Steps.end();
+		const bool IsStep = StepIt != U.Steps.end();
+		const std::pair<std::string, std::string> StepPills = IsStep ? HubStepPills(StepIt->second.first, StepIt->second.second) : std::pair<std::string, std::string>();
 		X.UI.RRect(R, 10.0f, St.Hover ? rlsites_detail::SitesTone(0x15253d) : rlsites_detail::SitesTone(0x101a2b),
 			IsMain ? NetA(pal::Gold, 0.55f) : IsMine ? NetA(pal::Accent, 0.6f) : NetA(pal::Line, 0.6f));
 		X.C.FillRoundRect({R.X + 1.0f, R.Y + 10.0f, 4.0f, R.H - 20.0f}, 2.0f, IsMain || TitleEvent ? pal::Gold : EdgeCol);
@@ -1256,6 +1338,11 @@ void HubRows(HubCtx& X, HubUi& U, int Day)
 		if (T.EventNo > 0)
 		{
 			Nx += rlnet_detail::NetPill(X.C, "#" + std::to_string(T.EventNo), Nx, R.Y + 14.0f, IsMain || TitleEvent ? pal::Gold : EdgeCol, true, 10.0f) + 8.0f;
+		}
+		else if (IsStep)
+		{
+			// U35's STEP {K} in the number's place (a satellite has none).
+			Nx += rlnet_detail::NetPill(X.C, StepPills.first, Nx, R.Y + 14.0f, pal::Accent2, true, 10.0f) + 8.0f;
 		}
 		X.UI.Text(rlnet_detail::NetShortName(T.Name), Nx, R.Y + 28.0f, Ts(15.0f, 700, pal::Ink, Align::Left, Baseline::Alphabetic, false, std::max(40.0f, StatusX - 12.0f - Nx)));
 		const std::string SeatLock = IsSat ? HubSeatLock(Net, T, E.Start, S.Unlocks()) : std::string();
@@ -1300,11 +1387,14 @@ void HubRows(HubCtx& X, HubUi& U, int Day)
 			const bool IsMini = T.Id.size() >= 4 && T.Id.compare(T.Id.size() - 4, 4, "mini") == 0;
 			const std::string PillText = IsMain ? std::string("MAIN EVENT")
 				: TitleEvent                     ? std::string(IsMini ? "MINI MAIN EVENT" : "MICRO MAIN EVENT")
+				: IsStep                         ? StepPills.second
 				: IsSat                          ? std::string("SATELLITE")
 												 : std::string();
 			if (!PillText.empty() && Lx < StatusX - 40.0f)
 			{
-				rlnet_detail::NetPill(X.C, PillText, Lx, R.Y + 39.0f, IsMain || TitleEvent ? pal::Gold : pal::Accent2, false, 9.5f);
+				// U35's seat pill is the row's longest: a size smaller where it would reach the entries' column (RunItTwice's 860).
+				const float PillSize = IsStep && Lx + X.C.Measure(PillText, 9.5f, 700) + 9.5f * 1.3f > StatusX - 6.0f ? 8.5f : 9.5f;
+				rlnet_detail::NetPill(X.C, PillText, Lx, R.Y + 39.0f, IsMain || TitleEvent ? pal::Gold : pal::Accent2, false, PillSize);
 			}
 		}
 		// The status (the series page's own forms) and the entries.
@@ -1989,6 +2079,7 @@ void HubYour(HubCtx& X, HubUi& U)
 	if (!U.LadderBuilt)
 	{
 		U.Ladder = HubLadder(Net, F);
+		U.Steps = HubSteps(Net, F);
 		U.LadderBuilt = true;
 	}
 	const std::string GoodOn = HubGoodOn(HubStepDays(Access::SessionOf(X.RL), Net, F, U.Ladder, H.World), H.Today);

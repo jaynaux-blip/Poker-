@@ -61,6 +61,8 @@ std::string HubYourCounts(const fest::YourLineView& V, bool Race);
 std::string HubGoodOn(const std::vector<int>& Days, int Today);
 float HubRollPitch(bool Championship);
 int HubRaceMoves(const RiverLine& RL);
+// FH-4A fix round 1: U35's two pills for a step row (its rung, the rung its seat is; 0 the Main).
+std::pair<std::string, std::string> HubStepPills(int K, int Next);
 } // namespace rlfest_detail
 } // namespace ui
 } // namespace ss
@@ -591,7 +593,7 @@ void FestCopyUiHubs()
 		{"Overlay", "$412,600"}, {"Amount", "$1,280,000"}, {"Entries", "2,345"}, {"Countdown", "2H 10M"}, {"Clock", "0:41:12"},
 		{"Nights", "12"}, {"Show1", "7 PM"}, {"Show2", "10 PM"}, {"Need", "20"}, {"Rank", "164th"}, {"Scorers", "2,214"}, {"Points", "290"},
 		{"Events", "9"}, {"Cashes", "3"}, {"Best", "31st"}, {"Field", "1,964"}, {"MARK", "FINALIST"}, {"Dates", "Apr 7 and Apr 9"}, {"Prize", "$795.32"},
-		{"Place", "31st"}};
+		{"Place", "31st"}, {"K", "2"}};
 	for (const auto& Kv : Extra)
 	{
 		Vars[Kv.first] = Kv.second;
@@ -738,6 +740,43 @@ void FestCopyUiHubs()
 	ui_test::Expect(One == "1 event \xC2\xB7 1 cash \xC2\xB7 best 3rd of 1,964" && Many == "9 events \xC2\xB7 0 cashes \xC2\xB7 best 31st of 1,964 \xC2\xB7 race 164th of 2,214" &&
 			rf::HubYourCounts(V, false) == "9 events \xC2\xB7 0 cashes \xC2\xB7 best 31st of 1,964",
 		("FestCopyUi: U10's forms (" + One + " | " + Many + ")").c_str());
+	// FH-4A fix round 1, U35 (§2.8.2): the five step-pill forms listed with their kinds, no digit typed but the pill numbers ({K} is
+	// the next rung's, a placeholder); HubStepPills gives each rung its own pair, its seat form the inventory's filled.
+	for (const char* Line : {"label\tSTEP 1", "label\tSTEP 2", "label\tSTEP 3", "label\tFOR A STEP {K} TICKET", "label\tFOR A MAIN EVENT SEAT"})
+	{
+		std::string Bare;
+		for (const char* Ch = std::strchr(Line, '\t') + 1; *Ch; ++Ch)
+		{
+			if (*Ch == '{')
+			{
+				while (*Ch && *Ch != '}')
+				{
+					++Ch;
+				}
+				if (!*Ch)
+				{
+					break;
+				}
+				continue;
+			}
+			Bare += *Ch;
+		}
+		const bool PillNo = Bare.size() == 6 && Bare.compare(0, 5, "STEP ") == 0;
+		const bool Listed = std::find(Inv.begin(), Inv.end(), std::string(Line)) != Inv.end();
+		const bool Typed = !PillNo && Bare.find_first_of("0123456789") != std::string::npos;
+		ui_test::Expect(Listed && !Typed, (std::string("FestCopyUi: FestUiInventory lists U35's \"") + Line + "\" with no digit typed but the pill number").c_str());
+	}
+	bool PillsOk = true;
+	std::string PillsSeen;
+	for (const std::pair<int, int>& Rung : {std::pair<int, int>{1, 2}, std::pair<int, int>{2, 3}, std::pair<int, int>{3, 0}})
+	{
+		const std::pair<std::string, std::string> Pp = rf::HubStepPills(Rung.first, Rung.second);
+		const std::string Seat = Rung.second > 0 ? copylint::Fill("FOR A STEP {K} TICKET", {{"K", std::to_string(Rung.second)}}) : std::string("FOR A MAIN EVENT SEAT");
+		PillsOk = PillsOk && Pp.first == "STEP " + std::to_string(Rung.first) && Pp.second == Seat &&
+			std::find(Inv.begin(), Inv.end(), "label\t" + Pp.first) != Inv.end();
+		PillsSeen += (PillsSeen.empty() ? "" : " | ") + Pp.first + " / " + Pp.second;
+	}
+	ui_test::Expect(PillsOk, ("FestCopyUi: U35's pills for Step 1, 2 and 3 (" + PillsSeen + ")").c_str());
 }
 // ------------------------------------------------------------------ FH-2: the real calendar in three frames
 
@@ -1254,10 +1293,87 @@ void FestCareerIgnite()
 	std::printf("  fest_hub_ig_live: %zu rows on FEIGN 2026's first day (six whole, the seventh under the fade)\n", Rows.size());
 }
 
+/** FestCopyUi's drawn U35 half (§2.8.2; FH-4A fix round 1): REIGN 2027's step rows on RunItTwice's hub (rows {232, 412, 860, 504}) on
+ *  day 302 (Step 2's first day) and day 303 (Step 1's second, Step 3's first), at noon. Each step row of the edition draws STEP {K} on
+ *  its first line and its seat pill on its second, ending 4 short of the entries' column (x 582), and no SATELLITE; K and the seat are read
+ *  here from the row's own template (H22's "Step {K} · REIGN Main" and its seats text, "Step {K} tickets (...)" or "REIGN Main Event
+ *  seats"), not from the hub's ladder. Adds each form drawn to Seen. Plants: FOR A MAIN EVENT SEAT on Step 1; the STEP {K} pill
+ *  dropped; the seat pill kept at 9.5 in RunItTwice's narrower column. */
+int FestStepPillsReignDay(HubsLaptop& P, const ss::fest::Festival& Reign, int Day, std::vector<std::string>& Seen)
+{
+	HubsTo(P, Day, 12.0);
+	HubsOpenHost(P, ss::net::SiteId::RunItTwice);
+	const DrawList L = P.Frame(1.0f);
+	const ss::net::Network& Rit = ss::net::Site(ss::net::SiteId::RunItTwice);
+	ui_test::TableMeasurer M;
+	DrawList Scratch;
+	ss::ui::Canvas C(Scratch, M, RiverLine::Width, RiverLine::Height, 1.0f);
+	const std::vector<std::string> Rows = P.RL.ListedEvents();
+	int Steps = 0;
+	for (size_t I = 0; I < Rows.size() && I < 7; ++I)
+	{
+		const ss::net::EventTemplate& T = Rit.TemplateOf(HubsInstance(Rit, Rows[I]));
+		const bool Own = std::find(Reign.Satellites.begin(), Reign.Satellites.end(), T.Id) != Reign.Satellites.end();
+		if (!Own || T.Fmt != ss::net::Format::Satellite || T.Name.size() < 6 || T.Name.compare(0, 5, "Step ") != 0)
+		{
+			continue;
+		}
+		const std::string Rung = "STEP " + T.Name.substr(5, 1);
+		const std::string SeatPill = T.Seats.compare(0, 5, "Step ") == 0 ? "FOR A STEP " + T.Seats.substr(5, 1) + " TICKET" : std::string("FOR A MAIN EVENT SEAT");
+		const float RowY = 412.0f + 72.0f * static_cast<float>(I);
+		const bool HasRung = HubsRunBetween(L, Rung, RowY, RowY + 32.0f).first >= 0.0f;
+		const ss::ui::TextItem* SeatRun = nullptr;
+		bool Sat = false;
+		for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+		{
+			if (Cmd.Type != ss::ui::DrawCmd::Kind::Text || Cmd.Text.BaselineY < RowY || Cmd.Text.BaselineY >= RowY + 66.0f)
+			{
+				continue;
+			}
+			SeatRun = Cmd.Text.Text == SeatPill && Cmd.Text.BaselineY >= RowY + 32.0f ? &Cmd.Text : SeatRun;
+			Sat = Sat || Cmd.Text.Text == "SATELLITE";
+		}
+		const float SeatRight = SeatRun ? SeatRun->X + C.Measure(SeatPill, SeatRun->SizePx, SeatRun->Face) + SeatRun->SizePx * 0.65f : -1.0f;
+		ui_test::Expect(HasRung && SeatRun && SeatRight <= 578.0f && !Sat,
+			("FestCopyUi: U35 on day " + std::to_string(Day) + ": " + T.Name + "'s row draws " + Rung + " and " + SeatPill + " (its pill ends at x " +
+				std::to_string(static_cast<int>(SeatRight)) + ", by 578: 4 short of the entries at 582), no SATELLITE")
+				.c_str());
+		if (HasRung && SeatRun)
+		{
+			Seen.push_back(Rung + " / " + SeatPill);
+			std::printf("  U35 on day %d, row %zu (%s): %s / %s, the seat pill at %.1f ends at x %.1f (by 578, the entries at 582)\n", Day, I, Rows[I].c_str(), Rung.c_str(),
+				SeatPill.c_str(), static_cast<double>(SeatRun->SizePx), static_cast<double>(SeatRight));
+		}
+		++Steps;
+	}
+	return Steps;
+}
+
+void FestStepPillsReign(HubsLaptop& P)
+{
+	const ss::fest::Festival* Reign = ss::fest::FestivalOf("runittwice.reign27");
+	ui_test::Expect(Reign && Reign->FirstDay == 294, "FestCopyUi: REIGN 2027 opens on day 294 (F-net's FN-3 row)");
+	if (!Reign)
+	{
+		return;
+	}
+	std::vector<std::string> Seen;
+	const int On302 = FestStepPillsReignDay(P, *Reign, 302, Seen);
+	const int On303 = FestStepPillsReignDay(P, *Reign, 303, Seen);
+	std::string List;
+	for (const std::string& S : Seen)
+	{
+		List += (List.empty() ? "" : " | ") + S;
+	}
+	const auto Has = [&Seen](const char* Form) { return std::find(Seen.begin(), Seen.end(), std::string(Form)) != Seen.end(); };
+	ui_test::Expect(On302 == 1 && On303 == 2 && Has("STEP 2 / FOR A STEP 3 TICKET") && Has("STEP 1 / FOR A STEP 2 TICKET") && Has("STEP 3 / FOR A MAIN EVENT SEAT"),
+		("FestCopyUi: U35's three rungs drawn on REIGN 2027's days 302 and 303 (" + std::to_string(On302) + " + " + std::to_string(On303) + " step rows: " + List + ")").c_str());
+}
+
 /** Career B (FH-2): RiverLine's and RunItTwice's hubs walked forward in day order, never opening Ignite: fest_strip_night_one (Night
  *  One, the pointer resting on FEIGN's cell), fest_hub_rl_live (RCOP 2026's first day), fest_hub_rl_locked (day 19, the rows
  *  scrolled to the ladder), The Summons' seats on WRIT 2027 (U33, no page), fest_hub_rit_twice (GRIT 2027, day 220: two runs a
- *  night), Summer Slam 2027's locked Main (no page), and fest_popover_pass (FEIGN II's cell on day 395, BY INVITATION until F-world's
+ *  night), REIGN 2027's step rows (U35, days 302 and 303, no page; FH-4A fix round 1), Summer Slam 2027's locked Main (no page), and fest_popover_pass (FEIGN II's cell on day 395, BY INVITATION until F-world's
  *  FW-7 sets the Pass; FH-7 emits the counting form). */
 void FestCareerRiverLine()
 {
@@ -1398,6 +1514,8 @@ void FestCareerRiverLine()
 		const DrawList Again = P.Frame(1.0f);
 		ui_test::Expect(ui_test::Drew(Again, Line), ("FestCopyUi: GRIT's ticker line is the edition's own (\"" + Line + "\", U15)").c_str());
 	}
+	// FH-4A fix round 1: REIGN 2027's step rows (U35) on days 302 and 303.
+	FestStepPillsReign(P);
 	// Summer Slam 2027 (its Main locked until G3, §2.2.3): the Main card's lock line.
 	HubsTo(P, Slam->FirstDay + 1, 12.0);
 	P.OpenHub();
