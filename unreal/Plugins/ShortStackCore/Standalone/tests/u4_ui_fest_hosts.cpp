@@ -17,6 +17,10 @@
 // G1 FH-3a: FestHonestLines' B half (RiverLine's honest copy, UI/RiverLineNet.cpp: slide 0's computed guarantee, the wire's festival
 // item from the Buildup, the boards' U25 and THE BELT, no Season prize, the Career goals' U24, the hub's RCOP Buildup panel's U23 through
 // rlfest_detail::RcopBuildupPanel; no removed claim in its claim form) with the lobby's cost printed; FestCopyUi's B half gains U23-U25.
+// G1 FH-4B: FestYourStrip's sheets half (§2.8.2: YOUR {FESTIVAL}'s two-line strip on RiverLine's event panel, Ignite's event sheet and
+// RunItTwice's Prospectus once the hero has played the edition, none before and none on a plain series event; LEAD_CALLS R-18: U37 on
+// a step event's sheet, Ignite's wallet ticket row and RunItTwice's step tickets apart from its WELCOME TICKETS); FestCopyUi's B half
+// gains the strip's, U37's and the ticket rows' strings.
 #include "UiSeg.h"
 
 #include "CopyLint.h"
@@ -56,9 +60,15 @@ const fest::Festival* NetHubEdition(net::SiteId Site, const std::string& SeriesI
 // UI/RiverLineNet.cpp (FH-3a): RiverLine's festival on the taskbar's wire.
 std::string NetTickerFest(double World, std::string& Series);
 const net::SeriesInfo* NetWireSeries(const net::Network& Net, double World, const std::string& FestSeries);
+// UI/RiverLineNet.cpp (FH-4B): the edition a register sheet belongs to, and a wallet ticket as a festival step ticket.
+const fest::Festival* NetSheetEdition(const net::Network& Net, const net::EventInstance& E);
+int NetStepTicket(net::SiteId Site, const std::string& Ticket, double World, const fest::Festival*& Edition, std::string& GoodOn);
 } // namespace rlnet_detail
 namespace rlignite_detail
 {
+// UI/RiverLineIgnite.cpp: the event sheet over the floor, and the laptop's Ignite state dropped.
+void IgniteOpenSheet(RiverLine& RL, const std::string& EventId, double Now);
+void IgniteForget(const RiverLine* RL);
 // UI/RiverLineIgnite.cpp (FH-3b): the bandstand's festival pick and the Lighthouse's festival line.
 bool IgniteBandstandFest(double World, net::EventInstance& Out, std::string& Label);
 std::string IgniteLighthouseAt(double World);
@@ -567,7 +577,8 @@ void FestCopyUiHosts()
 	std::map<std::string, std::string> Vars = copylint::Samples();
 	const std::pair<const char*, const char*> Extra[] = {{"D", "12"}, {"N", "4"}, {"Days", "22"}, {"FirstDate", "Mar 30"}, {"LastDate", "Apr 11"}, {"Gtd", "$281,100"},
 		{"Added", "$2,500"}, {"FESTIVAL", "PENNANT"}, {"Time", "9:00 PM"}, {"Name", "MRS. PARK"}, {"Festival", "RCOP 2027"}, {"BuyIn", "$5,250"},
-		{"Prize", "$795.32"}, {"Date", "Oct 6"}};
+		{"Prize", "$795.32"}, {"Date", "Oct 6"}, {"Rank", "38th"}, {"Scorers", "1,124"}, {"Events", "3"}, {"Cashes", "2"}, {"Best", "9th"},
+		{"Field", "1,104"}, {"Dates", "Apr 7 and Apr 9"}};
 	for (const auto& Kv : Extra)
 	{
 		Vars[Kv.first] = Kv.second;
@@ -1426,6 +1437,421 @@ void FestHonestLines()
 		static_cast<long long>(Live.Vertices.size()) - static_cast<long long>(Night.Vertices.size()), Plain ? Plain->Name.c_str() : "none",
 		std::chrono::duration<double>(std::chrono::steady_clock::now() - Began).count());
 }
+/** FH-4B: one of edition F's runs on F's site at the laptop's clock: Kind 0 a numbered event (its series F's) in play now (late
+ *  registration, running, the final table), 1 a numbered event still taking entries later today, 2 a satellite of F (Festival::
+ *  Satellites) still taking entries inside F's seat window; the earliest such instance, false when there is none. */
+bool HostsStripRun(const ss::fest::Festival& F, double World, int Kind, ss::net::EventInstance& Out, const std::string& Except = std::string())
+{
+	const ss::net::Network& Net = ss::net::Site(F.Site);
+	bool Found = false;
+	for (const ss::net::EventTemplate& T : Net.Templates())
+	{
+		const bool Sat = std::find(F.Satellites.begin(), F.Satellites.end(), T.Id) != F.Satellites.end();
+		if (Kind == 2 ? !Sat : T.Series != F.SeriesId)
+		{
+			continue;
+		}
+		ss::net::EventInstance E;
+		if (!Net.Next(T.Id, Kind == 0 ? World - 12.0 * 60.0 : World, E))
+		{
+			continue;
+		}
+		const ss::net::Status St = Net.Live(E, World).St;
+		const int Day = ss::net::DayOf(E.Start);
+		const bool Ok = Kind == 0 ? (St == ss::net::Status::LateReg || St == ss::net::Status::Running || St == ss::net::Status::FinalTable)
+			: Kind == 1			  ? (St == ss::net::Status::Registering || St == ss::net::Status::Announced) && Day == ss::net::DayOf(World)
+								  : (St == ss::net::Status::Registering || St == ss::net::Status::Announced) && Day >= F.FirstDay - ss::fest::kAnnounceDays && Day <= F.MainDay;
+		if (Ok && E.Id != Except && (!Found || E.Start < Out.Start))
+		{
+			Out = E;
+			Found = true;
+		}
+	}
+	return Found;
+}
+
+/** FH-4B: the first plain series event (a series that is no festival edition) on Site starting after World, false when none. */
+bool HostsStripPlain(ss::net::SiteId Site, double World, ss::net::EventInstance& Out)
+{
+	const ss::net::Network& Net = ss::net::Site(Site);
+	bool Found = false;
+	for (const ss::net::EventTemplate& T : Net.Templates())
+	{
+		ss::net::EventInstance E;
+		if (T.Series.empty() || ss::fest::FestivalOf(T.Series) || !Net.Next(T.Id, World, E))
+		{
+			continue;
+		}
+		if (!Found || E.Start < Out.Start)
+		{
+			Out = E;
+			Found = true;
+		}
+	}
+	return Found;
+}
+
+/** FH-4B: U10's line without its race clause as FestYourStrip expects it from fest::YourLine's numbers (written here, apart from
+ *  rlnet_detail::NetYourCounts), and the race at the head's right ("" while the hero doesn't score). */
+std::string HostsStripCounts(const ss::fest::YourLineView& V)
+{
+	std::string Want = (V.Events == 1 ? std::string("1 event") : ss::Grouped(V.Events) + " events") + " \xC2\xB7 " + (V.Cashes == 1 ? std::string("1 cash") : ss::Grouped(V.Cashes) + " cashes");
+	return V.Best > 0 && V.Field > 0 ? Want + " \xC2\xB7 best " + ss::Ordinal(V.Best) + " of " + ss::Grouped(V.Field) : Want;
+}
+
+std::string HostsStripRace(const ss::fest::YourLineView& V)
+{
+	return V.Rank > 0 && V.Scorers > 0 ? "race " + ss::Ordinal(V.Rank) + " of " + ss::Grouped(V.Scorers) : std::string();
+}
+
+/** FH-4B: event E's register sheet on its host, settled: RiverLine's lobby with E selected (its event panel), Ignite's sheet over the
+ *  floor, RunItTwice's Prospectus held on E (rlrit_detail::RitHoldSelection, which draws it off THE BOARD's window). */
+ss::ui::DrawList HostsStripSheet(HostsLaptop& P, const ss::net::EventInstance& E)
+{
+	const ss::net::SiteId Site = ss::net::SiteOf(E.Id);
+	if (Site == ss::net::SiteId::Ignite)
+	{
+		P.OpenPlay();
+		ss::ui::rlignite_detail::IgniteOpenSheet(P.RL, E.Id, P.Now);
+	}
+	else if (Site == ss::net::SiteId::RunItTwice)
+	{
+		P.OpenRit(ss::ui::RiverLine::Page::Lobby);
+		ss::ui::rlrit_detail::RitHoldSelection(P.RL, E.Id);
+	}
+	else
+	{
+		HostsOpenRiverLine(P, ss::ui::RiverLine::Page::Lobby);
+		P.RL.SelectEvent(E.Id);
+	}
+	return P.Settled();
+}
+
+/** FH-4B: no line of a YOUR strip on L (the head "YOUR " + the Short, the race clause, U10's counts: a run naming events and cashes). */
+bool HostsNoStrip(const ss::ui::DrawList& L, const std::string& Head)
+{
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		const std::string& T = Cmd.Text.Text;
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && (T == Head || T.compare(0, 5, "race ") == 0 || (T.find(" event") != std::string::npos && T.find(" cash") != std::string::npos)))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+/** FH-4B: the runs drawn as Lines cross no other text run on L from the first run reading After on ("" from the first run; Ignite's
+ *  sheet sits over its floor): each run's box, from its top to a fifth of its size under its baseline and as wide as its measured text,
+ *  meets no other run's. Hit names the first crossing. */
+bool HostsStripClear(const ss::ui::DrawList& L, const std::vector<std::string>& Lines, const std::string& After, std::string& Hit)
+{
+	ui_test::TableMeasurer M;
+	std::vector<const ss::ui::TextItem*> Runs;
+	bool On = After.empty();
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text)
+		{
+			On = On || Cmd.Text.Text == After;
+			if (On && !Cmd.Text.Text.empty())
+			{
+				Runs.push_back(&Cmd.Text);
+			}
+		}
+	}
+	const auto Meets = [&M](const ss::ui::TextItem& A, const ss::ui::TextItem& B) {
+		const float Ax1 = A.X + M.Width(A.Text, A.Face, A.SizePx);
+		const float Bx1 = B.X + M.Width(B.Text, B.Face, B.SizePx);
+		return A.X < Bx1 && B.X < Ax1 && A.Y < B.BaselineY + 0.2f * B.SizePx && B.Y < A.BaselineY + 0.2f * A.SizePx;
+	};
+	for (const ss::ui::TextItem* S : Runs)
+	{
+		if (std::find(Lines.begin(), Lines.end(), S->Text) == Lines.end())
+		{
+			continue;
+		}
+		for (const ss::ui::TextItem* O : Runs)
+		{
+			if (O != S && O->Text != S->Text && Meets(*S, *O))
+			{
+				Hit = "\"" + S->Text + "\" meets \"" + O->Text + "\"";
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+/** FH-4B: the hero plays Id to Place for Prize through the world's public calls (World::HeroEntered, HeroFinished; PLAN_FHUBS
+ *  Corrections item 15), the world drained first as the session drains it before telling a finish. */
+void HostsStripPlay(HostsLaptop& P, const std::string& Id, int Place, ss::Chips Prize)
+{
+	P.S.DrainWorld();
+	ss::world::World& W = P.S.Living();
+	W.HeroEntered(Id, std::string());
+	W.HeroFinished(Id, Place, Prize, ss::world::World::TableReport());
+	P.Now = ui_test::Step(P.S, P.Now, 0.2);
+}
+
+/** FestYourStrip's sheets half on one host (§2.8.2; FH-4B): edition F on its first day at 15:00: before the hero plays F, a numbered
+ *  event's sheet draws no strip; after a cash in one of F's events in play, the same sheet and a satellite's draw "YOUR {SHORT}", U10's
+ *  line in its singular ("1 event · 1 cash · best ...") and the race at the head's right while the hero scores, from fest::YourLine;
+ *  a plain series event's sheet draws none. Second (Plural): an unpaid finish makes it "2 events · 1 cash". */
+void FestYourStripHost(HostsLaptop& P, const ss::fest::Festival& F, bool Plural, std::string& Report)
+{
+	namespace rn = ss::ui::rlnet_detail;
+	const ss::net::Network& Net = ss::net::Site(F.Site);
+	const ss::net::SeriesInfo* Sr = Net.FindSeries(F.SeriesId);
+	const std::string Head = "YOUR " + HostsUpper(Sr ? Sr->Short : F.Name);
+	P.At(static_cast<double>(F.FirstDay) * ss::net::MinutesPerDay + 15.0 * 60.0);
+	ss::net::EventInstance Playing;
+	ss::net::EventInstance Later;
+	ss::net::EventInstance Sat;
+	const bool HasPlaying = HostsStripRun(F, P.S.WorldMinutes(), 0, Playing);
+	const bool HasLater = HostsStripRun(F, P.S.WorldMinutes(), 1, Later);
+	const bool HasSat = HostsStripRun(F, P.S.WorldMinutes(), 2, Sat);
+	ui_test::Expect(HasPlaying && HasLater && HasSat, ("FestYourStrip (sheets): " + F.Name + " has an event in play, one later today and a satellite on its first day").c_str());
+	if (!HasPlaying || !HasLater || !HasSat)
+	{
+		return;
+	}
+	ui_test::Expect(rn::NetSheetEdition(Net, Later) == &F && rn::NetSheetEdition(Net, Sat) == &F, ("FestYourStrip (sheets): " + F.Name + "'s event and satellite belong to it").c_str());
+	const ss::ui::DrawList Before = HostsStripSheet(P, Later);
+	ui_test::Expect(!ss::fest::YourLine(F, &P.S.Living()).Shown && HostsNoStrip(Before, Head),
+		("FestYourStrip (sheets): before the hero plays " + F.Name + ", " + Net.NameOf(Later) + "'s sheet draws no YOUR strip").c_str());
+	HostsStripPlay(P, Playing.Id, 3, std::max<ss::Chips>(100, Net.TemplateOf(Playing).BuyInCents * 6));
+	const ss::fest::YourLineView V = ss::fest::YourLine(F, &P.S.Living());
+	ui_test::Expect(V.Shown && V.Events == 1 && V.Cashes == 1 && V.Best == 3, ("FestYourStrip (sheets): the hero's cash in " + Playing.Id + " gives " + F.Name + "'s pin").c_str());
+	const std::string Counts = HostsStripCounts(V);
+	const std::string Race = HostsStripRace(V);
+	ui_test::Expect(Counts.compare(0, 17, "1 event \xC2\xB7 1 cash") == 0, ("FestYourStrip (sheets): U10 is singular at one (" + Counts + ")").c_str());
+	const ss::ui::DrawList After = HostsStripSheet(P, Later);
+	ui_test::Expect(ui_test::DrewRun(After, Head) && ui_test::DrewRun(After, Counts) && (Race.empty() ? !ui_test::Drew(After, "race ") : ui_test::DrewRun(After, Race)),
+		("FestYourStrip (sheets): " + Net.NameOf(Later) + "'s sheet draws " + Head + (Race.empty() ? std::string() : " | " + Race) + " | " + Counts).c_str());
+	const std::string Anchor = F.Site == ss::net::SiteId::Ignite ? std::string("YOUR IGNITE BALANCE") : std::string();
+	std::string Hit;
+	const bool ClearLater = HostsStripClear(After, {Head, Race, Counts}, Anchor, Hit);
+	ui_test::Expect(ClearLater, ("FestYourStrip (sheets): the strip on " + Net.NameOf(Later) + "'s sheet crosses no other line (" + Hit + ")").c_str());
+	const ss::ui::DrawList OnSat = HostsStripSheet(P, Sat);
+	ui_test::Expect(ui_test::DrewRun(OnSat, Head) && ui_test::DrewRun(OnSat, Counts), ("FestYourStrip (sheets): the satellite " + Net.NameOf(Sat) + "'s sheet draws the strip").c_str());
+	const bool ClearSat = HostsStripClear(OnSat, {Head, Race, Counts}, Anchor, Hit);
+	ui_test::Expect(ClearSat, ("FestYourStrip (sheets): the strip on " + Net.NameOf(Sat) + "'s sheet crosses no other line (" + Hit + ")").c_str());
+	ss::net::EventInstance Plain;
+	const bool HasPlain = HostsStripPlain(F.Site, P.S.WorldMinutes(), Plain);
+	ui_test::Expect(HasPlain, ("FestYourStrip (sheets): " + ss::net::Def(F.Site).Name + " runs a plain series event after " + F.Name).c_str());
+	if (HasPlain)
+	{
+		const ss::ui::DrawList OnPlain = HostsStripSheet(P, Plain);
+		ui_test::Expect(rn::NetSheetEdition(Net, Plain) == nullptr && HostsNoStrip(OnPlain, Head),
+			("FestYourStrip (sheets): the plain series event " + Net.NameOf(Plain) + "'s sheet draws no YOUR strip").c_str());
+	}
+	std::string Second;
+	if (Plural)
+	{
+		ss::net::EventInstance Again;
+		P.At(P.S.WorldMinutes() + 3.0 * 60.0);
+		if (HostsStripRun(F, P.S.WorldMinutes(), 0, Again, Playing.Id))
+		{
+			HostsStripPlay(P, Again.Id, std::max(40, ss::net::Site(F.Site).Live(Again, P.S.WorldMinutes()).Entries), 0);
+			const ss::fest::YourLineView V2 = ss::fest::YourLine(F, &P.S.Living());
+			Second = HostsStripCounts(V2);
+			ss::net::EventInstance Next;
+			const ss::ui::DrawList L2 = HostsStripSheet(P, HostsStripRun(F, P.S.WorldMinutes(), 2, Next) ? Next : Sat);
+			ui_test::Expect(V2.Events == 2 && V2.Cashes == 1 && Second.compare(0, 18, "2 events \xC2\xB7 1 cash") == 0 && ui_test::DrewRun(L2, Second),
+				("FestYourStrip (sheets): an unpaid finish makes it plural (" + Second + ")").c_str());
+		}
+		else
+		{
+			ui_test::Expect(false, ("FestYourStrip (sheets): a second " + F.Name + " event in play three hours on").c_str());
+		}
+	}
+	Report += " " + F.Name + ": " + Head + (Race.empty() ? std::string() : " | " + Race) + " | " + Counts + (Second.empty() ? std::string() : " then " + Second) + ";";
+}
+
+/** U37 and the wallets (§2.8.2, §2.16 step 8a, LEAD_CALLS R-18; FH-4B): on PENNANT 2027's Step 1 day 8 (day 183, Tue Apr 6) with a
+ *  Step 2 ticket held, the Step 2 event's sheet on Ignite reads "Good on Apr 7 and Apr 9." under its ticket line, Ignite's wallet
+ *  lists the ticket as a row (STEP 2, PENNANT 2027, TICKET, U37), and a plain event's sheet reads no U37; on REIGN 2027's day 2
+ *  RunItTwice's THE CLUB lists a held REIGN step ticket apart from its WELCOME TICKETS (STEP {K}, REIGN 2027 · Good on ...), never
+ *  under them. Plants: U37 keeping a run that no longer takes entries; the step ticket left among the welcome tickets. */
+void FestYourStripTickets(HostsLaptop& P, std::string& Report)
+{
+	namespace rn = ss::ui::rlnet_detail;
+	const ss::fest::Festival* Pennant = nullptr;
+	const ss::fest::Festival* Reign = nullptr;
+	for (const ss::fest::Festival& F : ss::fest::All())
+	{
+		Pennant = !Pennant && F.Which == ss::fest::Brand::Pennant ? &F : Pennant;
+		Reign = !Reign && F.Which == ss::fest::Brand::Reign ? &F : Reign;
+	}
+	ui_test::Expect(Pennant && Reign, "FestYourStrip (U37): F-net's calendar holds PENNANT and REIGN");
+	if (!Pennant || !Reign)
+	{
+		return;
+	}
+	// A step's ticket: a one-off satellite of the edition seating another one-off's ticket (Step 1 seats Step 2's).
+	const auto StepTwo = [](const ss::fest::Festival& F, std::string& Ticket, std::string& RunId) {
+		const ss::net::Network& Net = ss::net::Site(F.Site);
+		for (const std::string& Id : F.Satellites)
+		{
+			const ss::net::EventTemplate* S1 = Net.FindTemplate(Id);
+			for (const std::string& Up : F.Satellites)
+			{
+				const ss::net::EventTemplate* S2 = Net.FindTemplate(Up);
+				if (S1 && S2 && S1->OnlyDay != -9999 && S2->OnlyDay != -9999 && S1->SeatTicket == Net.TicketOf(Up) && Ticket.empty())
+				{
+					Ticket = S1->SeatTicket;
+					RunId = Up;
+				}
+			}
+		}
+		return !Ticket.empty();
+	};
+	std::string PTicket;
+	std::string PRun;
+	ui_test::Expect(StepTwo(*Pennant, PTicket, PRun), "FestYourStrip (U37): PENNANT 2027 has a Step 2 ticket");
+	if (PTicket.empty())
+	{
+		return;
+	}
+	const ss::net::Network& Ig = ss::net::Site(ss::net::SiteId::Ignite);
+	P.At(183.0 * ss::net::MinutesPerDay + 12.0 * 60.0);
+	ui_test::Expect(ss::net::DateLabel(183) == "Apr 6", ("FestYourStrip (U37): day 183 is Apr 6, not " + ss::net::DateLabel(183)).c_str());
+	P.S.Life.Tickets[PTicket] = 1;
+	// The Step 2 runs taking the ticket, from the calendar: the days of those still taking entries.
+	std::vector<int> Days;
+	ss::net::EventInstance Run;
+	bool HasRun = false;
+	for (const std::string& Id : Pennant->Satellites)
+	{
+		const ss::net::EventTemplate* R = Ig.FindTemplate(Id);
+		ss::net::EventInstance E;
+		if (R && R->OnlyDay != -9999 && Ig.TicketOf(Id) == PTicket && Ig.Next(Id, static_cast<double>(R->OnlyDay) * ss::net::MinutesPerDay, E))
+		{
+			Days.push_back(ss::net::DayOf(E.Start));
+			if (!HasRun || E.Start < Run.Start)
+			{
+				Run = E;
+				HasRun = true;
+			}
+		}
+	}
+	std::sort(Days.begin(), Days.end());
+	std::string Want = "Good on ";
+	for (size_t I = 0; I < Days.size(); ++I)
+	{
+		Want += (I == 0 ? "" : I + 1 == Days.size() ? " and " : ", ") + ss::net::DateLabel(Days[I]);
+	}
+	Want += ".";
+	ui_test::Expect(HasRun && Want == "Good on Apr 7 and Apr 9.", ("FestYourStrip (U37): PENNANT's Step 2 runs on Apr 7 and Apr 9 (" + Want + ", §2.16 step 8a)").c_str());
+	if (!HasRun)
+	{
+		return;
+	}
+	const ss::ui::DrawList Sheet = HostsStripSheet(P, Run);
+	ui_test::Expect(ui_test::DrewRun(Sheet, Want) && ui_test::Drew(Sheet, "1 ticket held"), ("FestYourStrip (U37): the Step 2 event's sheet on Ignite reads " + Want + " under its ticket line").c_str());
+	std::string Hit;
+	const bool ClearSheet = HostsStripClear(Sheet, {Want}, "YOUR IGNITE BALANCE", Hit);
+	ui_test::Expect(ClearSheet, ("FestYourStrip (U37): U37 on the sheet crosses no other line (" + Hit + ")").c_str());
+	ss::net::EventInstance Plain;
+	bool HasPlain = false;
+	for (const ss::net::EventTemplate& T : Ig.Templates())
+	{
+		ss::net::EventInstance E;
+		if (!HasPlain && T.Series.empty() && T.Fmt != ss::net::Format::Satellite && Ig.Next(T.Id, P.S.WorldMinutes() + 60.0, E))
+		{
+			Plain = E;
+			HasPlain = true;
+		}
+	}
+	if (HasPlain)
+	{
+		P.S.Life.Tickets[Ig.TicketOf(Ig.TemplateOf(Plain).Id)] = 1;
+		const ss::ui::DrawList PlainSheet = HostsStripSheet(P, Plain);
+		ui_test::Expect(!ui_test::Drew(PlainSheet, "Good on "), ("FestYourStrip (U37): a plain event's sheet with its own ticket held reads no U37 (" + Ig.NameOf(Plain) + ")").c_str());
+		P.S.Life.Tickets.erase(Ig.TicketOf(Ig.TemplateOf(Plain).Id));
+	}
+	ss::ui::rlignite_detail::IgniteForget(&P.RL);
+	P.OpenPlay();
+	P.RL.OpenPage(ss::ui::RiverLine::Page::Cashier, P.Now);
+	const ss::ui::DrawList Wallet = P.Settled();
+	ui_test::Expect(ui_test::DrewRun(Wallet, "STEP 2") && ui_test::DrewRun(Wallet, Pennant->Name) && ui_test::DrewRun(Wallet, "TICKET") && ui_test::DrewRun(Wallet, Want),
+		("FestYourStrip (U37): Ignite's wallet lists the Step 2 ticket as a row: STEP 2, " + Pennant->Name + ", TICKET, " + Want).c_str());
+	const bool ClearWallet = HostsStripClear(Wallet, {"STEP 2", Pennant->Name, "TICKET", Want}, "RECEIPTS", Hit);
+	ui_test::Expect(ClearWallet, ("FestYourStrip (U37): the wallet's ticket row crosses no other line (" + Hit + ")").c_str());
+	// Apr 8, after Step 2's first run has closed: one day left.
+	P.At(185.0 * ss::net::MinutesPerDay + 12.0 * 60.0);
+	const std::string Left = "Good on " + ss::net::DateLabel(Days.back()) + ".";
+	const ss::ui::DrawList Later = P.Settled();
+	ui_test::Expect(Days.size() == 2 && ui_test::DrewRun(Later, Left) && !ui_test::DrewRun(Later, Want), ("FestYourStrip (U37): on Apr 8 the wallet's row reads " + Left).c_str());
+	P.S.Life.Tickets.erase(PTicket);
+	Report += " U37 " + Want + " then " + Left + " (Ignite's sheet and wallet);";
+
+	// RunItTwice: a REIGN step ticket on THE CLUB, on REIGN 2027's day 2.
+	std::string RTicket;
+	std::string RRun;
+	ui_test::Expect(StepTwo(*Reign, RTicket, RRun), "FestYourStrip (U37): REIGN 2027 has a Step 2 ticket");
+	if (RTicket.empty())
+	{
+		return;
+	}
+	P.At(static_cast<double>(Reign->FirstDay + 1) * ss::net::MinutesPerDay + 12.0 * 60.0);
+	P.S.Life.Tickets[RTicket] = 1;
+	const ss::fest::Festival* Ed = nullptr;
+	std::string Good;
+	const int Step = rn::NetStepTicket(ss::net::SiteId::RunItTwice, RTicket, P.S.WorldMinutes(), Ed, Good);
+	P.OpenRit(ss::ui::RiverLine::Page::Promotions);
+	const ss::ui::DrawList Club = P.Settled();
+	// What the welcome list would print for it (the list's own rule: the ticket's template's short name, else the key past its site).
+	const ss::net::EventTemplate* RT = ss::net::Site(ss::net::SiteId::RunItTwice).FindTemplate(RTicket);
+	const std::string AsWelcome = RT ? HostsShortName(RT->Name) : RTicket.substr(RTicket.find('.') + 1);
+	const std::string Line = Reign->Name + (Good.empty() ? std::string() : " \xC2\xB7 " + Good);
+	ui_test::Expect(Step == 2 && Ed == Reign && !Good.empty(), ("FestYourStrip (U37): REIGN's Step 2 ticket is a step ticket on its day 2 (" + Good + ")").c_str());
+	ui_test::Expect(ui_test::DrewRun(Club, "STEP 2") && ui_test::DrewRun(Club, Line) && !ui_test::DrewRun(Club, AsWelcome) && ui_test::DrewRun(Club, "None held right now."),
+		("FestYourStrip (U37): THE CLUB lists REIGN's Step 2 ticket apart (STEP 2 | " + Line + "), never as the welcome ticket " + AsWelcome).c_str());
+	const bool ClearClub = HostsStripClear(Club, {"STEP 2", Line}, std::string(), Hit);
+	ui_test::Expect(ClearClub, ("FestYourStrip (U37): THE CLUB's step ticket row crosses no other line (" + Hit + ")").c_str());
+	// The Step 2 event's own sheet on RunItTwice: its Prospectus, held on the run, reads U37 under the festival lines.
+	const ss::net::Network& Rn = ss::net::Site(ss::net::SiteId::RunItTwice);
+	const ss::net::EventTemplate* RunT = Rn.FindTemplate(RRun);
+	ss::net::EventInstance RE;
+	const bool HasRE = RunT && Rn.Next(RRun, static_cast<double>(RunT->OnlyDay) * ss::net::MinutesPerDay, RE);
+	ui_test::Expect(HasRE, "FestYourStrip (U37): REIGN's Step 2 run is on the calendar");
+	if (HasRE)
+	{
+		const ss::ui::DrawList Pro = HostsStripSheet(P, RE);
+		const bool ClearPro = HostsStripClear(Pro, {Good}, std::string(), Hit);
+		ui_test::Expect(P.RL.SelectedEvent() == RE.Id && ui_test::DrewRun(Pro, Good) && ClearPro,
+			("FestYourStrip (U37): the Step 2 run's Prospectus reads " + Good + " clear of every other line (" + Hit + ")").c_str());
+	}
+	P.S.Life.Tickets.erase(RTicket);
+	Report += " THE CLUB: STEP 2 | " + Line + ";";
+}
+
+/** FestYourStrip's sheets half (§2.15.2, §2.8.2; F-hubs' stream B, FH-4B): YOUR {FESTIVAL} on each host's register sheet, from
+ *  fest::YourLine, the same numbers as the hub's panel (stream A's half): RCOP 2026 on RiverLine's event panel (with the plural after a
+ *  second, unpaid finish), FEIGN 2026 on Ignite's event sheet, WRIT 2027 on RunItTwice's Prospectus; then U37 and the wallets (R-18).
+ *  One laptop walks the year. Plants: the strip on a plain series event (the SPEC's); U10 plural at one; U37 keeping a closed run; the
+ *  step ticket left among RunItTwice's welcome tickets. */
+void FestYourStripSheets()
+{
+	const auto Began = std::chrono::steady_clock::now();
+	const ss::fest::Festival* Rcop = ss::fest::FestivalOf("rcop");
+	const ss::fest::Festival* Feign = ss::fest::FestivalOf("ignite.feign26");
+	const ss::fest::Festival* Writ = HostsRitEdition(ss::fest::Brand::Writ);
+	ui_test::Expect(Rcop && Feign && Writ, "FestYourStrip (sheets): F-net's calendar holds RCOP 2026, FEIGN 2026 and WRIT 2027");
+	if (!Rcop || !Feign || !Writ)
+	{
+		return;
+	}
+	HostsLaptop P("u4-fest-hosts-strip");
+	std::string Report;
+	FestYourStripHost(P, *Rcop, true, Report);
+	FestYourStripHost(P, *Feign, false, Report);
+	FestYourStripHost(P, *Writ, false, Report);
+	FestYourStripTickets(P, Report);
+	std::printf("FestYourStrip (sheets):%s %.2f s\n", Report.c_str(), std::chrono::duration<double>(std::chrono::steady_clock::now() - Began).count());
+}
 } // namespace
 
 namespace u4_ui_test
@@ -1437,5 +1863,6 @@ void SegFestHosts()
 	FestCopyUiHosts();
 	FestRitCodesAndHeld();
 	FestHonestLines();
+	FestYourStripSheets();
 }
 } // namespace u4_ui_test

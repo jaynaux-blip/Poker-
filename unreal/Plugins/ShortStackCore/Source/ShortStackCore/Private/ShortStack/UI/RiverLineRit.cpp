@@ -37,6 +37,15 @@ namespace ss
 {
 namespace ui
 {
+namespace rlnet_detail
+{
+// Update 4 G1 (SPEC v1.7 §2.8.2, LEAD_CALLS R-18; F-hubs FH-4B): the register sheet's YOUR strip, U37 on a step event's sheet and the
+// wallet's festival step tickets, defined in UI/RiverLineNet.cpp beside EventPanel.
+bool NetSheetStrip(const Session& S, const net::EventInstance& E, std::string& Head, std::string& Race, std::string& Counts);
+std::string NetSheetGoodOn(const Session& S, const net::EventInstance& E, double World);
+int NetStepTicket(net::SiteId Site, const std::string& Ticket, double World, const fest::Festival*& Edition, std::string& GoodOn);
+} // namespace rlnet_detail
+
 namespace rlrit_detail
 {
 constexpr float RitRailW = 216.0f;   // the rail
@@ -1849,6 +1858,29 @@ void RitProspectus(RitCtx& X, const std::vector<RitRow>& Rows, float LeadY)
 	Y += 18.0f;
 	X.C.FillRect({L, Y, Rx - L, 1.0f}, RitC(RitHair));
 	Y += 26.0f;
+	// Update 4 G1 (SPEC v1.7 §2.8.2, LEAD_CALLS R-18; F-hubs FH-4B): YOUR {FESTIVAL} once the hero has played the event's edition
+	// ("YOUR WRIT" with the race in Mono at its right, U10's line under it, mockup 02), then U37 while the hero holds the step ticket
+	// it takes; the tabs below give up the room they need (TabFloor).
+	std::string FestHead;
+	std::string FestRace;
+	std::string FestCounts;
+	if (rlnet_detail::NetSheetStrip(X.S, E, FestHead, FestRace, FestCounts))
+	{
+		const float Hw = RitText(X.C, FestHead, L, Y, 13.0f, RitC(RitInk), RitFace::Cond, Align::Left, Baseline::Alphabetic, (Rx - L) / 2.0f);
+		if (!FestRace.empty())
+		{
+			RitText(X.C, FestRace, Rx, Y, 13.0f, RitC(RitWhite), RitFace::Mono, Align::Right, Baseline::Alphabetic, Rx - L - Hw - 16.0f);
+		}
+		Y += 21.0f;
+		RitText(X.C, FestCounts, L, Y, 12.0f, RitC(RitMuted), RitFace::Body, Align::Left, Baseline::Alphabetic, Rx - L);
+		Y += 23.0f;
+	}
+	const std::string FestGoodOn = rlnet_detail::NetSheetGoodOn(X.S, E, X.World);
+	if (!FestGoodOn.empty())
+	{
+		RitText(X.C, FestGoodOn, L, Y, 12.0f, RitC(RitAmber), RitFace::Body, Align::Left, Baseline::Alphabetic, Rx - L);
+		Y += 22.0f;
+	}
 	// The League line (G2): what a win here scores at your division by core's LeagueScore, and the night's Matchday.
 	{
 		const int Day6 = net::DayOf(E.Start - 6.0 * 60.0);
@@ -1912,6 +1944,9 @@ void RitProspectus(RitCtx& X, const std::vector<RitRow>& Rows, float LeadY)
 	}
 	X.C.FillRect({L, Y + 27.0f, Rx - L, 1.0f}, RitC(RitHair));
 	const float By = Y + 52.0f;
+	// The last baseline a tab may print on above the register block's rule at 830 (FH-4B: only the festival lines above ever reach it).
+	const float TabFloor = 826.0f;
+	const auto TabLines = [TabFloor](float Top, int Most) { return Top > TabFloor ? 0 : std::min(Most, static_cast<int>((TabFloor - Top) / 18.0f) + 1); };
 	switch (X.U.Tab)
 	{
 	case 1:
@@ -1919,14 +1954,23 @@ void RitProspectus(RitCtx& X, const std::vector<RitRow>& Rows, float LeadY)
 		const int LateLevels = static_cast<int>(std::ceil(E.LateReg / std::max(1.0, T.LevelMinutes)));
 		RitTerm(X, L, Rx, By, "LEVEL 1", T.StartStack > 10000 ? std::string("100/200") : std::string("50/100"), RitInk);
 		RitTerm(X, L, Rx, By + 24.0f, "LEVELS", "every " + std::to_string(static_cast<int>(T.LevelMinutes)) + " min", RitInk);
-		RitTerm(X, L, Rx, By + 48.0f, "LATE REG", net::Countdown(E.LateReg) + " (to level " + std::to_string(LateLevels + 1) + ")", RitInk);
-		RitTerm(X, L, Rx, By + 72.0f, "STARTS", RitDay(net::DayOf(E.Start)) + " " + RitClock(E.Start), RitInk);
+		if (By + 48.0f <= TabFloor)
+		{
+			RitTerm(X, L, Rx, By + 48.0f, "LATE REG", net::Countdown(E.LateReg) + " (to level " + std::to_string(LateLevels + 1) + ")", RitInk);
+		}
+		if (By + 72.0f <= TabFloor)
+		{
+			RitTerm(X, L, Rx, By + 72.0f, "STARTS", RitDay(net::DayOf(E.Start)) + " " + RitClock(E.Start), RitInk);
+		}
 		break;
 	}
 	case 2:
 		RitTerm(X, L, Rx, By, "POOL SO FAR", Money(PoolNow), RitWhite);
 		RitTerm(X, L, Rx, By + 24.0f, "PER ENTRY", Money(Each), RitInk);
-		RitParagraph(X.C, RitPaysGrow, L, By + 50.0f, Rx - L, 13.0f, RitC(RitMuted), 18.0f, 3);
+		if (TabLines(By + 50.0f, 3) > 0)
+		{
+			RitParagraph(X.C, RitPaysGrow, L, By + 50.0f, Rx - L, 13.0f, RitC(RitMuted), 18.0f, TabLines(By + 50.0f, 3));
+		}
 		break;
 	case 3:
 	{
@@ -1994,7 +2038,7 @@ void RitProspectus(RitCtx& X, const std::vector<RitRow>& Rows, float LeadY)
 		int Shown = 0;
 		for (const RitEntrant& En : Ents)
 		{
-			if (Shown >= 3)
+			if (Shown >= 3 || By + static_cast<float>(Shown) * 34.0f > TabFloor)
 			{
 				break;
 			}
@@ -2020,7 +2064,7 @@ void RitProspectus(RitCtx& X, const std::vector<RitRow>& Rows, float LeadY)
 		break;
 	}
 	default:
-		RitParagraph(X.C, !T.Blurb.empty() ? T.Blurb : std::string(RitPaysGrow), L, By - 4.0f, Rx - L, 13.0f, RitC(RitMuted), 18.0f, 4);
+		RitParagraph(X.C, !T.Blurb.empty() ? T.Blurb : std::string(RitPaysGrow), L, By - 4.0f, Rx - L, 13.0f, RitC(RitMuted), 18.0f, std::max(1, TabLines(By - 4.0f, 4)));
 		break;
 	}
 	// The register block {1128,830,448,110}: the line, the countdown flap, the shared RegisterBlock as a red slab.
@@ -3461,9 +3505,13 @@ void RitClubPage(RitCtx& X)
 	float Ty = Wel.Y + 64.0f;
 	int Held = 0;
 	const std::string Prefix = std::string(net::KeyOf(RitSite)) + ".";
+	// Update 4 G1 (LEAD_CALLS R-18; F-hubs FH-4B): a festival step ticket is no welcome ticket: it is listed apart below them.
+	const auto StepTicket = [&X](const std::string& Key, const fest::Festival*& Ed, std::string& GoodOn) { return rlnet_detail::NetStepTicket(RitSite, Key, X.World, Ed, GoodOn); };
 	for (const auto& Tk : X.S.Life.Tickets)
 	{
-		if (Tk.second <= 0 || Tk.first.compare(0, Prefix.size(), Prefix) != 0 || Ty > Wel.Y + Wel.H - 16.0f)
+		const fest::Festival* StepEd = nullptr;
+		std::string StepGood;
+		if (Tk.second <= 0 || Tk.first.compare(0, Prefix.size(), Prefix) != 0 || Ty > Wel.Y + Wel.H - 16.0f || StepTicket(Tk.first, StepEd, StepGood) > 0)
 		{
 			continue;
 		}
@@ -3483,6 +3531,22 @@ void RitClubPage(RitCtx& X)
 	{
 		RitText(X.C, RitTicketsNone, Wel.X + 24.0f, Ty, 14.0f, RitC(RitMuted), RitFace::Body);
 		RitParagraph(X.C, RitTicketsRule, Wel.X + 24.0f, Ty + 26.0f, 600.0f, 13.0f, RitC(RitMuted), 18.0f, 2);
+	}
+	// The festival step tickets, apart: a STEP {K} tag (U35) in amber, the edition and U37 while its runs still take entries.
+	float Sy = Held > 0 ? Ty : Ty + 76.0f;
+	for (const auto& Tk : X.S.Life.Tickets)
+	{
+		const fest::Festival* Ed = nullptr;
+		std::string GoodOn;
+		const int Step = Tk.second > 0 && Tk.first.compare(0, Prefix.size(), Prefix) == 0 ? StepTicket(Tk.first, Ed, GoodOn) : 0;
+		if (Step <= 0 || !Ed || Sy > Wel.Y + Wel.H - 16.0f)
+		{
+			continue;
+		}
+		const float Tw = RitTag(X.C, Wel.X + 24.0f, Sy - 13.0f, "STEP " + std::to_string(Step), RitAmber, RitOnyx, 11.0f);
+		RitText(X.C, Ed->Name + (Tk.second > 1 ? " x" + std::to_string(Tk.second) : std::string()) + (GoodOn.empty() ? std::string() : " \xC2\xB7 " + GoodOn), Wel.X + 32.0f + Tw, Sy, 15.0f,
+			RitC(RitInk), RitFace::Name, Align::Left, Baseline::Alphabetic, 620.0f - Tw);
+		Sy += 28.0f;
 	}
 	X.C.FillRect({Wel.X + 680.0f, Wel.Y + 16.0f, 1.0f, Wel.H - 32.0f}, RitC(RitHair));
 	RitLabel(X.C, "From RunItTwice", Wel.X + 704.0f, Wel.Y + 32.0f, 12.0f, RitC(RitMuted));

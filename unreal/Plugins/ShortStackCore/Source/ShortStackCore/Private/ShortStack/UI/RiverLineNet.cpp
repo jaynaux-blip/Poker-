@@ -44,6 +44,209 @@ life::Funding OnlineFunding(const Session& S, const std::string& EventId)
 	}
 	return life::Funding();
 }
+
+/** Update 4 G1 (SPEC v1.7 §2.8.2, §2.2.3; F-hubs FH-4B): the festival edition a register sheet for E belongs to: a numbered event's, a
+ *  headliner's or the Main's, its series' edition (fest::FestivalOf); a satellite's, the edition on E's site that lists it in
+ *  Festival::Satellites and whose seats it is still selling (E's day from kAnnounceDays before FirstDay to MainDay: RCOP's recurring
+ *  step4 and mega-rcop sell the RCOP of their season and none outside one); null for a plain series event and every other event. */
+const fest::Festival* NetSheetEdition(const net::Network& Net, const net::EventInstance& E)
+{
+	const net::EventTemplate& T = Net.TemplateOf(E);
+	if (!T.Series.empty())
+	{
+		return fest::FestivalOf(T.Series);
+	}
+	if (T.Fmt != net::Format::Satellite)
+	{
+		return nullptr;
+	}
+	const int Day = net::DayOf(E.Start);
+	const net::SiteId Site = net::SiteOf(E.Id);
+	for (const fest::Festival* F : fest::Festivals(Day, Day + fest::kAnnounceDays))
+	{
+		if (F->Site == Site && Day >= F->FirstDay - fest::kAnnounceDays && Day <= F->MainDay &&
+			std::find(F->Satellites.begin(), F->Satellites.end(), T.Id) != F->Satellites.end())
+		{
+			return F;
+		}
+	}
+	return nullptr;
+}
+
+/** U10's line without its race clause (§2.8.2: the register sheets' strip prints "race {Rank} of {Scorers}" at its head's right
+ *  instead): "{Events} events · {Cashes} cashes · best {Best} of {Field}", singular at one ("1 event · 1 cash"), the best clause once
+ *  a finish is known. The YOUR panel's line (stream A's FH-4A, rlfest_detail::HubYourCounts) prints the same and then the race. Pure. */
+std::string NetYourCounts(const fest::YourLineView& V)
+{
+	std::string Out = (V.Events == 1 ? std::string("1 event") : Grouped(V.Events) + " events") + " \xC2\xB7 " + (V.Cashes == 1 ? std::string("1 cash") : Grouped(V.Cashes) + " cashes");
+	if (V.Best > 0 && V.Field > 0)
+	{
+		Out += " \xC2\xB7 best " + Ordinal(V.Best) + " of " + Grouped(V.Field);
+	}
+	return Out;
+}
+
+/** YOUR {FESTIVAL} on E's register sheet (§2.8.2, FestYourStrip; FH-4B): true once the hero has played E's edition (fest::YourLine,
+ *  the YOUR panel's data), with Head "YOUR {FESTIVAL}" (the edition's Short in capitals, as the hub's tab), Race "race {Rank} of
+ *  {Scorers}" once the hero scores (else "") and Counts U10's line without its race clause; false, all three empty, before the hero
+ *  plays it, and on a plain series event or any other event no edition holds. Each host draws the two lines in its own skin. */
+bool NetSheetStrip(const Session& S, const net::EventInstance& E, std::string& Head, std::string& Race, std::string& Counts)
+{
+	Head.clear();
+	Race.clear();
+	Counts.clear();
+	const net::Network& Net = net::ForEvent(E.Id);
+	const fest::Festival* F = NetSheetEdition(Net, E);
+	if (!F)
+	{
+		return false;
+	}
+	const fest::YourLineView V = fest::YourLine(*F, &S.Living());
+	if (!V.Shown)
+	{
+		return false;
+	}
+	const net::SeriesInfo* Sr = Net.FindSeries(F->SeriesId);
+	Head = "YOUR " + NetUpper(Sr && !Sr->Short.empty() ? Sr->Short : F->Name);
+	if (V.Rank > 0 && V.Scorers > 0)
+	{
+		Race = "race " + Ordinal(V.Rank) + " of " + Grouped(V.Scorers);
+	}
+	Counts = NetYourCounts(V);
+	return true;
+}
+
+/** U37's sentence (§2.8.2, LEAD_CALLS R-18): "Good on {Dates}." over the days a step ticket still plays, each in a sentence's form
+ *  (fest::DateInSentence): "Good on Apr 7.", "Good on Apr 7 and Apr 9."; "" for none. Pure. */
+std::string NetGoodOn(const std::vector<int>& Days, int Today)
+{
+	if (Days.empty())
+	{
+		return std::string();
+	}
+	std::string Out = "Good on ";
+	for (size_t I = 0; I < Days.size(); ++I)
+	{
+		if (I > 0)
+		{
+			Out += I + 1 == Days.size() ? " and " : ", ";
+		}
+		Out += fest::DateInSentence(Days[I], Today);
+	}
+	return Out + ".";
+}
+
+/** The step Ticket climbs to in edition F (§2.2.3, U35's STEP {K}): a step's runs are F's one-off satellites taking Ticket (its two
+ *  runs take one ticket), and K counts the one-off rungs below it that seat it, plus one; 0 when Ticket is no step ticket of F (no
+ *  one-off run of F takes it, or it is the Main's: a recurring ladder, RCOP's step1-4 every four hours, is no edition's own). */
+int NetStepOf(const net::Network& Net, const fest::Festival& F, const std::string& Ticket)
+{
+	if (Ticket.empty() || (!F.MainId.empty() && Ticket == Net.TicketOf(F.MainId)))
+	{
+		return 0;
+	}
+	bool Taken = false;
+	for (const std::string& Id : F.Satellites)
+	{
+		const net::EventTemplate* R = Net.FindTemplate(Id);
+		Taken = Taken || (R && R->OnlyDay != -9999 && Net.TicketOf(Id) == Ticket);
+	}
+	if (!Taken)
+	{
+		return 0;
+	}
+	int Step = 1;
+	std::string Want = Ticket;
+	for (int Hop = 0; Hop < 8; ++Hop)
+	{
+		const net::EventTemplate* Below = nullptr;
+		for (const std::string& Id : F.Satellites)
+		{
+			const net::EventTemplate* R = Net.FindTemplate(Id);
+			Below = !Below && R && R->OnlyDay != -9999 && R->SeatTicket == Want ? R : Below;
+		}
+		if (!Below)
+		{
+			break;
+		}
+		++Step;
+		Want = Net.TicketOf(Below->Id);
+	}
+	return Step;
+}
+
+/** The days step ticket Ticket of edition F still plays (§2.2.3, U37): the days of F's one-off runs taking it that still take entries
+ *  (announced, registering or in late registration), in order; none once every run has closed. */
+std::vector<int> NetStepDays(const net::Network& Net, const fest::Festival& F, const std::string& Ticket, double World)
+{
+	std::vector<int> Days;
+	for (const std::string& Id : F.Satellites)
+	{
+		const net::EventTemplate* R = Net.FindTemplate(Id);
+		if (!R || R->OnlyDay == -9999 || Net.TicketOf(Id) != Ticket)
+		{
+			continue;
+		}
+		net::EventInstance Run;
+		double From = static_cast<double>(R->OnlyDay) * net::MinutesPerDay;
+		for (int Guard = 0; Guard < 48 && Net.Next(Id, From, Run) && net::DayOf(Run.Start) == R->OnlyDay; ++Guard)
+		{
+			const net::Status St = Net.Live(Run, World).St;
+			if (St == net::Status::Announced || St == net::Status::Registering || St == net::Status::LateReg)
+			{
+				Days.push_back(R->OnlyDay);
+				break;
+			}
+			From = Run.Start + 1.0;
+		}
+	}
+	std::sort(Days.begin(), Days.end());
+	Days.erase(std::unique(Days.begin(), Days.end()), Days.end());
+	return Days;
+}
+
+/** U37 on a step event's register sheet (§2.8.2, LEAD_CALLS R-18; FH-4B): "Good on {Dates}." while the hero holds the step ticket E
+ *  takes, over that ticket's runs still taking entries; "" on every other sheet (no ticket held, the Main's ticket, a recurring step,
+ *  a plain event). */
+std::string NetSheetGoodOn(const Session& S, const net::EventInstance& E, double World)
+{
+	const net::Network& Net = net::ForEvent(E.Id);
+	const net::EventTemplate& T = Net.TemplateOf(E);
+	if (T.Fmt != net::Format::Satellite || T.OnlyDay == -9999)
+	{
+		return std::string();
+	}
+	const fest::Festival* F = NetSheetEdition(Net, E);
+	const std::string Ticket = Net.TicketOf(T.Id);
+	if (!F || S.Life.TicketsFor(Ticket) <= 0 || NetStepOf(Net, *F, Ticket) == 0)
+	{
+		return std::string();
+	}
+	return NetGoodOn(NetStepDays(Net, *F, Ticket, World), net::DayOf(World));
+}
+
+/** A ticket on Site's wallet as a festival step ticket (LEAD_CALLS R-18, §2.16 step 8a; FH-4B): its STEP {K} (U35's pill), 0 when
+ *  Ticket is no step ticket of an edition on Site around today (the ticket stays held, unplayed, until the crown refunds it); Edition
+ *  its festival and GoodOn U37 over its runs still taking entries ("" once none does). Ignite's wallet lists it as a ticket row and
+ *  RunItTwice's THE CLUB apart from its WELCOME TICKETS. */
+int NetStepTicket(net::SiteId Site, const std::string& Ticket, double World, const fest::Festival*& Edition, std::string& GoodOn)
+{
+	Edition = nullptr;
+	GoodOn.clear();
+	const net::Network& Net = net::Site(Site);
+	const int Today = net::DayOf(World);
+	for (const fest::Festival* F : fest::Festivals(Today - fest::kClearDays, Today + fest::kAnnounceDays))
+	{
+		const int Step = F->Site == Site ? NetStepOf(Net, *F, Ticket) : 0;
+		if (Step > 0)
+		{
+			Edition = F;
+			GoodOn = NetGoodOn(NetStepDays(Net, *F, Ticket, World), Today);
+			return Step;
+		}
+	}
+	return 0;
+}
 } // namespace rlnet_detail
 
 namespace backing_detail
@@ -1466,7 +1669,16 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 		}
 		Tx += W + 26.0f;
 	}
-	const Rect Body{R.X + 26.0f, R.Y + 484.0f, R.W - 52.0f, R.H - 484.0f - 110.0f};
+	// Update 4 G1 (SPEC v1.7 §2.8.2, LEAD_CALLS R-18; F-hubs FH-4B): YOUR {FESTIVAL}'s two-line strip once the hero has played the
+	// event's edition, and U37 while the hero holds the step ticket it takes, in a band under the tabs' body (which gives it the room).
+	std::string FestHead;
+	std::string FestRace;
+	std::string FestCounts;
+	const bool FestStrip = NetSheetStrip(S, E, FestHead, FestRace, FestCounts);
+	const std::string FestGoodOn = NetSheetGoodOn(S, E, World);
+	const int FestLines = (FestStrip ? 2 : 0) + (FestGoodOn.empty() ? 0 : 1);
+	const float FestBand = FestLines > 0 ? 38.0f + 19.0f * Nf(FestLines - 1) : 0.0f;
+	const Rect Body{R.X + 26.0f, R.Y + 484.0f, R.W - 52.0f, R.H - 484.0f - 110.0f - FestBand};
 	if (DetailTab == 0)
 	{
 		std::string Blurb = T.Blurb;
@@ -1489,7 +1701,8 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 			UI.Text(Row.second, Body.X + Body.W, Y, Ts(13.0f, 700, pal::Ink, Align::Right, Baseline::Alphabetic, false, Body.W - 130.0f));
 			Y += 24.0f;
 		}
-		if (!T.Seats.empty())
+		// Over the festival band (FH-4B) a box shows only where it fits: the register block below still says what locks the event.
+		if (!T.Seats.empty() && (FestLines == 0 || Y + 48.0f <= Body.Y + Body.H))
 		{
 			Y += 8.0f;
 			UI.RRect({Body.X, Y, Body.W, 40.0f}, 8.0f, NetA(pal::Gold, 0.08f), NetA(pal::Gold, 0.35f));
@@ -1497,7 +1710,7 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 			Y += 50.0f;
 		}
 		std::string Lock;
-		if (!Net.Joinable(E, &Lock, S.Unlocks()))
+		if (!Net.Joinable(E, &Lock, S.Unlocks()) && (FestLines == 0 || Y + 62.0f <= Body.Y + Body.H))
 		{
 			Y += 8.0f;
 			UI.RRect({Body.X, Y, Body.W, 54.0f}, 8.0f, Rgba(255, 255, 255, 0.03f), pal::Line);
@@ -1510,7 +1723,7 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 	{
 		const std::vector<Chips> Pay = Net.Payouts(E);
 		const float Top = Pay.empty() ? 1.0f : Nf(Pay.front());
-		for (size_t I = 0; I < Pay.size() && I < 8; ++I)
+		for (size_t I = 0; I < Pay.size() && I < 8 && 28.0f + Nf(I) * 27.0f <= Body.H - 24.0f; ++I)
 		{
 			const float Y = Body.Y + 12.0f + Nf(I) * 27.0f;
 			const float Bw = (Body.W - 170.0f) * Nf(Pay[I]) / Top * In;
@@ -1527,7 +1740,7 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 		const world::World& W = S.Living();
 		std::stable_sort(Who.begin(), Who.end(), [&](int A, int B) { return W.Get(A)->RepOf(world::Rep::Overall) > W.Get(B)->RepOf(world::Rep::Overall); });
 		UI.Text(Who.empty() ? std::string("No regulars registered yet") : "Regulars registered \xC2\xB7 " + std::to_string(Who.size()), Body.X, Body.Y + 18.0f, Ts(13.0f, 600, pal::Muted));
-		for (size_t I = 0; I < Who.size() && I < 8; ++I)
+		for (size_t I = 0; I < Who.size() && I < 8 && 48.0f + Nf(I) * 29.0f <= Body.H; ++I)
 		{
 			const world::Npc* N = W.Get(Who[I]);
 			const float Y = Body.Y + 30.0f + Nf(I) * 29.0f;
@@ -1545,7 +1758,7 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 		const bool Finished = L.St == net::Status::Finished;
 		UI.Text(Finished ? "Final table results" : L.St == net::Status::Registering || L.St == net::Status::LateReg || L.St == net::Status::Announced ? "Regulars registered" : "At the top of the counts",
 			Body.X, Body.Y + 18.0f, Ts(13.0f, 600, pal::Muted));
-		for (size_t I = 0; I < Res.FinalTable.size() && I < 8; ++I)
+		for (size_t I = 0; I < Res.FinalTable.size() && I < 8 && 48.0f + Nf(I) * 29.0f <= Body.H; ++I)
 		{
 			const net::Placing& P = Res.FinalTable[I];
 			const float Y = Body.Y + 30.0f + Nf(I) * 29.0f;
@@ -1560,6 +1773,28 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 			{
 				UI.Text(Money(P.Prize), Body.X + Body.W, Y + 18.0f, Ts(14.0f, 700, P.Place == 1 ? pal::Gold : pal::Ink, Align::Right, Baseline::Alphabetic, true));
 			}
+		}
+	}
+	if (FestLines > 0)
+	{
+		// The band: a rule, then "YOUR RCOP" in the event's edge colour with the race at its right and U10's line under it, then U37.
+		float By = Body.Y + Body.H + 6.0f;
+		C->FillRect({Body.X, By, Body.W, 1.0f}, pal::Line);
+		By += 18.0f;
+		if (FestStrip)
+		{
+			const float Hw = UI.Text(FestHead, Body.X, By, Ts(12.0f, 800, Edge, Align::Left, Baseline::Alphabetic, false, Body.W / 2.0f));
+			if (!FestRace.empty())
+			{
+				UI.Text(FestRace, Body.X + Body.W, By, Ts(13.0f, 700, pal::Ink, Align::Right, Baseline::Alphabetic, true, Body.W - Hw - 16.0f));
+			}
+			By += 19.0f;
+			UI.Text(FestCounts, Body.X, By, Ts(13.0f, 500, pal::Muted, Align::Left, Baseline::Alphabetic, false, Body.W));
+			By += 19.0f;
+		}
+		if (!FestGoodOn.empty())
+		{
+			UI.Text(FestGoodOn, Body.X, By, Ts(13.0f, 700, pal::Gold, Align::Left, Baseline::Alphabetic, false, Body.W));
 		}
 	}
 	C->SetAlpha(A0);
@@ -2795,7 +3030,8 @@ namespace rlfest_detail
  *  on Ignite and RunItTwice, the register sheets' YOUR strip, slide 0, the tickers, the card's pill), so CopyLint, both trademark tiers
  *  and U1 run over them with the hub's. Declared and called in UI/RiverLineFestival.cpp (stream A); each "<kind>\t<text>" (§2.11), its
  *  placeholders the hub's sample names ({FESTIVAL} the Short, {N}, {Days}, {D}, {Gtd}, {Added}, {FirstDate}, {LastDate}, {Time},
- *  {Name}), filled from the sim when drawn. FH-3b: the takeover's words (U15, U22, U32 and the floor's Main cabinet). */
+ *  {Name}), filled from the sim when drawn. FH-3b: the takeover's words (U15, U22, U32 and the floor's Main cabinet). FH-4B: the
+ *  register sheets' YOUR strip (U5, U10 without its race clause, the race at its right), U37 and the wallets' step ticket rows. */
 std::vector<std::string> HostUiStrings()
 {
 	return {
@@ -2838,6 +3074,15 @@ std::vector<std::string> HostUiStrings()
 		"sentence\tThe leader takes the belt and a seat in the next {Festival} Main Event.",
 		"sentence\tThe leader takes the belt.",
 		"sentence\tEvery cash scores; the deeper the run and the bigger the field, the more it's worth.",
+		// FH-4B (§2.8.2, LEAD_CALLS R-18): the register sheets' two-line strip on all three hosts (NetSheetStrip: U5's head, the race at
+		// its right, U10 without its race clause, singular at one), U37 on a step event's sheet and on the wallets' step ticket rows
+		// (NetSheetGoodOn, NetStepTicket), whose pill is U35's STEP {N} (above) beside the edition's name and TICKET.
+		"label\tYOUR {FESTIVAL}",
+		"label\trace {Rank} of {Scorers}",
+		"label\t{Events} events \xC2\xB7 {Cashes} cashes \xC2\xB7 best {Best} of {Field}",
+		"label\t1 event \xC2\xB7 1 cash \xC2\xB7 best {Best} of {Field}",
+		"sentence\tGood on {Dates}.",
+		"label\tTICKET",
 	};
 }
 

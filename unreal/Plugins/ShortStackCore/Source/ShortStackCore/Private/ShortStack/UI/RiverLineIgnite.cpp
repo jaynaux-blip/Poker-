@@ -39,6 +39,15 @@ namespace ss
 {
 namespace ui
 {
+namespace rlnet_detail
+{
+// Update 4 G1 (SPEC v1.7 §2.8.2, LEAD_CALLS R-18; F-hubs FH-4B): the register sheet's YOUR strip, U37 on a step event's sheet and the
+// wallet's festival step tickets, defined in UI/RiverLineNet.cpp beside EventPanel.
+bool NetSheetStrip(const Session& S, const net::EventInstance& E, std::string& Head, std::string& Race, std::string& Counts);
+std::string NetSheetGoodOn(const Session& S, const net::EventInstance& E, double World);
+int NetStepTicket(net::SiteId Site, const std::string& Ticket, double World, const fest::Festival*& Edition, std::string& GoodOn);
+} // namespace rlnet_detail
+
 namespace rlignite_detail
 {
 // ------------------------------------------------------------------ the laptop's side state
@@ -2503,11 +2512,31 @@ void IgniteSheet(IgniteCtx& X)
 		{
 			C.Text("after: " + Money(Bal - T.BuyInCents), Rg.X + Rg.W - 24.0f, Rg.Y + 166.0f, IgniteTx(14.0f, 700, Bal >= T.BuyInCents ? pal::Muted : pal::Red, Align::Right));
 		}
+		// Update 4 G1 (SPEC v1.7 §2.8.2, LEAD_CALLS R-18; F-hubs FH-4B): a held step ticket's runs left (U37) under the ticket line.
+		const std::string GoodOn = Tickets > 0 ? rlnet_detail::NetSheetGoodOn(X.S, E, X.World) : std::string();
+		if (!GoodOn.empty())
+		{
+			C.Text(GoodOn, Rg.X + Rg.W - 24.0f, Rg.Y + 190.0f, IgniteTx(12.5f, 700, Hex(igniteart::IgSun), Align::Right, Baseline::Alphabetic, Rg.W - 48.0f));
+		}
 		rlnet_detail::NetParagraph(C, IgniteStaysHere, Rg.X + 24.0f, Rg.Y + 214.0f, Rg.W - 48.0f, 13.5f, 600, pal::Muted, 19.0f, 2);
 		if (const stake::Deal* Package = stake::ActivePackage(X.S.Life.Stakes))
 		{
 			rlnet_detail::NetParagraph(C, rlsites_detail::SitesFill(rlsites_detail::SitesOwnMoney, {{"Backer", stake::BackerName(*Package)}}), Rg.X + 24.0f, Rg.Y + 270.0f, Rg.W - 48.0f, 13.0f, 700,
 				Hex(igniteart::IgTang), 18.0f, 2);
+		}
+		// YOUR {FESTIVAL} (§2.8.2, FestYourStrip): once the hero has played the event's edition, "YOUR FEIGN" with the race at its right
+		// and U10's line under it, above the register block.
+		std::string Head;
+		std::string Race;
+		std::string Counts;
+		if (rlnet_detail::NetSheetStrip(X.S, E, Head, Race, Counts))
+		{
+			const float Hw = C.Text(Head, Rg.X + 24.0f, Rg.Y + 334.0f, IgniteBi(15.0f, Hex(IgPink), Align::Left, Baseline::Alphabetic, (Rg.W - 48.0f) / 2.0f));
+			if (!Race.empty())
+			{
+				C.Text(Race, Rg.X + Rg.W - 24.0f, Rg.Y + 334.0f, IgniteTx(13.0f, 800, Hex(K.Cream), Align::Right, Baseline::Alphabetic, Rg.W - 64.0f - Hw));
+			}
+			C.Text(Counts, Rg.X + 24.0f, Rg.Y + 358.0f, IgniteTx(13.0f, 600, pal::Muted, Align::Left, Baseline::Alphabetic, Rg.W - 48.0f));
 		}
 		Access::RegisterBlock(X.RL, E, L, {Rg.X + 24.0f, Rg.Y + Rg.H - 104.0f, Rg.W - 48.0f, 72.0f}, X.Now);
 	}
@@ -3357,13 +3386,38 @@ void IgniteWallet(IgniteCtx& X)
 		const Rect Rt{1056.0f, 296.0f, 520.0f, 536.0f};
 		Card(Rt);
 		C.Text("RECEIPTS", Rt.X + 26.0f, Rt.Y + 42.0f, IgniteBi(22.0f, Hex(K.Cream)));
+		// Update 4 G1 (LEAD_CALLS R-18, SPEC v1.7 §2.16 step 8a; F-hubs FH-4B): a festival step ticket held here is a ticket row ahead
+		// of the receipts: its STEP {K} pill (U35), the edition, TICKET, and U37 while its runs still take entries.
+		float Ly = Rt.Y + 62.0f;
+		for (const auto& Tk : X.S.Life.Tickets)
+		{
+			const fest::Festival* Ed = nullptr;
+			std::string GoodOn;
+			const int Step = Tk.second > 0 ? rlnet_detail::NetStepTicket(Site, Tk.first, X.World, Ed, GoodOn) : 0;
+			if (Step <= 0 || !Ed || Ly + 48.0f > Rt.Y + Rt.H - 10.0f)
+			{
+				continue;
+			}
+			const std::string Pill = "STEP " + std::to_string(Step);
+			const float Pw = C.Measure(Pill, 11.0f, 900) + 16.0f;
+			C.FillRoundRect({Rt.X + 26.0f, Ly + 6.0f, Pw, 18.0f}, 9.0f, Hex(IgSun));
+			C.Text(Pill, Rt.X + 26.0f + Pw / 2.0f, Ly + 19.0f, IgniteTx(11.0f, 900, Hex(IgDarkInk), Align::Center));
+			C.Text(Ed->Name + (Tk.second > 1 ? " x" + std::to_string(Tk.second) : std::string()), Rt.X + 36.0f + Pw, Ly + 20.0f,
+				IgniteTx(14.5f, 700, Hex(K.Cream), Align::Left, Baseline::Alphabetic, Rt.W - 140.0f - Pw));
+			C.Text("TICKET", Rt.X + Rt.W - 26.0f, Ly + 20.0f, IgniteTx(11.0f, 800, Hex(IgSun), Align::Right));
+			if (!GoodOn.empty())
+			{
+				C.Text(GoodOn, Rt.X + 26.0f, Ly + 38.0f, IgniteTx(12.0f, 700, Hex(IgSun), Align::Left, Baseline::Alphabetic, Rt.W - 52.0f));
+			}
+			C.FillRect({Rt.X + 26.0f, Ly + 48.0f, Rt.W - 52.0f, 1.0f}, IgniteHx(K.Rim, 0.6f));
+			Ly += 52.0f;
+		}
 		if (!A || A->Lines.empty())
 		{
-			rlnet_detail::NetParagraph(C, IgniteNoLines, Rt.X + 26.0f, Rt.Y + 80.0f, Rt.W - 52.0f, 14.0f, 500, pal::Muted, 20.0f, 3);
+			rlnet_detail::NetParagraph(C, IgniteNoLines, Rt.X + 26.0f, Ly + 18.0f, Rt.W - 52.0f, 14.0f, 500, pal::Muted, 20.0f, 3);
 		}
 		else
 		{
-			float Ly = Rt.Y + 62.0f;
 			int Row = 0;
 			for (auto It = A->Lines.rbegin(); It != A->Lines.rend() && Ly + 48.0f <= Rt.Y + Rt.H - 10.0f; ++It, ++Row)
 			{
