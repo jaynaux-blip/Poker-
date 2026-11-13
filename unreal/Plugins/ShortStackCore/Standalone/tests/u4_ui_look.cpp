@@ -3049,6 +3049,7 @@ bool AttrOnPageLook(Brand B, const std::set<uint64_t>& Rows, const ss::ui::DrawL
  * attraction is on the page (AttrOnPageLook: F-hubs' band fill, FH-3b, in the tree) PLAY is at most 34,000 vertices and 400 text
  * runs, and the attraction is on the page at every moment. A tree without the fill (F-look's branch alone) has no attraction on PLAY:
  * the counts of PLAY today are printed, and after FEIGN's edition the laptop stops (PUSH's and PENNANT's would cost the same nothing).
+ * Once an edition has shown its attraction (the fill is in the tree), a later edition's attraction is owed at every moment too.
  * The probe itself is checked in every tree on the band drawn directly. Printed: each edition's busiest counts and their moments.
  * Planted bugs (run where the fill is merged): the arch's candy stripe in 0.6-unit dashes (inside the band's 15k, over PLAY's 34k);
  * the pavilion's pennant lines ten times as dense; the arch's foot sign lettered a run a glyph at each of its bulbs (the runs).
@@ -3095,6 +3096,7 @@ void FestBandPlayLook()
 	std::sort(Order.begin(), Order.end());
 	std::unique_ptr<LaptopLook> Lap;
 	bool Fill = true;
+	bool FillSeen = false; // an earlier edition had its attraction on PLAY
 	for (const std::pair<int, int>& O : Order)
 	{
 		const int Ai = O.second;
@@ -3163,7 +3165,7 @@ void FestBandPlayLook()
 		};
 		const int N = static_cast<int>(At.size());
 		ExpectLook(Pages, std::string("FestBandBudget: Ignite's PLAY draws at every moment of ") + F.Name);
-		if (On == 0)
+		if (On == 0 && !FillSeen)
 		{
 			// No band fill in this tree (F-look's branch alone): PLAY today, printed.
 			std::printf("  band: PLAY during %s (%d days, %d moments): %s on no page (no band fill in this tree: F-hubs' FH-3b fills IgniteBand); PLAY today "
@@ -3172,6 +3174,7 @@ void FestBandPlayLook()
 			Fill = false;
 			continue;
 		}
+		FillSeen = true;
 		std::printf("  band: PLAY with %s during %s (%d days, %d moments, on the page at %d): busiest %zu vertices (%s), %zu runs (%s); budget 34,000 and 400\n",
 			What[Ai], F.Name.c_str(), Days, N, On, MostV, When(MostVAt).c_str(), MostR, When(MostRAt).c_str());
 		ExpectLook(On == N, std::string("FestBandBudget: ") + What[Ai] + " is on PLAY at every moment of " + F.Name + " (its days are Live)");
