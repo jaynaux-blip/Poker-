@@ -1,6 +1,8 @@
 // Update 4, Festival Season (SPEC v1.7 §2.8.5, §2.9.3, §2.9.4): the session's festival rules, beside H/Session.h's frozen members.
 // F-world's private header (G1's FW-5; private, so not frozen, Q-5): what G/Session.cpp's ShowResults sends and plays for a finished
 // festival event, the seat line, T12's fill, the cap, the moments the marks leave, and Rerun's festival stories (G/SessionVideo.cpp).
+// FW-6: FestStep's crown tickets, step refunds and crown letter as functions of the career's state and the world (the session's step
+// calls them; the checks call them at any minute without running a world there), and the ladder's seat line.
 // Bodies in G/SessionFest.cpp; tests/festivals_world.cpp calls them directly.
 #pragma once
 
@@ -14,9 +16,18 @@
 
 namespace ss
 {
+namespace life
+{
+struct State;
+}
 namespace world
 {
 class World;
+struct HeroFestMark;
+}
+namespace fest
+{
+struct Festival;
 }
 
 namespace session_fest_detail
@@ -62,5 +73,30 @@ int FestStoryPrefix(const std::string& Key);
  *  Main), N (the belt: the hero's events in the edition) or Place (a final table: the hero's Main finish). Empty for a key that is no
  *  festival story. */
 std::vector<std::pair<std::string, std::string>> FestStoryFacts(const world::World& W, const std::string& Key);
+
+/** Dee's line for a seat a satellite won into a step ticket or any seat T11 doesn't name (the existing line, one literal, read by
+ *  ShowResults and ss.Fest.Result's s1 seat). */
+const char* FestLadderLine();
+
+/** FW-6 (§2.6.1 step 7): the ticket a crown mark earns in the brand's next edition (the first edition of the brand after F), as the
+ *  wallet keys it: THE BELT its Main's ticket (Network::TicketOf: a championship's year-free "<site>.<brand>-main", RCOP's
+ *  "rcop-main"), PODIUM its Main Mega Satellite ("-sat1", RiverLine "-mega", RCOP "mega-rcop"), FINALIST its Last Chance ("-sat2",
+ *  RiverLine "-last", RCOP "step4"; WRIT's one satellite, The Summons, for both). "" for any other mark, or when the brand has no next
+ *  edition or that edition no such satellite (Summer Slam has none). */
+std::string FestCrownTicket(const fest::Festival& F, int Mark);
+/** FW-6: FestStep's ticket for mark K (§2.6.1 step 7, §2.13): when K carries an unpaid ticket (fest::kCrownTickets) and
+ *  "festticket:<key>" is not in L.Sites.Done, the ticket FestCrownTicket names goes on RiverLine into L.Tickets, on Ignite and
+ *  RunItTwice through site::play::Grant (Kind::Ticket, "<ticket>|festticket:<key>": the Value Governor, over the cap the Guest List);
+ *  then the key and world::FestTicketPaid (the mark's t drops). True when it paid or queued now (nothing when K has no ticket left). */
+bool FestPayCrownTicket(life::State& L, world::World& W, const world::HeroFestMark& K, double Now);
+/** FW-6 (§2.6.1 item 8, v1.6): after a championship's crown, each step ticket of that edition the hero holds (a ticket one of its
+ *  satellites seats, never the Main ticket) that Network::NextFor can no longer place is credited at its SeatValue (times the count)
+ *  into the site's wallet once, keyed "festcredit:<ticket>" in L.Sites.Done, with one ledger line (ledger:festcredit), and leaves the
+ *  wallet; not governed (a refund, not a promotion). The number of tickets credited now. */
+int FestStepCredits(life::State& L, const world::World& W, double Now);
+/** FW-6 (§2.9.3, L5-L6): the crown letter for edition F's belt won with Points race points, (subject, body): "{Festival} {Year}: the
+ *  belt is yours" ({Festival} the edition's name without its year), its body's two {Festival} after "the " and "next " through
+ *  fest::NameAfterArticle. */
+std::pair<std::string, std::string> FestCrownLetter(const fest::Festival& F, double Points);
 } // namespace session_fest_detail
 } // namespace ss
