@@ -49,15 +49,27 @@
 // championship"; a shared festival template is judged on its PENNANT fill as Ignite's and on its REIGN fill as RunItTwice's; no
 // headline title holds it), also over every series and template on Ignite and RunItTwice; and FestRcopKept lands: RCOP's strings and the six
 // tournament names the game already prints, kept and screened. SitesCopy (rival_sites) screens SeriesInfo::Title too.
+//
+// G1, FN-5 (F-net; PLAN_FNET §4 FN-5 and its Corrections items 4 and 10; R-9): the juice. PayoutFor's Main body landed in
+// E/Structure.cpp and fest::RacePoints' cut in G/Festival.cpp, and eight checks land: FestCurveShape (§2.4.3's table, the sweeps on
+// the rival Mains' pools, spec-check6's edge setups with N-1's scaled floors, Standard == PayoutTable), FestCurveAgrees (the engine,
+// the network and the world to the cent on every rival Main of 2026-2028, the written lift's figures, a Blank world through FEIGN
+// I's Main), FestAddedMoneyAgrees (Added end to end, the Mains only, the world's P.Pool), FestGuarantees, FestNoRiverLineJuice,
+// FestOverlayIgnoresAdded, FestRacePoints and FestTalkBubbleCurve. SoftBound's line with PENNANT's Main is in rival_sites.
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
+#include "../../Source/ShortStackCore/Private/ShortStack/Game/WorldSim.h"
 #include "CopyLint.h"
 #include "Trademarks.h"
 #include "ShortStack/Common.h"
 #include "ShortStack/Game/Festival.h"
+#include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Lobby.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/SiteShow.h"
 #include "ShortStack/Game/Sites.h"
+#include "ShortStack/Game/TableTalk.h"
 #include "ShortStack/Game/World.h"
+#include "ShortStack/Structure.h"
 #include "ShortStack/Tournament.h"
 
 #include <algorithm>
@@ -2756,6 +2768,920 @@ void FestBlurbsFilledNet()
 			" rival festival blurbs, B1-B15, and RiverLine's three W5 blurbs; the Mega's seats text is \"RCOP Main Event seats\", no seat guaranteed)" + First);
 }
 
+// ------------------------------------------------------------------ the juice (FN-5): the Main curve, Added money, guarantees, overlays
+
+/** Night One's first world minute (tests/world_seg_sites.cpp's NightOne): where a Blank world starts. */
+const double FestNetNightOne = 1440.0 + 127.0;
+
+/** A rival festival edition's Main with its instance (SPEC v1.7 §2.4: the six rival Mains carry Added and Curve::Main). */
+struct FestNetMain
+{
+	const ss::fest::Festival* F = nullptr;
+	const ss::net::Network* N = nullptr;
+	const ss::net::EventTemplate* T = nullptr;
+	ss::net::EventInstance E;
+	ss::Chips Contribution = 0; // llround(BuyIn x the site's prize share): what an entry puts in the pool
+};
+
+/** Every rival festival edition's Main from FromYear to ToYear, in All()'s order (a Main with no instance at its MainStart fails). */
+std::vector<FestNetMain> FestNetMains(int FromYear, int ToYear)
+{
+	std::vector<FestNetMain> Out;
+	for (const ss::fest::Festival* F : FestNetRivalEditions())
+	{
+		if (F->Year < FromYear || F->Year > ToYear)
+		{
+			continue;
+		}
+		FestNetMain M;
+		M.F = F;
+		M.N = &ss::net::Site(F->Site);
+		if (!M.N->Next(F->MainId, F->MainStart - 1.0, M.E) || std::fabs(M.E.Start - F->MainStart) > 0.5)
+		{
+			Expect(false, F->Name + "'s Main " + F->MainId + " has an instance at its MainStart");
+			continue;
+		}
+		M.T = &M.N->TemplateOf(M.E);
+		M.Contribution = static_cast<ss::Chips>(std::llround(static_cast<double>(M.T->BuyInCents) * M.N->Definition().Rake.PrizeShare(*M.T)));
+		Out.push_back(M);
+	}
+	return Out;
+}
+
+/** "" when a prize table is non-increasing (no place pays more than the one above it), never below 0 and sums to Pool; else its
+ *  first fault. */
+std::string FestNetTableFault(const std::vector<ss::Chips>& T, ss::Chips Pool)
+{
+	ss::Chips Sum = 0;
+	for (size_t I = 0; I < T.size(); ++I)
+	{
+		Sum += T[I];
+		if (T[I] < 0)
+		{
+			return "place " + std::to_string(I + 1) + " pays " + std::to_string(T[I]) + " cents";
+		}
+		if (I > 0 && T[I] > T[I - 1])
+		{
+			return "place " + std::to_string(I + 1) + " pays " + std::to_string(T[I]) + " cents over place " + std::to_string(I) + "'s " + std::to_string(T[I - 1]);
+		}
+	}
+	return Sum == Pool ? std::string() : "it sums to " + std::to_string(Sum) + " of " + std::to_string(Pool) + " cents";
+}
+
+/** Whether §2.4.3's step 5 (b) scales the floors (they sum past the pool once made non-increasing): the check's own copy of steps 1,
+ *  4 and 5 in PayoutFor's arithmetic, so the edge sweep can say how many of its tables took the scaled path (N-1). */
+bool FestNetFloorsScaled(ss::Chips PoolCents, int Entrants, ss::Chips MinCashCents)
+{
+	if (Entrants <= 3)
+	{
+		return false;
+	}
+	const int Paid = ss::PaidPlaces(Entrants, ss::PayoutCurve::Main);
+	const double Pool = static_cast<double>(PoolCents);
+	const double F0 = ss::Min(static_cast<double>(MinCashCents), Pool / Paid);
+	std::vector<double> F(static_cast<size_t>(Paid));
+	for (int I = 1; I <= Paid; ++I)
+	{
+		double Fi = F0;
+		if (I > Paid / 2)
+		{
+			const double B = static_cast<double>(Paid - I) / static_cast<double>(Paid);
+			const int K = B < ss::payout::kMainFloorFlat ? 0 : 1 + static_cast<int>(std::floor((B - ss::payout::kMainFloorFlat) / ss::payout::kMainFloorBlock));
+			Fi = F0 * ss::PowInt(ss::payout::kMainFloorStep, K);
+		}
+		F[static_cast<size_t>(I - 1)] = Fi;
+	}
+	for (int I = Paid - 2; I >= 0; --I)
+	{
+		F[static_cast<size_t>(I)] = ss::Max(F[static_cast<size_t>(I)], F[static_cast<size_t>(I + 1)]);
+	}
+	double Sum = 0.0;
+	for (int I = 0; I < Paid; ++I)
+	{
+		Sum += F[static_cast<size_t>(I)];
+	}
+	return Sum > Pool;
+}
+
+/** §2.4.3's table "What the curve does", the Main columns (model/spec-fix3/examples_out.txt §1): a $11 event at RiverLine's share,
+ *  E.Pool = N x $10.07, min cash $16.50. Paid, 1st's share, the final table's share, the share of paid places flat at the min cash. */
+struct FestNetShapeRow
+{
+	int Entries, Paid;
+	double First, Final, Flat;
+};
+const FestNetShapeRow FestNetShapeTable[] = {{260, 31, 26.1, 72.2, 0.0}, {700, 84, 23.0, 61.1, 0.0}, {1000, 120, 21.6, 57.3, 10.0}, {3000, 360, 17.9, 47.4, 20.0},
+	{10000, 1200, 14.0, 37.9, 19.0}, {26662, 3199, 11.5, 31.9, 19.0}, {124466, 14936, 9.1, 25.7, 20.0}};
+
+/** SPEC v1.7 §2.4.3, §2.15.1: PayoutFor(Main) matches the printed table at 260 ... 124,466 entries (paid exact, 1st and the final table
+ *  +-0.2 points of the pool, the flat band +-1 point); every table is non-increasing, never below 0 and sums to its pool there, at every
+ *  101st N from 4 to 130,000 (1,288 fields) on each rival Main's E.Pool with and without its added money (2027's six), and on
+ *  spec-check6's 52 edge setups at every 1,001st N (6,760 tables, 3,096 of them with step 5 (b) scaling the floors) and the three
+ *  field sizes where step 6 run on scaled floors rose (N-1); Standard is PayoutTable byte for byte on 2,000 sampled (pool, N <= 200,000).
+ *  Planted: the lift not tapered; v1.6's step 5 (place 577 over place 576 at 10,000 entries); step 6 on scaled floors (the text
+ *  before N-1: place 28 over place 27 at 3,822 on GRIT's contribution). */
+void FestCurveShapeNet()
+{
+	using ss::Chips;
+	const ss::PayoutCurve Main = ss::PayoutCurve::Main;
+	const auto T0 = std::chrono::steady_clock::now();
+	// The printed table.
+	std::string Bad;
+	for (const FestNetShapeRow& R : FestNetShapeTable)
+	{
+		const Chips Pool = 1007 * static_cast<Chips>(R.Entries);
+		const std::vector<Chips> T = ss::PayoutFor(Pool, R.Entries, 1650, Main);
+		const int Paid = static_cast<int>(T.size());
+		Chips Final = 0;
+		int Above = -1; // the last place paying more than the min cash (examples.py's metrics: > 1.0005 x the min cash)
+		for (int I = 0; I < Paid; ++I)
+		{
+			Final += I < 9 ? T[static_cast<size_t>(I)] : 0;
+			Above = static_cast<double>(T[static_cast<size_t>(I)]) > 1650.0 * 1.0005 ? I : Above;
+		}
+		const double First = Paid > 0 ? 100.0 * static_cast<double>(T[0]) / static_cast<double>(Pool) : 0.0;
+		const double FinalShare = 100.0 * static_cast<double>(Final) / static_cast<double>(Pool);
+		const double Flat = Paid > 0 ? 100.0 * static_cast<double>(Paid - (Above + 1)) / static_cast<double>(Paid) : 0.0;
+		std::printf("festivals: the Main curve at %d entries (pool $%.2f, min cash $16.50): %d paid, 1st %.2f%%, final table %.2f%%, flat at the min cash %.1f%% "
+					"(SPEC: %d / %.1f%% / %.1f%% / %.0f%%)\n",
+			R.Entries, static_cast<double>(Pool) / 100.0, Paid, First, FinalShare, Flat, R.Paid, R.First, R.Final, R.Flat);
+		const std::string Fault = FestNetTableFault(T, Pool);
+		if (Paid != R.Paid || Paid != ss::PaidPlaces(R.Entries, Main) || std::fabs(First - R.First) > 0.2 || std::fabs(FinalShare - R.Final) > 0.2 ||
+			std::fabs(Flat - R.Flat) > 1.0 || !Fault.empty())
+		{
+			Bad += " " + std::to_string(R.Entries) + " entries (" + std::to_string(Paid) + " paid, 1st " + std::to_string(First) + "%, final table " +
+				std::to_string(FinalShare) + "%, flat " + std::to_string(Flat) + "%" + (Fault.empty() ? std::string() : "; " + Fault) + ")";
+		}
+	}
+	Expect(Bad.empty(), "the Main curve matches SPEC §2.4.3's table at 260, 700, 1,000, 3,000, 10,000, 26,662 and 124,466 entries (paid exact, 1st and the final table "
+						"within 0.2 points, the flat band within 1), each table non-increasing and summing to its pool" + (Bad.empty() ? std::string() : ":" + Bad));
+
+	// Every 101st N from 4 to 130,000 on each rival Main's E.Pool (max(GTD, C x N) + Added, Network::Make's), with and without Added.
+	const std::vector<FestNetMain> Mains = FestNetMains(2027, 2027);
+	int Tables = 0;
+	long long Places = 0;
+	std::string SweepBad;
+	for (const FestNetMain& M : Mains)
+	{
+		for (int WithAdded = 1; WithAdded >= 0; --WithAdded)
+		{
+			for (int N = 4; N <= 130000; N += 101)
+			{
+				const Chips Pool = std::max(M.T->GtdCents, M.Contribution * static_cast<Chips>(N)) + (WithAdded ? M.T->AddedCents : 0);
+				const std::vector<Chips> T = ss::PayoutFor(Pool, N, M.T->BuyInCents * 3 / 2, Main);
+				++Tables;
+				Places += static_cast<long long>(T.size());
+				const std::string Fault = static_cast<int>(T.size()) == ss::PaidPlaces(N, Main) ? FestNetTableFault(T, Pool) : std::string("PaidPlaces differs from the table");
+				if (!Fault.empty() && SweepBad.empty())
+				{
+					SweepBad = ": " + M.F->Name + "'s Main at " + std::to_string(N) + " entries" + (WithAdded ? "" : " without its added money") + ", " + Fault;
+				}
+			}
+		}
+	}
+	Expect(Mains.size() == 6 && Tables == 6 * 2 * 1288 && SweepBad.empty(),
+		"the Main curve is non-increasing, never below 0 and sums to the pool at every 101st N from 4 to 130,000 on each of 2027's six rival Mains' pools, with and without "
+		"Added (" + std::to_string(Tables) + " tables, " + std::to_string(Places) + " places)" + SweepBad);
+
+	// spec-check6's 52 edge setups (each pool kind with a min cash from Pool / (2 x Paid) to the pool), every 1,001st N, and the three
+	// named field sizes (N-1, model/spec-pass/n1_edge_out.txt).
+	struct FestNetEdgePool
+	{
+		const char* Name;
+		Chips Contribution; // < 0: a flat pool of -Contribution
+		Chips Added;
+	};
+	const FestNetEdgePool Edges[] = {{"REIGN's contribution + $50,000", 198450, 5000000}, {"GRIT's contribution", 50085, 0}, {"the $11 pool", 1007, 0},
+		{"a flat $1,000,000,000", -100000000000LL, 0}};
+	const int Ratios[] = {1000, 1200, 1300, 1340, 1350, 1360, 1370, 1380, 1400, 1450, 1520, 2000, -1}; // min cash Pool / (Paid x r / 1000); -1: the pool
+	const auto EdgePool = [](const FestNetEdgePool& P, int N) { return (P.Contribution < 0 ? -P.Contribution : P.Contribution * static_cast<Chips>(N)) + P.Added; };
+	const auto EdgeMin = [Main](Chips Pool, int N, int R) {
+		return R < 0 ? Pool
+					 : static_cast<Chips>(static_cast<double>(Pool) * 1000.0 / (static_cast<double>(ss::PaidPlaces(N, Main)) * static_cast<double>(R)));
+	};
+	int EdgeTables = 0;
+	int Scaled = 0;
+	std::string EdgeBad;
+	for (const FestNetEdgePool& P : Edges)
+	{
+		for (const int R : Ratios)
+		{
+			for (int N = 4; N <= 130000; N += 1001)
+			{
+				const Chips Pool = EdgePool(P, N);
+				const Chips Min = EdgeMin(Pool, N, R);
+				const std::string Fault = FestNetTableFault(ss::PayoutFor(Pool, N, Min, Main), Pool);
+				++EdgeTables;
+				Scaled += FestNetFloorsScaled(Pool, N, Min) ? 1 : 0;
+				if (!Fault.empty() && EdgeBad.empty())
+				{
+					EdgeBad = ": " + std::string(P.Name) + " at " + std::to_string(N) + " entries, min cash " + std::to_string(Min) + " cents, " + Fault;
+				}
+			}
+		}
+	}
+	struct FestNetNamed
+	{
+		int Edge, Entries, Ratio;
+	};
+	const FestNetNamed Named[] = {{1, 3822, 1000}, {0, 63995, 1000}, {3, 26355, -1}};
+	int NamedScaled = 0;
+	for (const FestNetNamed& Nm : Named)
+	{
+		const Chips Pool = EdgePool(Edges[Nm.Edge], Nm.Entries);
+		const Chips Min = EdgeMin(Pool, Nm.Entries, Nm.Ratio);
+		const std::string Fault = FestNetTableFault(ss::PayoutFor(Pool, Nm.Entries, Min, Main), Pool);
+		NamedScaled += FestNetFloorsScaled(Pool, Nm.Entries, Min) ? 1 : 0;
+		if (!Fault.empty())
+		{
+			EdgeBad += "; " + std::string(Edges[Nm.Edge].Name) + " at " + std::to_string(Nm.Entries) + " entries (N-1's named size), " + Fault;
+		}
+	}
+	std::printf("festivals: the Main curve's edge sweep: %d tables on spec-check6's 52 setups at every 1,001st N, %d with step 5 (b) scaling the floors; the three "
+				"named sizes (3,822, 63,995, 26,355) %d of 3 scaled\n",
+		EdgeTables, Scaled, NamedScaled);
+	Expect(EdgeTables == 6760 && Scaled == 3096 && NamedScaled == 3 && EdgeBad.empty(),
+		"the Main curve keeps the scaled floors (N-1): spec-check6's 52 edge setups at every 1,001st N (6,760 tables, 3,096 scaled) and its three named field sizes "
+		"are non-increasing, never below 0 and sum to the pool (" + std::to_string(EdgeTables) + " tables, " + std::to_string(Scaled) + " scaled)" + EdgeBad);
+
+	// Standard is PayoutTable exactly, on 2,000 sampled (pool, N <= 200,000, min cash).
+	uint64_t Seed = 0x9e3779b97f4a7c15ull;
+	const auto Draw = [&Seed]() {
+		Seed = Seed * 6364136223846793005ull + 1442695040888963407ull;
+		return Seed >> 33;
+	};
+	int Same = 0;
+	std::string StdBad;
+	for (int K = 0; K < 2000; ++K)
+	{
+		const int N = 1 + static_cast<int>(Draw() % 200000);
+		const Chips Each = 1 + static_cast<Chips>(Draw() % 500000);
+		const Chips Pool = K % 10 == 0 ? 1 + static_cast<Chips>(Draw()) * 47 : Each * static_cast<Chips>(N);
+		const Chips Min = K % 7 == 0 ? static_cast<Chips>(Draw() % static_cast<uint64_t>(Pool + 1)) : Each * 3 / 2;
+		const std::vector<Chips> A = ss::PayoutFor(Pool, N, Min, ss::PayoutCurve::Standard);
+		const bool Ok = A == ss::PayoutTable(Pool, N, Min) && static_cast<int>(A.size()) == ss::PaidPlaces(N, ss::PayoutCurve::Standard);
+		Same += Ok ? 1 : 0;
+		if (!Ok && StdBad.empty())
+		{
+			StdBad = ": pool " + std::to_string(Pool) + ", " + std::to_string(N) + " entries, min cash " + std::to_string(Min);
+		}
+	}
+	const double Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count();
+	std::printf("festivals: FestCurveShape: %d + %d tables swept, Standard == PayoutTable on %d of 2,000 samples; %.2fs\n", Tables, EdgeTables, Same, Seconds);
+	Expect(Same == 2000, "PayoutFor(Standard) is PayoutTable byte for byte, PaidPlaces its size, on 2,000 sampled pools, fields up to 200,000 and min cashes" + StdBad);
+}
+
+/** The world's payout of an online festival Main: Sim::OnlineEvent's pending event (P.Pool = E.Pool) through Sim::CurveOf and
+ *  WorldSim.cpp's PayoutFor form (a freezeout: the prize pool is the pool). */
+std::vector<ss::Chips> FestNetWorldPayouts(ss::world::World& W, const ss::net::EventInstance& E, ss::Chips* Pool = nullptr)
+{
+	const ss::world::Pending P = ss::world::Sim::OnlineEvent(W, E);
+	if (Pool)
+	{
+		*Pool = P.Pool;
+	}
+	return ss::PayoutFor(P.Pool, P.Entries, std::max<ss::Chips>(1, P.BuyIn * 3 / 2), ss::world::Sim::CurveOf(P));
+}
+
+/** The nine top places of a table in whole dollars, 9th first (SPEC §2.4.3's "pays 9th to 1st" lines). */
+std::vector<long long> FestNetTopDollars(const std::vector<ss::Chips>& T)
+{
+	std::vector<long long> Out;
+	for (int I = std::min<int>(9, static_cast<int>(T.size())) - 1; I >= 0; --I)
+	{
+		Out.push_back(std::llround(static_cast<double>(T[static_cast<size_t>(I)]) / 100.0));
+	}
+	return Out;
+}
+
+/** SPEC v1.7 §2.4.3, §2.15.1: the engine (a Tournament from the listing's spec), the network (Network::Payouts) and the world (Sim's
+ *  form) pay every rival festival Main of 2026-2028 to the cent; PaidPlaces is the table's size; every table is non-increasing and
+ *  never below 0; the written lift's figures hold (FEIGN's and GRIT's lines, the championships' first prizes); and one Blank world run
+ *  through FEIGN I's Main (day 66) recorded its prizes from Network::Payouts. Planted: the engine's 1.4x min cash kept under Main; the
+ *  0-based lift (1st 1 + 9L/8); step 7's remainder from the last place up (all four still agree: only the monotone half fails). */
+void FestCurveAgreesNet()
+{
+	using ss::Chips;
+	const ss::PayoutCurve Main = ss::PayoutCurve::Main;
+	const std::vector<FestNetMain> Mains = FestNetMains(2026, 2028);
+	ss::world::World W;
+	W.Create(7u, FestNetNightOne, ss::world::Start::Blank);
+	std::string Bad;
+	long long Places = 0;
+	for (const FestNetMain& M : Mains)
+	{
+		const std::vector<Chips> Net = M.N->Payouts(M.E);
+		const ss::Tournament Engine(M.N->Listing(M.E).Spec, "FestNet", "fest-curve:" + M.E.Id);
+		const std::vector<Chips> World = FestNetWorldPayouts(W, M.E);
+		Places += static_cast<long long>(Net.size());
+		const std::string Fault = FestNetTableFault(Net, M.E.Pool);
+		const std::string EngineFault = FestNetTableFault(Engine.Payouts, Engine.PrizePoolCents);
+		if (M.T->Curve != Main || Engine.Payouts != Net || World != Net || static_cast<int>(Net.size()) != ss::PaidPlaces(M.E.Entries, Main) || !Fault.empty() ||
+			!EngineFault.empty())
+		{
+			Bad += " " + M.F->Name + " (" + std::to_string(M.E.Entries) + " entries: network " + std::to_string(Net.size()) + " places, 1st " +
+				std::to_string(Net.empty() ? 0 : Net[0]) + "; engine " + std::to_string(Engine.Payouts.size()) + ", 1st " +
+				std::to_string(Engine.Payouts.empty() ? 0 : Engine.Payouts[0]) + "; world " + std::to_string(World.size()) + ", 1st " +
+				std::to_string(World.empty() ? 0 : World[0]) + (Fault.empty() ? std::string() : "; " + Fault) + (EngineFault.empty() ? std::string() : "; engine: " + EngineFault) + ")";
+		}
+	}
+	Expect(Mains.size() == 13 && Bad.empty(), "the engine, the network and the world pay every rival festival Main of 2026-2028 to the cent on the Main curve, PaidPlaces is "
+											  "the table's size and no place pays more than the one above it or below 0 (" +
+												  std::to_string(Mains.size()) + " Mains, " + std::to_string(Places) + " places)" + Bad);
+
+	// The written lift's figures (SPEC §2.4.3; model/spec-fix3/examples_out.txt §3-5), each on its own pool and min cash.
+	struct FestNetLine
+	{
+		const char* What;
+		Chips Pool;
+		int Entries;
+		Chips MinCash;
+		int Paid;
+		Chips First;  // exact cents, or 0 when only the whole dollars are printed
+		long long FirstDollars;
+		Chips Last;   // the min cash paid, exact cents (0: not printed)
+		std::vector<long long> Top; // 9th to 1st in whole dollars (empty: not printed)
+	};
+	const FestNetLine Lines[] = {
+		{"the FEIGN Main (700 runners, $37,500)", 3750000, 700, 8250, 84, 865491, 8655, 8558, {740, 863, 1022, 1234, 1531, 1977, 2719, 4203, 8655}},
+		{"GRIT's Main Event (1,000, $510,850)", 51085000, 1000, 79500, 120, 11073771, 110738, 79500, {9467, 11049, 13084, 15796, 19594, 25290, 34785, 53773, 110738}},
+		{"PENNANT's Main at its median (410, $88,433.89)", 8843389, 410, 32250, 49, 0, 20836, 0, {}},
+		{"REIGN's Main at its median (359, $761,532.55)", 76153255, 359, 315000, 43, 18466307, 184663, 0, {}},
+		{"REIGN's Main at its largest draw (402, $847,769)", 84776900, 402, 315000, 48, 0, 200644, 0, {}},
+		{"PENNANT 2027's 409-runner Main ($88,262.15)", 8826215, 409, 32250, 49, 2079538, 20795, 0, {}},
+	};
+	std::string LineBad;
+	for (const FestNetLine& Ln : Lines)
+	{
+		const std::vector<Chips> T = ss::PayoutFor(Ln.Pool, Ln.Entries, Ln.MinCash, Main);
+		const long long FirstDollars = T.empty() ? 0 : std::llround(static_cast<double>(T[0]) / 100.0);
+		std::printf("festivals: %s pays 1st %.2f of %d paid, min cash %.2f\n", Ln.What, T.empty() ? 0.0 : static_cast<double>(T[0]) / 100.0, static_cast<int>(T.size()),
+			T.empty() ? 0.0 : static_cast<double>(T.back()) / 100.0);
+		if (static_cast<int>(T.size()) != Ln.Paid || FirstDollars != Ln.FirstDollars || (Ln.First > 0 && T[0] != Ln.First) || (Ln.Last > 0 && T.back() != Ln.Last) ||
+			(!Ln.Top.empty() && FestNetTopDollars(T) != Ln.Top) || !FestNetTableFault(T, Ln.Pool).empty())
+		{
+			LineBad += " " + std::string(Ln.What) + " (" + std::to_string(T.size()) + " paid, 1st " + std::to_string(T.empty() ? 0 : T[0]) + " cents)";
+		}
+	}
+	// PENNANT 2027's Main as the game draws it: 409 runners, so it is the line above.
+	for (const FestNetMain& M : Mains)
+	{
+		if (M.F->Which == ss::fest::Brand::Pennant && M.F->Year == 2027 && M.E.Entries == 409)
+		{
+			const std::vector<Chips> Net = M.N->Payouts(M.E);
+			LineBad += M.E.Pool == 8826215 && !Net.empty() && Net[0] == 2079538 ? "" : " PENNANT 2027's instance (pool " + std::to_string(M.E.Pool) + ")";
+		}
+	}
+	Expect(LineBad.empty(), "the written lift's figures hold: FEIGN's Main pays $740 ... $8,655 (1st $8,654.91, min cash $85.58 of 84), GRIT's $9,467 ... $110,738 (min cash "
+							"$795 of 120), PENNANT's median Main 1st $20,836, REIGN's $184,663 and $200,644, PENNANT 2027's instance $20,795.38" + LineBad);
+
+	// One Blank world through FEIGN I's Main (day 66): every result it recorded for that Main is Network::Payouts' place.
+	const FestNetMain* Feign = nullptr;
+	for (const FestNetMain& M : Mains)
+	{
+		Feign = !Feign && M.F->Which == ss::fest::Brand::Feign && M.F->Year == 2026 ? &M : Feign;
+	}
+	if (!Feign)
+	{
+		Expect(false, "FEIGN 2026's Main is among the rival Mains");
+		return;
+	}
+	const auto T1 = std::chrono::steady_clock::now();
+	ss::world::World Run;
+	Run.Create(7u, FestNetNightOne, ss::world::Start::Blank);
+	Run.AdvanceTo(Feign->E.Start + Feign->E.Duration + 60.0);
+	const std::vector<Chips> Pay = Feign->N->Payouts(Feign->E);
+	int Records = 0, Cashes = 0, Honors = 0;
+	std::string RecBad;
+	const auto PayAt = [&Pay](int Place) { return Place >= 1 && Place <= static_cast<int>(Pay.size()) ? Pay[static_cast<size_t>(Place - 1)] : Chips(0); };
+	// The title (the world's history keeps every rival major's winner, known or not) and the final table posts of the people it follows.
+	for (const ss::world::Honor& H : Run.Honors())
+	{
+		if (H.EventId == Feign->E.Id)
+		{
+			++Honors;
+			++Records;
+			RecBad += H.Prize != PayAt(1) || H.Entries != Feign->E.Entries ? " the title: " + std::to_string(H.Prize) + " cents (Network::Payouts " + std::to_string(PayAt(1)) + ")" : "";
+		}
+	}
+	for (const ss::world::WorldEvent& Ev : Run.Events())
+	{
+		if (Ev.Kind == ss::world::EventKind::FinalTable && Ev.What == Feign->T->Name)
+		{
+			++Records;
+			RecBad += Ev.Amount != PayAt(Ev.Value) ? " the final table's " + std::to_string(Ev.Value) + ": " + std::to_string(Ev.Amount) + " cents" : "";
+		}
+	}
+	for (size_t I = 0; I < Run.People().size(); ++I)
+	{
+		for (const ss::world::Finish& Fi : Run.People()[I].Recent)
+		{
+			if (Fi.Event != Feign->T->Name || Fi.Entries != Feign->E.Entries)
+			{
+				continue;
+			}
+			++Records;
+			const Chips Want = PayAt(Fi.Place);
+			Cashes += Fi.Prize > 0 ? 1 : 0;
+			if (Fi.Prize != Want || Fi.Curve != Main)
+			{
+				RecBad += " place " + std::to_string(Fi.Place) + ": " + std::to_string(Fi.Prize) + " cents (Network::Payouts " + std::to_string(Want) + ")";
+			}
+		}
+	}
+	std::printf("festivals: a Blank world through FEIGN I's Main (day %d, %d entries) in %.2fs: %d results recorded for it (the title %d; %d followed players' records, %d cashes)\n",
+		static_cast<int>((Feign->E.Start + Feign->E.Duration) / ss::net::MinutesPerDay), Feign->E.Entries,
+		std::chrono::duration<double>(std::chrono::steady_clock::now() - T1).count(), Records, Honors, Records - Honors, Cashes);
+	Expect(Honors == 1 && RecBad.empty(), "a Blank world run through FEIGN I's Main recorded its title, final tables and finishes at Network::Payouts' prizes on the Main "
+										  "curve (" + std::to_string(Records) + " results)" + RecBad);
+}
+
+/** SPEC v1.7 §2.4.1, §2.15.1: every rival festival Main of 2026-2028 carries its brand's added money and the Main curve, and only the
+ *  Mains do (never a championship's Mini or Micro Main or a headliner); Make's pool is max(GTD, C x N) + Added; the listing's spec carries
+ *  Added and the curve; a Tournament built from it has PrizePoolCents == E.Pool; the world's pending event has P.Pool == E.Pool (a Blank
+ *  world's Sim::OnlineEvent); Live at Finished reports E.Pool and judges overlay on the base (E.Pool - Added). Planted: + Spec.AddedCents
+ *  dropped in the engine (E/Tournament.cpp:34). */
+void FestAddedMoneyAgreesNet()
+{
+	using ss::Chips;
+	const ss::PayoutCurve Main = ss::PayoutCurve::Main;
+	const std::map<ss::fest::Brand, Chips> Added = {{ss::fest::Brand::Feign, 250000}, {ss::fest::Brand::Push, 500000}, {ss::fest::Brand::Grit, 1000000},
+		{ss::fest::Brand::Writ, 2500000}, {ss::fest::Brand::Pennant, 1000000}, {ss::fest::Brand::Reign, 5000000}};
+	// Only the Mains: every template of every rival festival edition.
+	int Juiced = 0;
+	std::string OnlyBad;
+	for (const ss::fest::Festival* F : FestNetRivalEditions())
+	{
+		for (const ss::net::EventTemplate* T : FestNetEditionTemplates(*F))
+		{
+			const bool IsMain = T->Id == F->MainId;
+			const auto It = Added.find(F->Which);
+			const Chips Want = IsMain && It != Added.end() ? It->second : 0;
+			Juiced += T->AddedCents > 0 ? 1 : 0;
+			if (T->AddedCents != Want || (T->Curve == Main) != IsMain)
+			{
+				OnlyBad += " " + T->Id + " (Added " + std::to_string(T->AddedCents) + ", curve " + std::to_string(static_cast<int>(T->Curve)) + ")";
+			}
+		}
+	}
+	Expect(OnlyBad.empty() && Juiced > 0, "only the rival festival Mains carry added money (FEIGN $2,500, PUSH $5,000, GRIT $10,000, WRIT $25,000, PENNANT $10,000, REIGN "
+										  "$50,000) and the Main curve, never a Mini or Micro Main, a headliner or a satellite (" +
+											  std::to_string(Juiced) + " Mains)" + OnlyBad);
+
+	ss::world::World W;
+	W.Create(7u, FestNetNightOne, ss::world::Start::Blank);
+	const std::vector<FestNetMain> Mains = FestNetMains(2026, 2028);
+	int Short = 0, ShortSeen = 0;
+	std::string Bad;
+	for (const FestNetMain& M : Mains)
+	{
+		const Chips Base = std::max(M.T->GtdCents, M.Contribution * static_cast<Chips>(M.E.Entries));
+		const auto L = M.N->Listing(M.E);
+		const ss::Tournament Engine(L.Spec, "FestNet", "fest-added:" + M.E.Id);
+		Chips WorldPool = 0;
+		FestNetWorldPayouts(W, M.E, &WorldPool);
+		const double After = M.E.Start + M.E.Duration + 1.0;
+		const ss::net::LiveState Live = M.N->Live(M.E, After);
+		const Chips PerEntry = (M.E.Pool - M.T->AddedCents) / std::max(1, M.E.Entries);
+		const bool ShortField = M.Contribution * static_cast<Chips>(M.E.Entries) < M.T->GtdCents;
+		Short += ShortField ? 1 : 0;
+		ShortSeen += ShortField && Live.Overlay ? 1 : 0;
+		if (M.T->AddedCents <= 0 || M.E.Pool != Base + M.T->AddedCents || L.Spec.AddedCents != M.T->AddedCents || L.Spec.Curve != M.T->Curve ||
+			Engine.PrizePoolCents != M.E.Pool || WorldPool != M.E.Pool || Live.St != ss::net::Status::Finished || Live.Pool != M.E.Pool ||
+			Live.Overlay != (PerEntry * static_cast<Chips>(M.E.Entries) < M.T->GtdCents) || (Live.Overlay && !ShortField))
+		{
+			Bad += " " + M.F->Name + " (pool " + std::to_string(M.E.Pool) + ", max(GTD, C x N) + Added " + std::to_string(Base + M.T->AddedCents) + "; spec Added " +
+				std::to_string(L.Spec.AddedCents) + "; engine " + std::to_string(Engine.PrizePoolCents) + "; world " + std::to_string(WorldPool) + "; Live " +
+				std::to_string(Live.Pool) + (Live.Overlay ? ", overlay" : "") + ")";
+		}
+	}
+	std::printf("festivals: the added money end to end on %zu rival Mains of 2026-2028 (%d closed short of the guarantee, %d of them an overlay at Finished)\n", Mains.size(), Short,
+		ShortSeen);
+	Expect(Mains.size() == 13 && Bad.empty(), "every rival festival Main of 2026-2028: Make's pool is max(GTD, C x N) + Added, the listing's spec carries Added and the curve, "
+											  "the engine's PrizePoolCents and the world's P.Pool are E.Pool, and Live at Finished reports E.Pool with the overlay judged on the base" +
+												  Bad);
+}
+
+/** A guarantee as a lobby writes it (G/NetworkSites.cpp's NetSitesNice, the check's own copy): two significant figures, rounded down. */
+double FestNetNice(double Dollars)
+{
+	if (Dollars < 100.0)
+	{
+		return std::floor(Dollars + 1e-9);
+	}
+	const double Step = std::pow(10.0, std::floor(std::log10(Dollars)) - 1.0);
+	return std::floor(Dollars / Step + 1e-9) * Step;
+}
+
+/** True when Text promises a seat count: a number (digits or a number word) right before "seat", or a seat guarantee. */
+bool FestNetSeatCount(const std::string& Text)
+{
+	std::string Low;
+	for (const char Ch : Text)
+	{
+		Low.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(Ch))));
+	}
+	if (Low.find("guarantee") != std::string::npos || Low.find("gtd") != std::string::npos)
+	{
+		return true;
+	}
+	static const char* const Words[] = {"one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "fifteen", "twenty", "fifty", "hundred"};
+	for (size_t At = Low.find("seat"); At != std::string::npos; At = Low.find("seat", At + 1))
+	{
+		size_t End = At;
+		while (End > 0 && Low[End - 1] == ' ')
+		{
+			--End;
+		}
+		size_t Begin = End;
+		while (Begin > 0 && (std::isalnum(static_cast<unsigned char>(Low[Begin - 1])) || Low[Begin - 1] == ','))
+		{
+			--Begin;
+		}
+		const std::string Word = Low.substr(Begin, End - Begin);
+		bool Number = !Word.empty() && std::isdigit(static_cast<unsigned char>(Word[0]));
+		for (const char* W : Words)
+		{
+			Number = Number || Word == W;
+		}
+		if (Number)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+/** SPEC v1.7 §2.4.2, §2.15.1: headline guarantees are NetSitesNice(share x the median pool) at 1.0 on Ignite and 0.95 on RunItTwice (the
+ *  Main, the headliners and the micro-mega), numbered events at 0.9 (FEIGN's two $11 headline events, No 8 and 16, at 1.0); The Summons
+ *  and mega-rcop carry none and their blurbs and seats text promise no seat count; the championships' twelve headline guarantees match
+ *  §2.4.2's W5 table to the dollar for 2027 and 2028, and the editions' GtdCents are $281,100 and $1,991,300. Planted: a headliner at 0.9;
+ *  a championship headliner at 0.9x. */
+void FestGuaranteesNet()
+{
+	using ss::Chips;
+	int Headliners = 0, Numbered = 0;
+	std::string Bad;
+	for (const ss::fest::Festival* F : FestNetRivalEditions())
+	{
+		const ss::net::Network& N = ss::net::Site(F->Site);
+		const ss::net::SiteDef& D = N.Definition();
+		const double HeadShare = F->Site == ss::net::SiteId::RunItTwice ? 0.95 : 1.0;
+		for (const ss::net::EventTemplate* T : FestNetEditionTemplates(*F))
+		{
+			if (T->Fmt == ss::net::Format::Satellite || T->Series != F->SeriesId)
+			{
+				continue;
+			}
+			const std::string Tail = T->Id.substr(std::min(T->Id.size(), F->SeriesId.size() + 1));
+			const bool IsNumbered = !Tail.empty() && std::all_of(Tail.begin(), Tail.end(), [](char Ch) { return Ch >= '0' && Ch <= '9'; });
+			const bool HeadlineNo = IsNumbered && F->Which == ss::fest::Brand::Feign && (T->EventNo == 8 || T->EventNo == 16);
+			const double Share = !IsNumbered || HeadlineNo ? HeadShare : 0.9;
+			const double Contribution = static_cast<double>(std::llround(static_cast<double>(T->BuyInCents) * D.Rake.PrizeShare(*T))) / 100.0;
+			const double Median = static_cast<double>(T->Field) * D.Traffic.Scale * 1.025 * Contribution;
+			const Chips Want = static_cast<Chips>(std::llround(FestNetNice(Share * Median) * 100.0));
+			(IsNumbered ? Numbered : Headliners) += 1;
+			if (T->GtdCents != Want)
+			{
+				Bad += " " + T->Id + " (" + std::to_string(T->GtdCents) + " cents, " + std::to_string(Share) + "x the median pool is " + std::to_string(Want) + ")";
+			}
+		}
+	}
+	Expect(Bad.empty() && Headliners > 0 && Numbered > 0, "every rival festival guarantee is NetSitesNice(share x the median pool): headliners 1.0x on Ignite and 0.95x on "
+														  "RunItTwice, numbered events 0.9x (FEIGN's No 8 and 16 at 1.0x) (" +
+															  std::to_string(Headliners) + " headliners, " + std::to_string(Numbered) + " numbered events)" + Bad);
+
+	// The championships' twelve headline guarantees and their editions' totals (§2.4.2's W5 table), 2027 and 2028.
+	struct FestNetChampRow
+	{
+		ss::fest::Brand Which;
+		const char* Stem;
+		Chips Gtd;
+	};
+	const FestNetChampRow Rows[] = {{ss::fest::Brand::Pennant, "on", 800000}, {ss::fest::Brand::Pennant, "mega", 260000}, {ss::fest::Brand::Pennant, "hr", 2100000},
+		{ss::fest::Brand::Pennant, "micro", 500000}, {ss::fest::Brand::Pennant, "mini", 2400000}, {ss::fest::Brand::Pennant, "main", 7800000},
+		{ss::fest::Brand::Reign, "on", 8700000}, {ss::fest::Brand::Reign, "mega", 1200000}, {ss::fest::Brand::Reign, "hr", 19000000},
+		{ss::fest::Brand::Reign, "micro", 3500000}, {ss::fest::Brand::Reign, "mini", 17000000}, {ss::fest::Brand::Reign, "main", 67000000}};
+	int Matched = 0, Editions = 0;
+	std::string ChampBad;
+	for (const ss::fest::Festival* F : FestNetRivalEditions())
+	{
+		if ((F->Which != ss::fest::Brand::Pennant && F->Which != ss::fest::Brand::Reign) || F->Year < 2027 || F->Year > 2028)
+		{
+			continue;
+		}
+		++Editions;
+		const ss::net::Network& N = ss::net::Site(F->Site);
+		for (const FestNetChampRow& R : Rows)
+		{
+			if (R.Which != F->Which)
+			{
+				continue;
+			}
+			const std::string Id = F->SeriesId + "-" + R.Stem;
+			const ss::net::EventTemplate* T = nullptr;
+			for (const ss::net::EventTemplate& Tm : N.Templates())
+			{
+				T = !T && Tm.Id == Id ? &Tm : T;
+			}
+			Matched += T && T->GtdCents == R.Gtd ? 1 : 0;
+			if (!T || T->GtdCents != R.Gtd)
+			{
+				ChampBad += " " + Id + " (" + (T ? std::to_string(T->GtdCents) : std::string("missing")) + ", the table's " + std::to_string(R.Gtd) + ")";
+			}
+		}
+		const Chips Total = F->Which == ss::fest::Brand::Pennant ? 28110000 : 199130000;
+		Chips Sum = 0, Listed = -1;
+		for (const ss::net::EventTemplate* T : FestNetEditionTemplates(*F))
+		{
+			Sum += T->Series == F->SeriesId ? T->GtdCents * static_cast<Chips>(FestNetRuns(*T).size()) : 0;
+		}
+		for (const ss::net::SeriesInfo& S : N.Series())
+		{
+			Listed = S.Id == F->SeriesId ? S.GtdCents : Listed;
+		}
+		if (Sum != Total || Listed != Total)
+		{
+			ChampBad += " " + F->Name + "'s edition GtdCents " + std::to_string(Listed) + " (its templates sum to " + std::to_string(Sum) + ", the table's " + std::to_string(Total) + ")";
+		}
+	}
+	Expect(Editions == 4 && Matched == 24 && ChampBad.empty(), "the championships' headline guarantees match §2.4.2's W5 table to the dollar in 2027 and 2028 (PENNANT $8,000 "
+															   "$2,600 $21,000 $5,000 $24,000 $78,000; REIGN $87,000 $12,000 $190,000 $35,000 $170,000 $670,000) and the "
+															   "editions' GtdCents are $281,100 and $1,991,300" + ChampBad);
+
+	// The Summons and mega-rcop: no guarantee, and no seat count promised in their blurbs, seats text or listing.
+	int Doors = 0;
+	std::string DoorBad;
+	for (const ss::net::SiteId S : {ss::net::SiteId::RunItTwice, ss::net::SiteId::RiverLine})
+	{
+		const ss::net::Network& N = ss::net::Site(S);
+		for (const ss::net::EventTemplate& T : N.Templates())
+		{
+			const bool Summons = S == ss::net::SiteId::RunItTwice && T.Fmt == ss::net::Format::Satellite && T.Name.find("The Summons") != std::string::npos;
+			if (!Summons && T.Id != "mega-rcop")
+			{
+				continue;
+			}
+			++Doors;
+			ss::net::EventInstance E;
+			const bool Listed = N.Next(T.Id, T.OnlyDay >= 0 ? static_cast<double>(T.OnlyDay) * ss::net::MinutesPerDay - 1.0 : FestNetNightOne, E);
+			const std::string Label = Listed ? N.Listing(E).GuaranteeLabel : std::string();
+			if (T.GtdCents != 0 || FestNetSeatCount(T.Blurb) || FestNetSeatCount(T.Seats) || Label.find("GTD") != std::string::npos)
+			{
+				DoorBad += " " + T.Id + " (GTD " + std::to_string(T.GtdCents) + ", blurb \"" + T.Blurb + "\", seats \"" + T.Seats + "\", label \"" + Label + "\")";
+			}
+		}
+	}
+	std::printf("festivals: guarantees: %d rival festival headliners and %d numbered events at their shares of the median pool; the championships' %d rows in %d editions; "
+				"%d no-guarantee doors (The Summons, mega-rcop)\n",
+		Headliners, Numbered, Matched, Editions, Doors);
+	Expect(Doors >= 2 && DoorBad.empty(), "The Summons and mega-rcop carry no guarantee and promise no seat count in their blurbs, seats text or listing (" + std::to_string(Doors) +
+											  " templates)" + DoorBad);
+}
+
+/** RiverLine's festival templates at FN-5 (G1's juice changes none of them): their count and the FNV-1a of "id TAB GtdCents LF". */
+const int FestNetRiverLineFestCount = 4860;
+const uint64_t FestNetRiverLineFestPin = 0x5d06510bd274e9afull;
+
+/** SPEC v1.7 §2.4.1, §2.15.1: no RiverLine template carries added money or the Main curve, and RiverLine's festival templates keep
+ *  today's guarantees (every RiverLine festival's series events and satellites, ids and GtdCents pinned). Planted: Added on the Ring
+ *  Rush Main. */
+void FestNoRiverLineJuiceNet()
+{
+	const ss::net::Network& R = ss::net::Site(ss::net::SiteId::RiverLine);
+	int Juiced = 0;
+	std::string First;
+	for (const ss::net::EventTemplate& T : R.Templates())
+	{
+		if (T.AddedCents != 0 || T.Curve != ss::PayoutCurve::Standard)
+		{
+			++Juiced;
+			First += First.size() < 300 ? " " + T.Id : "";
+		}
+	}
+	std::set<std::string> Series, Satellites;
+	for (const ss::fest::Festival& F : ss::fest::All())
+	{
+		if (F.Site == ss::net::SiteId::RiverLine)
+		{
+			Series.insert(F.SeriesId);
+			Satellites.insert(F.Satellites.begin(), F.Satellites.end());
+		}
+	}
+	uint64_t H = 14695981039346656037ull;
+	int Count = 0;
+	ss::Chips Sum = 0;
+	for (const ss::net::EventTemplate& T : R.Templates())
+	{
+		if (!Series.count(T.Series) && !Satellites.count(T.Id))
+		{
+			continue;
+		}
+		++Count;
+		Sum += T.GtdCents;
+		for (const char Ch : T.Id + "\t" + std::to_string(T.GtdCents) + "\n")
+		{
+			H = (H ^ static_cast<unsigned char>(Ch)) * 1099511628211ull;
+		}
+	}
+	std::printf("festivals: RiverLine's festival templates: %d (series events and satellites), guarantees $%.2f in all, pin %s\n", Count, static_cast<double>(Sum) / 100.0,
+		SitesHexNet(H).c_str());
+	Expect(Juiced == 0, "no RiverLine template carries added money or the Main curve (" + std::to_string(Juiced) + " do:" + First + ")");
+	Expect(Count == FestNetRiverLineFestCount && H == FestNetRiverLineFestPin, "RiverLine's festival templates keep today's guarantees (" + std::to_string(Count) +
+																				  " templates, pin " + SitesHexNet(H) + ")");
+}
+
+/** SPEC v1.7 §2.4.1, §2.4.4, §2.15.1: for a rival Main with added money and a short field, OverlayOf, ProjectedOverlay, the rival's
+ *  News overlays and the world's SiteOverlay report the base overlay (the guarantee less what the field put in), never one from a pool
+ *  that holds Added: every short rival Main of 2026-2040 as the game draws it, and FEIGN 2026's Main cut to a field 20% short by hand
+ *  (resolved on a Blank world for SiteOverlay). Planted: ProjectedOverlay from E.Pool. */
+void FestOverlayIgnoresAddedNet()
+{
+	using ss::Chips;
+	namespace show = ss::site::show;
+	ss::net::HeroStats Hero;
+	int Short = 0, NewsSeen = 0;
+	std::string Bad;
+	const std::vector<FestNetMain> Mains = FestNetMains(2026, 2040);
+	for (const FestNetMain& M : Mains)
+	{
+		const Chips Base = M.T->GtdCents - M.Contribution * static_cast<Chips>(M.E.Entries);
+		if (Base <= 0)
+		{
+			continue;
+		}
+		++Short;
+		const double After = M.E.Start + M.E.Duration + 1.0;
+		bool Actual = false;
+		const Chips Projected = show::ProjectedOverlay(*M.N, M.E, M.E.Entries, After, Actual);
+		const show::OverlayView V = show::OverlayOf(*M.N, M.E, After);
+		std::string Why = !Actual || Projected != Base ? "ProjectedOverlay " + std::to_string(Projected) : std::string();
+		Why += !V.Actual || V.Cents != Base ? " OverlayOf " + std::to_string(V.Cents) : std::string();
+		const std::string Name = M.N->NameOf(M.E);
+		for (const ss::net::NewsItem& It : M.N->News(After, Hero, 1000))
+		{
+			if (It.Tag == "OVERLAY" && (It.Title.find(Name) != std::string::npos || It.Body.find(Name) != std::string::npos))
+			{
+				++NewsSeen;
+				Why += It.Amount != std::llround(static_cast<double>(Base) / 100.0) * 100 ? " News " + std::to_string(It.Amount) : std::string();
+			}
+		}
+		if (!Why.empty())
+		{
+			Bad += " " + M.F->Name + " (" + std::to_string(M.E.Entries) + " entries, base overlay " + std::to_string(Base) + ":" + Why + ")";
+		}
+	}
+	// FEIGN 2026's Main 20% short by hand: the pool Make would give that field (the guarantee + Added), each of the four reads.
+	ss::world::World W;
+	W.Create(7u, FestNetNightOne, ss::world::Start::Blank);
+	int Posts = 0;
+	for (const FestNetMain& M : Mains)
+	{
+		if (M.F->Which != ss::fest::Brand::Feign || M.F->Year != 2026)
+		{
+			continue;
+		}
+		ss::net::EventInstance Cut = M.E;
+		Cut.Entries = static_cast<int>(static_cast<double>(M.T->GtdCents) * 0.8 / static_cast<double>(M.Contribution));
+		Cut.Pool = std::max(M.T->GtdCents, M.Contribution * static_cast<Chips>(Cut.Entries)) + M.T->AddedCents;
+		const Chips Base = M.T->GtdCents - M.Contribution * static_cast<Chips>(Cut.Entries);
+		const double After = Cut.Start + Cut.Duration + 1.0;
+		bool Actual = false;
+		const Chips Projected = show::ProjectedOverlay(*M.N, Cut, Cut.Entries, After, Actual);
+		const show::OverlayView V = show::OverlayOf(*M.N, Cut, After);
+		ss::world::Pending P = ss::world::Sim::OnlineEvent(W, Cut);
+		ss::world::Sim::Resolve(W, P);
+		Chips Posted = -1;
+		for (const ss::world::WorldEvent& Ev : W.Events())
+		{
+			if (Ev.Kind == ss::world::EventKind::SiteOverlay && Ev.What == P.Name)
+			{
+				++Posts;
+				Posted = Ev.Amount;
+			}
+		}
+		std::printf("festivals: FEIGN 2026's Main cut to %d entries (pool $%.2f with Added): base overlay $%.2f; ProjectedOverlay $%.2f, OverlayOf $%.2f, the world's "
+					"SiteOverlay $%.2f\n",
+			Cut.Entries, static_cast<double>(Cut.Pool) / 100.0, static_cast<double>(Base) / 100.0, static_cast<double>(Projected) / 100.0, static_cast<double>(V.Cents) / 100.0,
+			static_cast<double>(Posted) / 100.0);
+		if (!Actual || Projected != Base || V.Cents != Base || Posted != Base)
+		{
+			Bad += " FEIGN 2026's Main cut to " + std::to_string(Cut.Entries) + " (base " + std::to_string(Base) + ": ProjectedOverlay " + std::to_string(Projected) +
+				", OverlayOf " + std::to_string(V.Cents) + ", SiteOverlay " + std::to_string(Posted) + ")";
+		}
+	}
+	std::printf("festivals: overlays on %zu rival Mains of 2026-2040: %d closed short, %d of them in their site's News\n", Mains.size(), Short, NewsSeen);
+	Expect(Short > 0 && NewsSeen > 0 && Posts == 1 && Bad.empty(), "OverlayOf, ProjectedOverlay, the rival's News and the world's SiteOverlay report a short Main's base "
+																   "overlay, never one from a pool holding Added (" +
+																	   std::to_string(Short) + " short Mains, " + std::to_string(NewsSeen) + " in News)" + Bad);
+}
+
+/** SPEC v1.7 §2.4.3, §2.15.1: RacePoints is net::Points under Standard (every field from 5 entries) and, under Main, net::Points inside
+ *  PaidPlaces and 0 past it (net::Points' places 12-15% score nothing), on fields 2-3,000 at four buy-ins and on every rival Main of
+ *  2026-2028. Planted: points for places 12-15%. */
+void FestRacePointsNet()
+{
+	using ss::Chips;
+	const ss::PayoutCurve Main = ss::PayoutCurve::Main;
+	const Chips BuyIns[] = {110, 5500, 21500, 210000};
+	int Places = 0, Cut = 0, SmallDiff = 0;
+	std::string Bad;
+	for (int N = 2; N <= 3000; N += N < 200 ? 1 : 37)
+	{
+		const int Paid = ss::PaidPlaces(N, Main);
+		for (const Chips B : BuyIns)
+		{
+			for (int P = 1; P <= std::min(N, N / 5 + 3); ++P)
+			{
+				++Places;
+				const double Points = ss::net::Points(P, N, B);
+				const double Std = ss::fest::RacePoints(P, N, B, ss::PayoutCurve::Standard);
+				const double Race = ss::fest::RacePoints(P, N, B, Main);
+				SmallDiff += Std != Points && N < 5 ? 1 : 0;
+				Cut += P > Paid && Points > 0.0 ? 1 : 0;
+				if ((Std != Points && N >= 5) || Race != (P <= Paid ? Points : 0.0))
+				{
+					Bad += Bad.size() < 400 ? " " + std::to_string(P) + " of " + std::to_string(N) + " at " + std::to_string(B) + " (net::Points " + std::to_string(Points) +
+							", Standard " + std::to_string(Std) + ", Main " + std::to_string(Race) + ")"
+											: std::string();
+				}
+			}
+		}
+	}
+	for (const FestNetMain& M : FestNetMains(2026, 2028))
+	{
+		const int Paid = ss::PaidPlaces(M.E.Entries, Main);
+		const double Last = ss::fest::RacePoints(Paid, M.E.Entries, M.T->BuyInCents, M.T->Curve);
+		const double Past = ss::fest::RacePoints(Paid + 1, M.E.Entries, M.T->BuyInCents, M.T->Curve);
+		if (Last <= 0.0 || Past != 0.0 || ss::net::Points(Paid + 1, M.E.Entries, M.T->BuyInCents) <= 0.0)
+		{
+			Bad += " " + M.F->Name + "'s Main (place " + std::to_string(Paid) + " " + std::to_string(Last) + ", " + std::to_string(Paid + 1) + " " + std::to_string(Past) + ")";
+		}
+	}
+	std::printf("festivals: race points on %d places (fields 2-3,000, four buy-ins): %d past the Main curve's paid places that net::Points scores; %d Standard differences under 5 "
+				"entries\n",
+		Places, Cut, SmallDiff);
+	Expect(Cut > 0 && Bad.empty(), "RacePoints is net::Points under Standard and, under the Main curve, only for the paid places (0 past PaidPlaces; every rival Main's first "
+								   "place out of the money scores nothing)" + Bad);
+}
+
+/** SPEC v1.7 §2.4.3 (the table talk's row), R-9, §2.15.1: a Main-curve result at PaidPlaces + 1 with no prize may claim the bubble and
+ *  one at 15% + 1 may not (and the reverse under Standard); StoryText writes the 7th field only for Main and StoryOf reads it back, old
+ *  six-field stories parse as Standard. Planted: the talk rule left at 15% (G/TableTalk.cpp:1419). */
+void FestTalkBubbleCurveNet()
+{
+	namespace talk = ss::talk;
+	const int N = 700;
+	const int MainPaid = ss::PaidPlaces(N, ss::PayoutCurve::Main);
+	const int StdPaid = ss::PaidPlaces(N, ss::PayoutCurve::Standard);
+	const auto Result = [N](int Place, ss::PayoutCurve Curve) {
+		talk::Result R;
+		R.Day = 65;
+		R.Event = "FEIGN 10: $55 MAIN EVENT";
+		R.Place = Place;
+		R.Entries = N;
+		R.Prize = 0;
+		R.Online = true;
+		R.Curve = Curve;
+		return R;
+	};
+	const auto Claims = [](const talk::Result& R) {
+		ss::life::LiveVoice V;
+		V.Name = "Festnet Voice";
+		V.Story = talk::StoryText({R});
+		talk::Context C;
+		C.Self = &V;
+		C.Vars = {{"Topic", "bubble"}, {"Record", "0"}, {"Day", "66"}};
+		return !talk::Line(talk::Moment::Small, C).Text.empty();
+	};
+	const bool MainBubble = Claims(Result(MainPaid + 1, ss::PayoutCurve::Main));
+	const bool MainAtStd = Claims(Result(StdPaid + 1, ss::PayoutCurve::Main));
+	const bool StdBubble = Claims(Result(StdPaid + 1, ss::PayoutCurve::Standard));
+	const bool StdAtMain = Claims(Result(MainPaid + 1, ss::PayoutCurve::Standard));
+	std::printf("festivals: the bubble talk at %d entries: the Main curve pays %d (place %d claims it: %s; place %d: %s), Standard %d (place %d: %s; place %d: %s)\n", N, MainPaid,
+		MainPaid + 1, MainBubble ? "yes" : "no", StdPaid + 1, MainAtStd ? "yes" : "no", StdPaid, StdPaid + 1, StdBubble ? "yes" : "no", MainPaid + 1, StdAtMain ? "yes" : "no");
+	Expect(MainPaid == 84 && StdPaid == 105 && MainBubble && !MainAtStd && StdBubble && !StdAtMain,
+		"a Main-curve result one past PaidPlaces with no prize may claim the bubble and one at 15% + 1 may not (Standard the other way round)");
+
+	// The story's 7th field: written only for Main, read back; old stories (six fields) and a 7th of 0 read Standard.
+	talk::Result A = Result(12, ss::PayoutCurve::Main);
+	A.Prize = 41500;
+	const talk::Result B = Result(StdPaid + 1, ss::PayoutCurve::Standard);
+	const std::string Text = talk::StoryText({A, B});
+	const std::vector<talk::Result> Back = talk::StoryOf(Text);
+	const size_t Bar = Text.find('|');
+	const std::string First = Text.substr(0, Bar), Second = Bar == std::string::npos ? std::string() : Text.substr(Bar + 1);
+	const bool Fields = std::count(First.begin(), First.end(), '^') == 6 && std::count(Second.begin(), Second.end(), '^') == 5;
+	const auto Same = [](const talk::Result& X, const talk::Result& Y) {
+		return X.Day == Y.Day && X.Event == Y.Event && X.Place == Y.Place && X.Entries == Y.Entries && X.Prize == Y.Prize && X.Online == Y.Online && X.Curve == Y.Curve;
+	};
+	const std::vector<talk::Result> Old = talk::StoryOf("12^Embercrest Nightly $120^2^88^214000^0|9^RiverLine Daily $22^7^410^61000^1^0");
+	const bool OldOk = Old.size() == 2 && Old[0].Curve == ss::PayoutCurve::Standard && Old[0].Place == 2 && Old[0].Prize == 214000 && Old[1].Curve == ss::PayoutCurve::Standard &&
+		Old[1].Online && Old[1].Entries == 410;
+	Expect(Fields && Back.size() == 2 && Same(Back[0], A) && Same(Back[1], B) && OldOk,
+		"StoryText writes the curve as a 7th field only when it isn't Standard and StoryOf reads it back; old six-field stories (and a 7th of 0) read Standard (\"" + Text + "\")");
+}
+
 /** fest::All()'s first build, timed once the networks exist (SPEC §2.14: built once, <= 1 ms; asserted under SS_PERF=1 only). */
 void FestNetAllBudget()
 {
@@ -2851,6 +3777,39 @@ void SegNet()
 	if (Only("FestRcopKept"))
 	{
 		FestRcopKeptNet();
+	}
+	// FN-5: the juice.
+	if (Only("FestCurveShape"))
+	{
+		FestCurveShapeNet();
+	}
+	if (Only("FestCurveAgrees"))
+	{
+		FestCurveAgreesNet();
+	}
+	if (Only("FestAddedMoneyAgrees"))
+	{
+		FestAddedMoneyAgreesNet();
+	}
+	if (Only("FestGuarantees"))
+	{
+		FestGuaranteesNet();
+	}
+	if (Only("FestNoRiverLineJuice"))
+	{
+		FestNoRiverLineJuiceNet();
+	}
+	if (Only("FestOverlayIgnoresAdded"))
+	{
+		FestOverlayIgnoresAddedNet();
+	}
+	if (Only("FestRacePoints"))
+	{
+		FestRacePointsNet();
+	}
+	if (Only("FestTalkBubbleCurve"))
+	{
+		FestTalkBubbleCurveNet();
 	}
 }
 } // namespace festivals_test

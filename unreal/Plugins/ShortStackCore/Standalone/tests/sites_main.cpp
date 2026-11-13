@@ -53,6 +53,7 @@
 #include "ShortStack/AI/View.h"
 #include "ShortStack/Cards.h"
 #include "ShortStack/Game/Autoplay.h"
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/SiteShow.h"
 #include "ShortStack/Hand.h"
 #include "ShortStack/Rng.h"
@@ -2647,6 +2648,41 @@ void SoftBound(int Count)
 	Expect(IgFee == 61 && Micro0 > 0.0 && Soft0 + Ceiling <= 1.5 * Micro0 && Soft0 + Window <= 1.5 * Micro0,
 		"the soft bound with promotional EV: Ignite's ROI " + SitesNum(100.0 * Soft0) + "% plus the Governor's most (50%, " + SitesNum(100.0 * Ceiling) +
 			" points; 75% in the welcome window, " + SitesNum(100.0 * Window) + ") is at most 1.5x RiverLine's " + SitesNum(100.0 * Micro0) + "%");
+	// Update 4 G1 (SPEC v1.7 §2.4.2, §2.15.3, the lead's P-3; F-net, FN-5; PLAN_FNET Q13 and its Corrections item 10): the bound with
+	// the juice on top. PENNANT's Main (Ignite's championship: $10,000 added on a 1.0x guarantee) as an entrant sees it, from its
+	// instances 2027-2040 as the network draws them: the site money in its pool (E.Pool less what the field put in: the added money
+	// and any overlay paid) over the entries' buy-ins, averaged over the editions. Counted as if every $5.50 sit-and-go carried it
+	// (an upper bound by construction: it is once a year), on top of the Governor's 50%: asserted at most 1.5x RiverLine's; the
+	// welcome window's 75% beside it is printed only.
+	double PennantEv = 0.0;
+	int Editions = 0;
+	for (const ss::fest::Festival& F : ss::fest::All())
+	{
+		if (F.Which != ss::fest::Brand::Pennant || F.Year < 2027 || F.Year > 2040)
+		{
+			continue;
+		}
+		const net::Network& Ig = net::Site(F.Site);
+		net::EventInstance E;
+		if (!Ig.Next(F.MainId, F.MainStart - 1.0, E))
+		{
+			continue;
+		}
+		const net::EventTemplate& T = Ig.TemplateOf(E);
+		const Chips Each = static_cast<Chips>(std::llround(static_cast<double>(T.BuyInCents) * Ig.Definition().Rake.PrizeShare(T)));
+		PennantEv += static_cast<double>(E.Pool - Each * static_cast<Chips>(E.Entries)) / (static_cast<double>(T.BuyInCents) * static_cast<double>(std::max(1, E.Entries)));
+		++Editions;
+	}
+	PennantEv /= std::max(1, Editions);
+	std::printf("soft bound with PENNANT's Main: its entrant EV over %d editions (2027-2040; the added money and the overlay paid over the entries' buy-ins) %+.1f%%; "
+				"Ignite %+.1f%% + the Governor's 50%% + PENNANT's = %+.1f%% (ratio %.2f), with the welcome window's 75%% %+.1f%% (%.2f, printed only), against RiverLine's %+.1f%%\n",
+		Editions, 100.0 * PennantEv, 100.0 * Soft0, 100.0 * (Soft0 + Ceiling + PennantEv), Micro0 > 0.0 ? (Soft0 + Ceiling + PennantEv) / Micro0 : 0.0,
+		100.0 * (Soft0 + Window + PennantEv), Micro0 > 0.0 ? (Soft0 + Window + PennantEv) / Micro0 : 0.0, 100.0 * Micro0);
+	Expect(Editions == 14 && PennantEv > 0.0 && Micro0 > 0.0 && Soft0 + Ceiling + PennantEv <= 1.5 * Micro0,
+		"the soft bound with PENNANT's Main: Ignite's ROI " + SitesNum(100.0 * Soft0) + "% plus the Governor's 50% (" + SitesNum(100.0 * Ceiling) + " points) and PENNANT "
+			"Main's entrant EV (" + SitesNum(100.0 * PennantEv) + " points over " + std::to_string(Editions) + " editions) is at most 1.5x RiverLine's " + SitesNum(100.0 * Micro0) + "%");
+	Expect(std::fabs(PennantEv - 0.141) <= 0.02, "PENNANT Main's entrant EV from its 2027-2040 instances (" + SitesNum(100.0 * PennantEv) +
+													  "%) is SPEC §2.4.2's +14.1% within 2 points: the line carries the Main's added money once");
 }
 
 void SitesCopy()

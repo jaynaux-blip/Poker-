@@ -403,10 +403,12 @@ int SeatsWon(const Festival& /*F*/, double /*Now*/)
 	return 0;
 }
 
-double RacePoints(int Place, int Entries, Chips BuyInCents, PayoutCurve /*Curve*/)
+double RacePoints(int Place, int Entries, Chips BuyInCents, PayoutCurve Curve)
 {
-	// Phase A: net::Points (every Standard event's points but the four smallest fields'); G1 cuts it at PaidPlaces(Entries, Curve).
-	return net::Points(Place, Entries, BuyInCents);
+	// Update 4 G1 (SPEC v1.7 §2.4.3; F-net, FN-5): race points follow the curve. net::Points scores its own top 15%; the race
+	// counts only the places the field paid (PaidPlaces, PayoutFor(...).size()), so under Main only cashes score ("every cash
+	// scores" is true) and under Standard it is net::Points for every field but the four smallest (Paid is min(N - 1, ...)).
+	return Place <= PaidPlaces(Entries, Curve) ? net::Points(Place, Entries, BuyInCents) : 0.0;
 }
 
 std::vector<life::Mark> Marks(double /*From*/, double /*To*/, double /*Now*/)
