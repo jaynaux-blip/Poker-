@@ -69,6 +69,7 @@ namespace rlignite_detail
 // UI/RiverLineIgnite.cpp: the event sheet over the floor, and the laptop's Ignite state dropped.
 void IgniteOpenSheet(RiverLine& RL, const std::string& EventId, double Now);
 void IgniteForget(const RiverLine* RL);
+bool IgniteSheetOpen(const RiverLine* RL);
 // UI/RiverLineIgnite.cpp (FH-3b): the bandstand's festival pick and the Lighthouse's festival line.
 bool IgniteBandstandFest(double World, net::EventInstance& Out, std::string& Label);
 std::string IgniteLighthouseAt(double World);
@@ -1505,13 +1506,16 @@ std::string HostsStripRace(const ss::fest::YourLineView& V)
 }
 
 /** FH-4B: event E's register sheet on its host, settled: RiverLine's lobby with E selected (its event panel), Ignite's sheet over the
- *  floor, RunItTwice's Prospectus held on E (rlrit_detail::RitHoldSelection, which draws it off THE BOARD's window). */
+ *  floor, RunItTwice's Prospectus held on E (rlrit_detail::RitHoldSelection, which draws it off THE BOARD's window). Ignite's floor is
+ *  drawn once before the sheet opens: the laptop's first Ignite frame claims its state for the session (RiverLine::IgniteFrame starts
+ *  it afresh for a new owner), which would drop a sheet opened before it (fix round 1). */
 ss::ui::DrawList HostsStripSheet(HostsLaptop& P, const ss::net::EventInstance& E)
 {
 	const ss::net::SiteId Site = ss::net::SiteOf(E.Id);
 	if (Site == ss::net::SiteId::Ignite)
 	{
 		P.OpenPlay();
+		P.Frame();
 		ss::ui::rlignite_detail::IgniteOpenSheet(P.RL, E.Id, P.Now);
 	}
 	else if (Site == ss::net::SiteId::RunItTwice)
@@ -1539,6 +1543,30 @@ bool HostsNoStrip(const ss::ui::DrawList& L, const std::string& Head)
 		}
 	}
 	return true;
+}
+
+/** FH-4B (fix round 1): L is E's own register sheet, so a "no strip" on it tests something: the laptop's selection is E and the sheet
+ *  draws a line only it draws: Ignite's sheet up (rlignite_detail::IgniteSheetOpen) with its "YOUR IGNITE BALANCE" line; RiverLine's
+ *  event panel with E's sub line ("NL Hold'em · {Speed} · {N}-min levels · {N}-max"); RunItTwice's Prospectus with E's "RIT-{HHMM}". */
+bool HostsOnSheet(const HostsLaptop& P, const ss::net::EventInstance& E, const ss::ui::DrawList& L)
+{
+	const ss::net::SiteId Site = ss::net::SiteOf(E.Id);
+	if (P.RL.SelectedEvent() != E.Id)
+	{
+		return false;
+	}
+	if (Site == ss::net::SiteId::Ignite)
+	{
+		return ss::ui::rlignite_detail::IgniteSheetOpen(&P.RL) && ui_test::DrewRun(L, "YOUR IGNITE BALANCE");
+	}
+	if (Site == ss::net::SiteId::RunItTwice)
+	{
+		const int Min = static_cast<int>(std::fmod(E.Start, ss::net::MinutesPerDay));
+		return ui_test::DrewRun(L, "RIT-" + std::to_string(Min / 60 * 100 + Min % 60));
+	}
+	const ss::net::EventTemplate& T = ss::net::Site(Site).TemplateOf(E);
+	return ui_test::DrewRun(L, std::string(T.Omaha ? "PL Omaha" : "NL Hold'em") + " \xC2\xB7 " + T.Speed + " \xC2\xB7 " + std::to_string(static_cast<int>(T.LevelMinutes)) + "-min levels \xC2\xB7 " +
+		std::to_string(T.TableSize) + "-max");
 }
 
 /** FH-4B: the runs drawn as Lines cross no other text run on L from the first run reading After on ("" from the first run; Ignite's
@@ -1595,7 +1623,7 @@ void HostsStripPlay(HostsLaptop& P, const std::string& Id, int Place, ss::Chips 
 }
 
 /** FestYourStrip's sheets half on one host (§2.8.2; FH-4B): edition F on its first day at 15:00: before the hero plays F, a numbered
- *  event's sheet draws no strip; after a cash in one of F's events in play, the same sheet and a satellite's draw "YOUR {SHORT}", U10's
+ *  event's sheet draws no strip (that list checked to be the event's own sheet first, HostsOnSheet: fix round 1); after a cash in one of F's events in play, the same sheet and a satellite's draw "YOUR {SHORT}", U10's
  *  line in its singular ("1 event · 1 cash · best ...") and the race at the head's right while the hero scores, from fest::YourLine;
  *  a plain series event's sheet draws none. Second (Plural): an unpaid finish makes it "2 events · 1 cash". */
 void FestYourStripHost(HostsLaptop& P, const ss::fest::Festival& F, bool Plural, std::string& Report)
@@ -1618,6 +1646,7 @@ void FestYourStripHost(HostsLaptop& P, const ss::fest::Festival& F, bool Plural,
 	}
 	ui_test::Expect(rn::NetSheetEdition(Net, Later) == &F && rn::NetSheetEdition(Net, Sat) == &F, ("FestYourStrip (sheets): " + F.Name + "'s event and satellite belong to it").c_str());
 	const ss::ui::DrawList Before = HostsStripSheet(P, Later);
+	ui_test::Expect(HostsOnSheet(P, Later, Before), ("FestYourStrip (sheets): before the hero plays " + F.Name + ", " + Net.NameOf(Later) + "'s own sheet is up").c_str());
 	ui_test::Expect(!ss::fest::YourLine(F, &P.S.Living()).Shown && HostsNoStrip(Before, Head),
 		("FestYourStrip (sheets): before the hero plays " + F.Name + ", " + Net.NameOf(Later) + "'s sheet draws no YOUR strip").c_str());
 	HostsStripPlay(P, Playing.Id, 3, std::max<ss::Chips>(100, Net.TemplateOf(Playing).BuyInCents * 6));
@@ -1643,6 +1672,7 @@ void FestYourStripHost(HostsLaptop& P, const ss::fest::Festival& F, bool Plural,
 	if (HasPlain)
 	{
 		const ss::ui::DrawList OnPlain = HostsStripSheet(P, Plain);
+		ui_test::Expect(HostsOnSheet(P, Plain, OnPlain), ("FestYourStrip (sheets): the plain series event " + Net.NameOf(Plain) + "'s own sheet is up").c_str());
 		ui_test::Expect(rn::NetSheetEdition(Net, Plain) == nullptr && HostsNoStrip(OnPlain, Head),
 			("FestYourStrip (sheets): the plain series event " + Net.NameOf(Plain) + "'s sheet draws no YOUR strip").c_str());
 	}
@@ -1768,7 +1798,7 @@ void FestYourStripTickets(HostsLaptop& P, std::string& Report)
 	{
 		P.S.Life.Tickets[Ig.TicketOf(Ig.TemplateOf(Plain).Id)] = 1;
 		const ss::ui::DrawList PlainSheet = HostsStripSheet(P, Plain);
-		ui_test::Expect(!ui_test::Drew(PlainSheet, "Good on "), ("FestYourStrip (U37): a plain event's sheet with its own ticket held reads no U37 (" + Ig.NameOf(Plain) + ")").c_str());
+		ui_test::Expect(HostsOnSheet(P, Plain, PlainSheet) && !ui_test::Drew(PlainSheet, "Good on "), ("FestYourStrip (U37): a plain event's sheet with its own ticket held reads no U37 (" + Ig.NameOf(Plain) + ")").c_str());
 		P.S.Life.Tickets.erase(Ig.TicketOf(Ig.TemplateOf(Plain).Id));
 	}
 	ss::ui::rlignite_detail::IgniteForget(&P.RL);
