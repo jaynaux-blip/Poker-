@@ -28,6 +28,9 @@
 // and card backs of the ten looks, cached, within 1.5k and 300; the three festival tables within 22k / 19k wearing their looks; no
 // sponsor mark on REIGN's), and the page halves of FestLeak and FestContrast. Emits F-look's seven pages (QF-18): fest_takeover_rl_lobby,
 // fest_takeover_ig_play, fest_takeover_ig_afterburner, fest_takeover_rit_board, fest_table_rl, fest_table_ig and fest_table_rit.
+// G1 FL-final: FestSkinRule's Afterburner page reads the skin without the attraction's foot sign (FH-3b's fill puts FEIGN's arch
+// and its Mirror Mint sign on FEIGN's day 2 at 02:00; the attraction keeps its look every hour, only the palette yields). Test-only.
+// (Carried into F-hubs stream A for FH-7 by the lead, from F-look's 8233790, with fhubs_to_flook_1.)
 #include "UiSeg.h"
 #include "CopyLint.h"
 #include "Trademarks.h"
@@ -2516,6 +2519,63 @@ int SponsorMarksLook(const ss::ui::DrawList& L, const ss::ui::Rect& R)
 	return Count;
 }
 
+/** SponsorMarksLook beyond a base drawing of the same scene inside R: each sponsor-ink vertex or sponsor run that the base doesn't hold
+ *  at the same place in the same colour (or text). The REIGN table is drawn on the seats WRIT's table was drawn on a moment before, so
+ *  what a seated player brings (an avatar disc in a colour a sponsor brand shares: Stacked Apparel's amber 0xf59e0b on a player's
+ *  avatar, F-hubs' FH-7 tree with F-world's world) cancels, and only what REIGN's own look draws on its felt counts. (fhubs_to_flook_1) */
+int SponsorMarksOverLook(const ss::ui::DrawList& L, const ss::ui::DrawList& Base, const ss::ui::Rect& R)
+{
+	std::set<std::string> Names;
+	std::set<uint32_t> Inks;
+	for (const ss::sponsor::Brand& B : ss::sponsor::Brands())
+	{
+		Names.insert(B.Name);
+		Names.insert(B.Short);
+		uint32_t Ground = 0, Thread = 0;
+		if (ss::ui::sponsorart::PatchColors(B.Id, Ground, Thread))
+		{
+			Inks.insert(Ground);
+			Inks.insert(Thread);
+		}
+		Inks.insert(B.Color);
+		Inks.insert(B.Ink);
+	}
+	const auto Inside = [&R](float X, float Y) { return X >= R.X && X <= R.X + R.W && Y >= R.Y && Y <= R.Y + R.H; };
+	const auto Marks = [&](const ss::ui::DrawList& D) {
+		std::multiset<std::string> Out;
+		for (const ss::ui::DrawCmd& Cmd : D.Cmds)
+		{
+			if (Cmd.Type == ss::ui::DrawCmd::Kind::Text)
+			{
+				if (Inside(Cmd.Text.X, Cmd.Text.BaselineY) && (Names.count(Cmd.Text.Text) || Inks.count(RgbLook(Cmd.Text.Col))))
+				{
+					Out.insert("t" + Cmd.Text.Text + "@" + std::to_string(std::lround(Cmd.Text.X * 4.0f)) + "," + std::to_string(std::lround(Cmd.Text.BaselineY * 4.0f)));
+				}
+				continue;
+			}
+			for (uint32_t K = 0; Cmd.Type == ss::ui::DrawCmd::Kind::Triangles && K < Cmd.VertexCount; ++K)
+			{
+				const ss::ui::Vertex& V = D.Vertices[Cmd.VertexStart + K];
+				if (V.Col.A > 0.05f && Inside(V.X, V.Y) && Inks.count(RgbLook(V.Col)))
+				{
+					Out.insert("v" + std::to_string(RgbLook(V.Col)) + "@" + std::to_string(std::lround(V.X * 4.0f)) + "," + std::to_string(std::lround(V.Y * 4.0f)));
+				}
+			}
+		}
+		return Out;
+	};
+	std::multiset<std::string> Left = Marks(L);
+	for (const std::string& K : Marks(Base))
+	{
+		const auto It = Left.find(K);
+		if (It != Left.end())
+		{
+			Left.erase(It);
+		}
+	}
+	return static_cast<int>(Left.size());
+}
+
 /** One drawing on a fresh canvas at a scale: its draw list (the art's fragments stay cached for the thread). */
 ss::ui::DrawList OnCanvasLook(const std::function<void(ss::ui::Canvas&)>& Paint, float Scale)
 {
@@ -2648,9 +2708,13 @@ void FestTableBudgets(const TakeoverLook& T)
 	const int ReignRail = RailInk(T.ReignTable.L1);
 	const int WritRail = Writ ? RailInk(Writ->L1) : -1;
 	const ss::ui::Rect FeltR{170.0f, 210.0f, 840.0f, 440.0f};
-	std::printf("  takeover REIGN table: %d Rose Brass rail vertices (WRIT's %d); sponsor marks on the felt %d\n", ReignRail, WritRail, SponsorMarksLook(T.ReignTable.L1, FeltR));
+	// fhubs_to_flook_1 (F-hubs' FH-7): the REIGN felt's sponsor marks beyond WRIT's table on the same seats (a seated player's avatar can
+	// share a sponsor brand's colour; REIGN's look must add none).
+	const int ReignOwn = Writ ? SponsorMarksOverLook(T.ReignTable.L1, Writ->L1, FeltR) : SponsorMarksLook(T.ReignTable.L1, FeltR);
+	std::printf("  takeover REIGN table: %d Rose Brass rail vertices (WRIT's %d); sponsor marks on the felt %d, %d beyond WRIT's table on the same seats\n", ReignRail, WritRail,
+		SponsorMarksLook(T.ReignTable.L1, FeltR), ReignOwn);
 	ExpectLook(T.ReignTable.Drawn && ReignRail >= 16 && WritRail == 0, "FestTableBudgets: a REIGN table's rail is Rose Brass on the club's own cloth, a WRIT table's is not");
-	ExpectLook(T.ReignTable.Drawn && SponsorMarksLook(T.ReignTable.L1, FeltR) == 0, "FestTableBudgets: no sponsor mark on the REIGN felt");
+	ExpectLook(T.ReignTable.Drawn && ReignOwn == 0, "FestTableBudgets: no sponsor mark on the REIGN felt");
 }
 
 /** Each look of a host through the dev look (ss.Fest.Look) on the page Lap shows, at both scales; the dev look off after. */
@@ -2694,6 +2758,21 @@ bool TextWearsLook(const ss::ui::DrawList& L, uint32_t Rgb)
 	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
 	{
 		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Col.A > 0.5f && RgbLook(Cmd.Text.Col) == Rgb)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+/** TextWearsLook for the page's skin: the attraction's foot sign ("STEP INSIDE · THE HUB", §2.11 U32) left out. The attraction stands
+ *  in its look's colours every hour its festival is Live (§2.7.4), Afterburner Hours included; only the palette yields to the night
+ *  (§2.7.3). G1 FL-final: with F-hubs' band fill (FH-3b) merged, FEIGN's day 2 at 02:00 shows the arch and its Mirror Mint sign. */
+bool SkinTextWearsLook(const ss::ui::DrawList& L, uint32_t Rgb)
+{
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Col.A > 0.5f && RgbLook(Cmd.Text.Col) == Rgb && Cmd.Text.Text != festart::festart_detail::FestHubSign())
 		{
 			return true;
 		}
@@ -2830,7 +2909,8 @@ TakeoverLook TakeoverPagesLook()
 			continue;
 		}
 		const festart::FestivalLook& F = festart::LookOf(P.Look == Brand::None ? Brand::Feign : P.Look);
-		bool Worn = TextWearsLook(P.L1, NightAccent) && !TextWearsLook(P.L1, F.Accent) && !TextWearsLook(P.L1, F.Accent2) && !TextWearsLook(P.L1, F.Gold);
+		// Afterburner's page: the night's accent on its text and none of FEIGN's skin (the arch's own sign wears FEIGN's look while Live).
+		bool Worn = TextWearsLook(P.L1, NightAccent) && !SkinTextWearsLook(P.L1, F.Accent) && !SkinTextWearsLook(P.L1, F.Accent2) && !SkinTextWearsLook(P.L1, F.Gold);
 		if (P.Look != Brand::None)
 		{
 			// The look's swapped tokens (those it changes on its host: REIGN's Accent2 alone).
