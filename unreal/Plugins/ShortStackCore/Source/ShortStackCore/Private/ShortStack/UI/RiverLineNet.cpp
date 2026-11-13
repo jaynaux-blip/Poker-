@@ -1773,6 +1773,14 @@ std::string NetTickerFest(double World, std::string& Series)
 	const int Days = F->LastDay - F->FirstDay + 1;
 	return Sr->Short + " \xC2\xB7 DAY " + std::to_string(std::min(Days, std::max(1, Today - F->FirstDay + 1))) + " OF " + std::to_string(Days);
 }
+
+/** The wire's series item (today's: the series on now or next, Network::CurrentSeries) unless it is the festival whose own item is on
+ *  the wire (FestSeries, from NetTickerFest): nullptr then, so the wire never names it twice (FH-3a). */
+const net::SeriesInfo* NetWireSeries(const net::Network& Net, double World, const std::string& FestSeries)
+{
+	const net::SeriesInfo* Sr = Net.CurrentSeries(World);
+	return Sr && (FestSeries.empty() || Sr->Id != FestSeries) ? Sr : nullptr;
+}
 } // namespace rlnet_detail
 
 void RiverLine::Ticker(const Rect& R, double Now)
@@ -1811,8 +1819,7 @@ void RiverLine::Ticker(const Rect& R, double Now)
 		const festart::FestivalLook* FestLook = Fs ? festart::LookFor(*Fs) : nullptr;
 		Items.insert(Items.begin() + 1, Item{FestItem, FestLook && FestLook->Accent ? Hex(FestLook->Accent) : Fs ? Hex(Fs->Color) : pal::Gold});
 	}
-	const net::SeriesInfo* WireSeries = Net.CurrentSeries(World);
-	if (const net::SeriesInfo* Sr = WireSeries && WireSeries->Id != FestSeries ? WireSeries : nullptr)
+	if (const net::SeriesInfo* Sr = NetWireSeries(Net, World, FestSeries))
 	{
 		const int Day = net::DayOf(World);
 		Items.push_back({Day >= Sr->FirstDay ? Sr->Name + ": day " + std::to_string(Day - Sr->FirstDay + 1) + " of " + std::to_string(Sr->LastDay - Sr->FirstDay + 1)

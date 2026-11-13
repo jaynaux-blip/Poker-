@@ -55,6 +55,7 @@ const fest::Festival* NetHubPick(net::SiteId Site, bool HasPick, const fest::Fes
 const fest::Festival* NetHubEdition(net::SiteId Site, const std::string& SeriesId, double World);
 // UI/RiverLineNet.cpp (FH-3a): RiverLine's festival on the taskbar's wire.
 std::string NetTickerFest(double World, std::string& Series);
+const net::SeriesInfo* NetWireSeries(const net::Network& Net, double World, const std::string& FestSeries);
 } // namespace rlnet_detail
 namespace rlignite_detail
 {
@@ -1309,7 +1310,15 @@ void FestHonestLines()
 	HostsOpenRiverLine(P, ss::ui::RiverLine::Page::Lobby);
 	const ss::ui::DrawList Soon = P.Settled();
 	ui_test::Expect(ui_test::DrewRun(Soon, HostsWantWire(*Rcop, Rc->Short, BuildDay)), ("FestHonestLines: RCOP's Buildup puts " + HostsWantWire(*Rcop, Rc->Short, BuildDay) + " on the wire").c_str());
-	ui_test::Expect(!ui_test::Drew(Soon, Rc->Name + " starts"), "FestHonestLines: the festival's item stands in for its series' own (no second RCOP item)");
+	{
+		// The festival's item stands in for its series' own: on RCOP's days its series is the wire's, and it is named once.
+		const double LiveAt = static_cast<double>(Rcop->FirstDay + 7) * ss::net::MinutesPerDay + 12.0 * 60.0;
+		std::string LiveSeries;
+		rn::NetTickerFest(LiveAt, LiveSeries);
+		const ss::net::SeriesInfo* Cur = Net.CurrentSeries(LiveAt);
+		ui_test::Expect(Cur && Cur->Id == Rcop->SeriesId && LiveSeries == Rcop->SeriesId && !rn::NetWireSeries(Net, LiveAt, LiveSeries) && rn::NetWireSeries(Net, LiveAt, std::string()) == Cur,
+			"FestHonestLines: the festival's item stands in for its series' own (no second RCOP item on the wire)");
+	}
 	{
 		ui_test::TableMeasurer M;
 		ss::ui::DrawList L;
