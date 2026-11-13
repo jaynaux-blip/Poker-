@@ -2696,7 +2696,8 @@ void SitesCopy()
 	Expect(Silent, "the sites' copy never mentions AI, bots or autoplay");
 	// The trademark screen over the sites, their reps, series, events, promotions and methods: no real site, wallet, platform,
 	// format or product (tests/Trademarks.h, both tiers, whole words), none of the ten closed sites the world already tells of
-	// and no drink brand (the screen's own list, matched anywhere as before).
+	// and no drink brand (the screen's own list, matched anywhere as before). Update 4 G1 (SPEC v1.7 §2.15.3; F-net, FN-4b): a
+	// series' Title too (SeriesInfo::Title: PUSH's, WRIT's and GRIT's full titles, on the hub banner and the strip's popover).
 	const char* Real[] = {"northpot", "bluffharbor", "aceline", "chipcity", "felt republic", "pocketrocket", "riverbend", "saltwater poker", "cardroom 88", "tiltproof",
 		"monster", "red bull", "rockstar"};
 	std::vector<std::string> Names;
@@ -2715,6 +2716,10 @@ void SitesCopy()
 		for (const net::SeriesInfo& Sr : net::Site(S).Series())
 		{
 			Names.push_back(Sr.Name + " " + Sr.Tagline);
+			if (!Sr.Title.empty())
+			{
+				Names.push_back(Sr.Title);
+			}
 		}
 	}
 	for (const site::TierInfo& T : site::SecondRunTiers())

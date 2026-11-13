@@ -37,6 +37,10 @@
 // (a Main Satellite, a Mega and a Last Chance into each Ring Rush and Championship Online Main, 2027-2040) joins those editions'
 // Satellites through the same ticket walk, with no change here; Inventory adds RiverLine's four festivals (names, Shorts, taglines,
 // satellites), §2.2.2's other G1 strings and the five renamed seasonal series.
+//
+// G1, FN-4b (F-net; SPEC v1.7 §2.11; PLAN_FNET's Corrections item 1): Inventory is complete: the trophies and the championships' title
+// objects (P1-P12, through TrophyName), the crown Honor's title (C1) and every room word of the six rival plans
+// (G/NetworkFestival.cpp's NetSitesFestRoomWords), after the strings above.
 #include "ShortStack/Game/Festival.h"
 
 #include "ShortStack/Game/Life.h"
@@ -61,6 +65,8 @@ namespace netsites_detail
 {
 // G/NetworkFestival.cpp's (F-net's; no header): a rival festival plan row's Title flag (§2.3.1), by brand key and row stem.
 bool NetSitesFestTitle(const std::string& Brand, const std::string& Stem);
+/** G1, FN-4b (G/NetworkFestival.cpp): the six rival plans' room words, plan by plan (FEIGN, PUSH, PENNANT; WRIT, GRIT, REIGN). */
+std::vector<std::string> NetSitesFestRoomWords();
 } // namespace netsites_detail
 namespace calendar_detail
 {
@@ -487,7 +493,9 @@ std::vector<std::string> Inventory()
 	// RiverLine's four festivals' names, Shorts and taglines (RCOP 2026's with its computed guarantee) and their satellites (RCOP's step4
 	// and Mega, the trio into Ring Rush's and the Championship Online's Mains, H11-H13), then §2.2.2's other G1 strings (the rcop-main,
 	// Mega and Sunday Showdown blurbs, the Mega's seats text, the schedule post's body) and the five renamed seasonal series.
-	// RiverLine's numbered events keep today's strings (U9), so they are not listed.
+	// RiverLine's numbered events keep today's strings (U9), so they are not listed. FN-4b (§2.11): the trophies and the two title
+	// objects (P1-P12, as TrophyName prints them), the crown Honor's title (C1, a template: WorldFest's crown fills it with the
+	// edition's name) and the six rival plans' room words, every word a numbered name can draw.
 	std::vector<std::string> Out;
 	std::set<std::string> Seen;
 	const auto Add = [&Out, &Seen](const char* Kind, const std::string& Text) {
@@ -559,6 +567,16 @@ std::vector<std::string> Inventory()
 	for (const std::string& Name : net::calendar_detail::FestRenamedNames())
 	{
 		Add("label", Name);
+	}
+	for (int B = static_cast<int>(Brand::None) + 1; B < static_cast<int>(Brand::Count); ++B)
+	{
+		Add("label", TrophyName(static_cast<Brand>(B)));
+		Add("label", TrophyName(static_cast<Brand>(B), 1));
+	}
+	Add("label", "{Festival} {Year} Player of the Series");
+	for (const std::string& Word : net::netsites_detail::NetSitesFestRoomWords())
+	{
+		Add("label", Word);
 	}
 	return Out;
 }

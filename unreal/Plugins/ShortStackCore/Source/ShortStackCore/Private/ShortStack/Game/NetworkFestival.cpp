@@ -42,6 +42,9 @@
 // column, since NetSitesStep stops at $530; a $1,050 Main with $25,000 added and its one satellite, The Summons, with no seat
 // guarantee, FD-7; HighRoller for the world's high-roller mix, §3.2.1). Names, taglines and blurbs: §2.11's N1, N6, N9, N14, N17,
 // N18, G1, G6, H2, H6-H10, H14, B2, B6-B10.
+//
+// G1, FN-4b (F-net; SPEC v1.7 §2.11; PLAN_FNET's Corrections item 1): NetSitesFestRoomWords, the six plans' room words for
+// fest::Inventory (G/Festival.cpp), read from the plans themselves, so the inventory lists every word a numbered name can draw.
 #include "ShortStack/Game/Network.h"
 
 #include "SitesDetail.h"
@@ -359,6 +362,26 @@ bool NetSitesFestTitle(const std::string& Brand, const std::string& Stem)
 		}
 	}
 	return false;
+}
+
+/** G1, FN-4b (§2.11; read by fest::Inventory, G/Festival.cpp): every rival festival plan's room words, plan by plan in each site's
+ *  order (FEIGN, PUSH, PENNANT; WRIT, GRIT, REIGN), each list as its plan holds it. */
+std::vector<std::string> NetSitesFestRoomWords()
+{
+	std::vector<std::string> Out;
+	for (const NetSitesFestival* Plans : {IgniteFestivals, RunItTwiceFestivals})
+	{
+		const size_t Count = Plans == IgniteFestivals ? sizeof(IgniteFestivals) / sizeof(IgniteFestivals[0])
+													  : sizeof(RunItTwiceFestivals) / sizeof(RunItTwiceFestivals[0]);
+		for (size_t P = 0; P < Count; ++P)
+		{
+			for (int K = 0; K < Plans[P].RoomCount; ++K)
+			{
+				Out.push_back(Plans[P].Rooms[K]);
+			}
+		}
+	}
+	return Out;
 }
 } // namespace netsites_detail
 
