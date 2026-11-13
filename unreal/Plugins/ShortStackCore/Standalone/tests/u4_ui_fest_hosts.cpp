@@ -1169,6 +1169,21 @@ std::string HostsWhole(int64_t Cents)
 	return "$" + ss::Grouped((Cents + 50) / 100);
 }
 
+/** U24's and U23's "Last year: {Prize}." as the test reads it from the world's roll itself (world::FestRoll of F's brand: a row of the
+ *  year before F's with a Main that paid), "" when the roll holds none: the oracle the panel and the Career goal answer to, never
+ *  the function under test (FIX ROUND 1 (d)). */
+std::string HostsLastYearWant(const ss::world::World& W, const ss::fest::Festival& F)
+{
+	for (const ss::world::FestRollRow& Row : ss::world::FestRoll(W, F.Which))
+	{
+		if (Row.Year == F.Year - 1 && Row.Main && Row.Main->Prize > 0)
+		{
+			return "Last year: " + HostsWhole(Row.Main->Prize) + ".";
+		}
+	}
+	return std::string();
+}
+
 /** Every text run of a frame joined by single spaces (a wrapped paragraph reads back as its sentence). */
 std::string HostsText(const ss::ui::DrawList& L)
 {
@@ -1340,8 +1355,10 @@ void FestHonestLines()
 			Buys = Buys && T && ui_test::DrewRun(L, ss::net::BuyIn(T->BuyInCents));
 		}
 		ui_test::Expect(Buys && ui_test::DrewRun(L, ss::net::BuyIn(Main->BuyInCents)), "FestHonestLines: the ladder's buy-ins are step1..4's and the Main's");
-		const bool Roll = !rf::FestLastYear(P.S.Living(), *Rcop).empty();
-		ui_test::Expect(Roll == (Text.find("Last year") != std::string::npos), "FestHonestLines: the panel's \"Last year\" appears exactly when the roll holds last year's Main");
+		const std::string LastYear = HostsLastYearWant(P.S.Living(), *Rcop);
+		ui_test::Expect(LastYear.empty() ? Text.find("Last year") == std::string::npos : Text.find(LastYear) != std::string::npos,
+			(LastYear.empty() ? std::string("FestHonestLines: the RCOP Buildup panel draws no \"Last year\" while the roll holds no RCOP Main of last year")
+							  : "FestHonestLines: the RCOP Buildup panel reads \"" + LastYear + "\" from the roll").c_str());
 		ui_test::Expect(HostsClaim(L, true).empty(), ("FestHonestLines: the RCOP Buildup panel holds no typed past (" + HostsClaim(L, true) + ")").c_str());
 	}
 
@@ -1373,9 +1390,10 @@ void FestHonestLines()
 	const ss::ui::DrawList Career = P.Settled();
 	const std::string CareerText = HostsText(Career);
 	const std::string SeatGoal = "Win a " + ss::net::BuyIn(Main->BuyInCents) + " seat to the RCOP Main Event.";
-	const std::string WinGoal = "Win the RCOP Main Event." + (rf::FestLastYear(P.S.Living(), *Rcop).empty() ? std::string() : " " + rf::FestLastYear(P.S.Living(), *Rcop));
+	const std::string CareerLast = HostsLastYearWant(P.S.Living(), *Rcop);
+	const std::string WinGoal = "Win the RCOP Main Event." + (CareerLast.empty() ? std::string() : " " + CareerLast);
 	ui_test::Expect(CareerText.find(SeatGoal) != std::string::npos, ("FestHonestLines: the Career goal reads \"" + SeatGoal + "\" (U24)").c_str());
-	ui_test::Expect(CareerText.find(WinGoal) != std::string::npos && (WinGoal.size() > 24 || CareerText.find("Last year") == std::string::npos),
+	ui_test::Expect(CareerText.find(WinGoal) != std::string::npos && (!CareerLast.empty() || CareerText.find("Last year") == std::string::npos),
 		("FestHonestLines: the Career goal reads \"" + WinGoal + "\" (U24, \"Last year\" only from the roll)").c_str());
 	ui_test::Expect(HostsClaim(Career, false).empty(), ("FestHonestLines: the Career page holds no typed past (" + HostsClaim(Career, false) + ")").c_str());
 
