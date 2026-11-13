@@ -13,7 +13,7 @@
 // R-3's names. Draws, emits nothing.
 // G1 FL-5 (F-look): Ignite's band with the festival's attraction (§2.7.4): FestBandBudget (the band with each attraction within 15k at
 // both scales, its bulbs one cached row a chase step, asked of Canvas::IsCached through UI/IgniteArt.cpp's IgniteAttrBulbsKey; PLAY's
-// 34k / 400 is FL-final's, once F-hubs fills the band), FestBandstand's arch half (the arch in the Prize Counter's place only while FEIGN
+// 34k / 400 is FL-final's FestBandPlayLook), FestBandstand's arch half (the arch in the Prize Counter's place only while FEIGN
 // is Live, the tower, the pavilion, the foot sign, the puck) and FestCopyUi's art half (FestArtInventory by kind through the copy rules;
 // every word the attractions paint is listed). Draws the band straight onto its own canvases, emits nothing.
 // G1 FL-5, fix round 1: FestCopyUi's art half screens §1.2 item 5's avoided words after the fill (FestArtInventory's only screen for
@@ -28,6 +28,10 @@
 // and card backs of the ten looks, cached, within 1.5k and 300; the three festival tables within 22k / 19k wearing their looks; no
 // sponsor mark on REIGN's), and the page halves of FestLeak and FestContrast. Emits F-look's seven pages (QF-18): fest_takeover_rl_lobby,
 // fest_takeover_ig_play, fest_takeover_ig_afterburner, fest_takeover_rit_board, fest_table_rl, fest_table_ig and fest_table_rit.
+// G1 FL-final (F-look; PLAN_G1 item 17): FestBandBudget's PLAY half, FestBandPlayLook: Ignite's PLAY at most 34k vertices and 400
+// text runs with each attraction (FEIGN's arch, PUSH's tower, PENNANT's pavilion) on every evening of its first edition, on one
+// laptop visiting the three in date order. Asserted wherever the attraction is on the page (F-hubs' band fill, FH-3b, merged: the
+// integration's trees); a tree without the fill prints PLAY today and stops after FEIGN. Runs last (after the takeover pages).
 #include "UiSeg.h"
 #include "CopyLint.h"
 #include "Trademarks.h"
@@ -54,6 +58,7 @@
 #include <cstring>
 #include <functional>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <utility>
@@ -1663,8 +1668,8 @@ const Brand AttractionsLook[] = {Brand::Feign, Brand::Push, Brand::Pennant};
  * day's and Afterburner's tones, at its busiest (snow, the Sunday Blaze's fireworks and the series' bunting at once) on four beats; the
  * attraction's bulbs are one cached row a chase step (Canvas::IsCached holds IgniteAttrBulbsKey after a drawing and not before, a
  * second drawing copies the first exactly, two steps two keys, no attraction no key). Printed: every count, what the attraction adds
- * to the band, the Boardwalk pool's share of the chase rows, and PLAY: Ignite's PLAY at 34k vertices and 400 runs with an attraction
- * needs F-hubs' band fill (FH-3b), so FL-final asserts it.
+ * to the band and the Boardwalk pool's share of the chase rows. PLAY's half (34k vertices and 400 runs with each attraction) is
+ * FestBandPlayLook (FL-final), run after the takeover pages.
  * Planted bug: the arch's bulbs uncached.
  */
 void FestBandBudget()
@@ -1746,8 +1751,6 @@ void FestBandBudget()
 	ExpectLook(ia::IgniteAttrBulbsKey(BandLook(Brand::None, 0, 0, ss::site::show::Mood::PrimeTime, 41.0, false)) == 0 &&
 			ia::IgniteAttrBulbsKey(BandLook(Brand::Feign, 0, 10, ss::site::show::Mood::PrimeTime, 41.0, false)) == 0,
 		"FestBandBudget: no attraction, no bulbs row (Fest None, or FEIGN before its first day)");
-	std::printf("  band: PLAY: needs F-hubs' band fill (FH-3b fills IgniteBand's Fest, FestDay and FestDays); FL-final asserts PLAY <= 34k vertices and 400 runs "
-				"with each attraction (the attraction adds the vertices above and at most one text run)\n");
 }
 
 /**
@@ -2972,6 +2975,193 @@ void FestPagesLeakContrast(const TakeoverLook& T)
 	ExpectLook(Looks == 10 && Accents > 0 && Inks > 0 && Low == 0, "FestContrast: on every look's pages at both scales, accent text on Bg, Ink on Panel and Muted on Bg read at 4.5:1 or more" + LowWhat);
 	ExpectLook(RedSame, "FestContrast: a RunItTwice look sets no run in Signal Red its other looks don't (red is light, never ink)");
 }
+
+/** Every bulbs row Ignite's band can cache for attraction B (IgniteAttrBulbsKey over 30 beats, a 32nd of a beat apart: which steps are
+ *  lit depends on the beat alone, and 30 beats hold every step of the three chases, 30, 9 and 27 long). */
+std::set<uint64_t> AttrRowsLook(Brand B)
+{
+	std::set<uint64_t> Keys;
+	for (int Step = 0; Step < 32 * 30; ++Step)
+	{
+		Keys.insert(ia::IgniteAttrBulbsKey(BandLook(B, 1, 10, ss::site::show::Mood::PrimeTime, static_cast<double>(Step) / 32.0 * 60.0 / 124.0, false)));
+	}
+	Keys.erase(0);
+	return Keys;
+}
+
+/** Empties the Boardwalk pool (least recently used first) and puts its 120k back, so a drawing's rows are the only ones cached. */
+void EmptyBoardwalkLook()
+{
+	ss::ui::Canvas::SetPoolBudget(ss::ui::Canvas::CachePool::Boardwalk, 1);
+	ss::ui::Canvas::SetPoolBudget(ss::ui::Canvas::CachePool::Boardwalk, 0);
+}
+
+/** Whether a drawing (made just after EmptyBoardwalkLook) put attraction B on the page: one of its bulbs rows is cached, or (the arch
+ *  and the pavilion) its foot sign is lettered on it, so an uncached row can't hide the attraction from the budget. */
+bool AttrOnPageLook(Brand B, const std::set<uint64_t>& Rows, const ss::ui::DrawList& L, ui_test::TableMeasurer& M)
+{
+	ss::ui::DrawList Ask;
+	ss::ui::Canvas C(Ask, M, 1600.0f, 1000.0f, 1.0f);
+	for (const uint64_t K : Rows)
+	{
+		if (C.IsCached(K))
+		{
+			return true;
+		}
+	}
+	if (B != Brand::Push)
+	{
+		for (const ss::ui::TextItem& T : RunsLook(L))
+		{
+			if (T.Text == festart::festart_detail::FestHubSign())
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+/**
+ * FestBandBudget's PLAY half (§2.15.2's row: "Ignite's PLAY ≤ 34k / 400 runs with the arch, with the tower and with the pavilion";
+ * §2.8.10 / §8.5; G1 FL-final, PLAN_G1 item 17): Ignite's PLAY (the lobby, scale 1, settled, as tests/ui_seg_ignite.cpp's bench draws
+ * it) during each attraction's first edition on Ignite (FEIGN's arch, PUSH's tower, PENNANT's pavilion), on one laptop that visits
+ * the three in date order (its world starts at the first; each later edition is a day's catching up, not a new world's): on day 1 at
+ * 12:00, day 2 at 02:00 (Afterburner) and every day at 19:30, 20:30 and 21:00 (the evening's busiest, the bench's hour). Wherever the
+ * attraction is on the page (AttrOnPageLook: F-hubs' band fill, FH-3b, in the tree) PLAY is at most 34,000 vertices and 400 text
+ * runs, and the attraction is on the page at every moment. A tree without the fill (F-look's branch alone) has no attraction on PLAY:
+ * the counts of PLAY today are printed, and after FEIGN's edition the laptop stops (PUSH's and PENNANT's would cost the same nothing).
+ * The probe itself is checked in every tree on the band drawn directly. Printed: each edition's busiest counts and their moments.
+ * Planted bugs (run where the fill is merged): the arch's candy stripe in 0.6-unit dashes (inside the band's 15k, over PLAY's 34k);
+ * the pavilion's pennant lines ten times as dense; the arch's foot sign lettered a run a glyph at each of its bulbs (the runs).
+ */
+void FestBandPlayLook()
+{
+	using Page = ss::ui::RiverLine::Page;
+	const auto T0 = std::chrono::steady_clock::now();
+	const char* What[3] = {"FEIGN's arch", "PUSH's tower", "PENNANT's pavilion"};
+	std::set<uint64_t> Rows[3];
+	// The probe on the band drawn directly: with the attraction one of its rows is cached, with today's band none.
+	for (int Ai = 0; Ai < 3; ++Ai)
+	{
+		const Brand B = AttractionsLook[Ai];
+		Rows[Ai] = AttrRowsLook(B);
+		ui_test::TableMeasurer M;
+		EmptyBoardwalkLook();
+		const bool With = AttrOnPageLook(B, Rows[Ai], DrawBandLook(BandLook(B, 2, 10, ss::site::show::Mood::PrimeTime, 977.3, false), 1.0f, true, true), M);
+		EmptyBoardwalkLook();
+		const ss::ui::DrawList Today = DrawBandLook(BandLook(Brand::None, 0, 0, ss::site::show::Mood::PrimeTime, 977.3, false), 1.0f, true, true);
+		bool Without = false;
+		{
+			ss::ui::DrawList Ask;
+			ss::ui::Canvas C(Ask, M, 1600.0f, 1000.0f, 1.0f);
+			for (const uint64_t K : Rows[Ai])
+			{
+				Without = Without || C.IsCached(K);
+			}
+		}
+		ExpectLook(With && !Without && Rows[Ai].size() >= 2,
+			std::string("FestBandBudget: PLAY's probe finds ") + What[Ai] + " when the band draws it (a bulbs row cached), and no row with today's band");
+	}
+	// The three editions in date order.
+	std::vector<std::pair<int, int>> Order;
+	for (int Ai = 0; Ai < 3; ++Ai)
+	{
+		const ss::fest::Festival* F = FirstOnLook(SiteId::Ignite, AttractionsLook[Ai]);
+		ExpectLook(F != nullptr, std::string("FestBandBudget: the calendar has a ") + NameLook(AttractionsLook[Ai]) + " edition on Ignite (PLAY with " + What[Ai] + ")");
+		if (F)
+		{
+			Order.push_back({F->FirstDay, Ai});
+		}
+	}
+	std::sort(Order.begin(), Order.end());
+	std::unique_ptr<LaptopLook> Lap;
+	bool Fill = true;
+	for (const std::pair<int, int>& O : Order)
+	{
+		const int Ai = O.second;
+		const Brand B = AttractionsLook[Ai];
+		const ss::fest::Festival& F = *FirstOnLook(SiteId::Ignite, B);
+		const int Days = F.LastDay - F.FirstDay + 1;
+		if (!Fill)
+		{
+			std::printf("  band: PLAY with %s (%s): not measured, no band fill in this tree (FEIGN's arch was on no page)\n", What[Ai], F.Name.c_str());
+			continue;
+		}
+		// Day D's moments, in the order of the clock: 02:00 (day 2), 12:00 (day 1), 19:30, 20:30, 21:00.
+		std::vector<double> At;
+		for (int D = 1; D <= Days; ++D)
+		{
+			const double Day = static_cast<double>(F.FirstDay + D - 1) * 1440.0;
+			if (D == 2)
+			{
+				At.push_back(Day + 120.0);
+			}
+			if (D == 1)
+			{
+				At.push_back(Day + 720.0);
+			}
+			for (const double Min : {1170.0, 1230.0, 1260.0})
+			{
+				At.push_back(Day + Min);
+			}
+		}
+		if (!Lap)
+		{
+			Lap.reset(new LaptopLook("fest-band-play", SiteId::Ignite, At.front()));
+		}
+		size_t MostV = 0;
+		size_t MostR = 0;
+		double MostVAt = 0.0;
+		double MostRAt = 0.0;
+		int On = 0;
+		bool Pages = true;
+		for (const double W : At)
+		{
+			Lap->At(W);
+			Lap->Open(Page::Lobby);
+			EmptyBoardwalkLook();
+			const ss::ui::DrawList Play = Lap->Settled();
+			On += AttrOnPageLook(B, Rows[Ai], Play, Lap->M) ? 1 : 0;
+			const size_t V = Play.Vertices.size();
+			const size_t R = RunsLook(Play).size();
+			Pages = Pages && V > 8000 && R > 0;
+			if (V > MostV)
+			{
+				MostV = V;
+				MostVAt = W;
+			}
+			if (R > MostR)
+			{
+				MostR = R;
+				MostRAt = W;
+			}
+		}
+		const auto When = [&F](double W) {
+			const int Min = static_cast<int>(W) % 1440;
+			char Buf[48];
+			std::snprintf(Buf, sizeof(Buf), "day %d %02d:%02d", static_cast<int>(W / 1440.0) - F.FirstDay + 1, Min / 60, Min % 60);
+			return std::string(Buf);
+		};
+		const int N = static_cast<int>(At.size());
+		ExpectLook(Pages, std::string("FestBandBudget: Ignite's PLAY draws at every moment of ") + F.Name);
+		if (On == 0)
+		{
+			// No band fill in this tree (F-look's branch alone): PLAY today, printed.
+			std::printf("  band: PLAY during %s (%d days, %d moments): %s on no page (no band fill in this tree: F-hubs' FH-3b fills IgniteBand); PLAY today "
+						"at its busiest %zu vertices (%s), %zu runs (%s), printed only\n",
+				F.Name.c_str(), Days, N, What[Ai], MostV, When(MostVAt).c_str(), MostR, When(MostRAt).c_str());
+			Fill = false;
+			continue;
+		}
+		std::printf("  band: PLAY with %s during %s (%d days, %d moments, on the page at %d): busiest %zu vertices (%s), %zu runs (%s); budget 34,000 and 400\n",
+			What[Ai], F.Name.c_str(), Days, N, On, MostV, When(MostVAt).c_str(), MostR, When(MostRAt).c_str());
+		ExpectLook(On == N, std::string("FestBandBudget: ") + What[Ai] + " is on PLAY at every moment of " + F.Name + " (its days are Live)");
+		ExpectLook(MostV <= 34000 && MostR <= 400,
+			std::string("FestBandBudget: Ignite's PLAY with ") + What[Ai] + " is at most 34k vertices and 400 text runs (" + F.Name + ", busiest of " + std::to_string(N) + " moments)");
+	}
+	std::printf("  band: PLAY's half took %.2f s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
+}
 } // namespace
 
 namespace u4_ui_test
@@ -2990,5 +3180,6 @@ void SegLook()
 	const TakeoverLook Takeover = TakeoverPagesLook();
 	FestTableBudgets(Takeover);
 	FestPagesLeakContrast(Takeover);
+	FestBandPlayLook();
 }
 } // namespace u4_ui_test
