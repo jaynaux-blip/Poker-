@@ -3,6 +3,7 @@
 #include "ShortStack/UI/RiverLine.h"
 #include "../StrictFloat.h"
 #include "../Game/SitesDetail.h"
+#include "../Game/WorldFestDetail.h"
 #include "RiverLineShared.h"
 #include "ShortStack/UI/EventArt.h"
 #include "ShortStack/UI/ShopArt.h"
@@ -29,6 +30,11 @@ namespace ss
 namespace ui
 {
 using namespace rlnet_detail;
+
+namespace rlfest_detail
+{
+const fest::Festival* FestNextEdition(const fest::Festival& F); // below (FH-3a): the brand's next edition
+} // namespace rlfest_detail
 
 namespace rlnet_detail
 {
@@ -246,6 +252,136 @@ int NetStepTicket(net::SiteId Site, const std::string& Ticket, double World, con
 		}
 	}
 	return 0;
+}
+
+// Update 4 G1 (SPEC v1.7 §2.6.3, §2.6.4, §2.8.7, U20, U21; F-hubs FH-6b): the defending champion's marks, the card's honorific line and
+// the festival pieces that join the trophy cases, all read from the world's Honors (H/WorldFest.h's views, G/WorldFestDetail.h's title
+// reads: F-world's). The lobby's PlayerName pills and the Career page's trophy case are below; UI/RiverLineCard.cpp's card reads them too.
+
+/** The edition Npc defends at WorldMin (§2.6.3): the brand's edition after the one whose Main title they hold as world::FestDefending's
+ *  Main (never a belt, a Mini or a Micro; a championship's only from its edition II), from that edition's Announced phase to its crown;
+ *  nullptr for anyone else and outside that window. PlayerName's and the card's DEFENDING CHAMPION and the honorific's "Defending
+ *  {Festival} champion" read it. */
+const fest::Festival* NetFestDefends(const world::World& W, int Npc, double WorldMin)
+{
+	const int Day = net::DayOf(WorldMin);
+	if (Npc < -1 || !world::IsDefending(W, Npc, Day))
+	{
+		return nullptr;
+	}
+	for (int B = static_cast<int>(fest::Brand::None) + 1; B < static_cast<int>(fest::Brand::Count); ++B)
+	{
+		const world::Honor* H = world::FestDefending(W, static_cast<fest::Brand>(B), false, Day);
+		world::FestSlot Slot = world::FestSlot::None;
+		const fest::Festival* Won = H && H->Npc == Npc ? world::FestOfHonor(*H, Slot) : nullptr;
+		const fest::Festival* Next = Won && Slot == world::FestSlot::Main ? rlfest_detail::FestNextEdition(*Won) : nullptr;
+		const fest::Phase Ph = Next ? fest::PhaseOf(*Next, WorldMin, &W) : fest::Phase::Off;
+		if (Ph != fest::Phase::Off && Ph != fest::Phase::Afterglow)
+		{
+			return Next;
+		}
+	}
+	return nullptr;
+}
+
+/** U21's {Festival}: an edition's name without its year ("FEIGN", "The Championship Online"; §2.11's N1-N8, N20-N21). */
+std::string NetFestBrandName(const fest::Festival& F)
+{
+	const std::string Year = " " + std::to_string(F.Year);
+	const bool Ends = F.Name.size() > Year.size() && F.Name.compare(F.Name.size() - Year.size(), Year.size(), Year) == 0;
+	return Ends ? F.Name.substr(0, F.Name.size() - Year.size()) : F.Name;
+}
+
+/** The card's honorific line (§2.6.3, U21): Npc's top title by the title order (world::FestTopTitle: class, then prize, a belt by its
+ *  points, then date) in U21's words: "Defending {Festival} champion" while they defend that Main (NetFestDefends), else "{Festival}
+ *  {Year} champion"; a belt "{Festival} {Year} Player of the Series"; "" with no festival title, and for a championship's Mini or Micro
+ *  title (the order's last class, which U21 gives no words). */
+std::string NetFestHonorific(const world::World& W, int Npc, double WorldMin)
+{
+	const world::Honor* Top = world::FestTopTitle(W, Npc);
+	world::FestSlot Slot = world::FestSlot::None;
+	const fest::Festival* F = Top ? world::FestOfHonor(*Top, Slot) : nullptr;
+	if (!F || (Slot != world::FestSlot::Main && Slot != world::FestSlot::Crown))
+	{
+		return std::string();
+	}
+	const std::string Brand = NetFestBrandName(*F);
+	if (Slot == world::FestSlot::Crown)
+	{
+		return Brand + " " + std::to_string(F->Year) + " Player of the Series";
+	}
+	const fest::Festival* Defends = NetFestDefends(W, Npc, WorldMin);
+	return Defends && Defends == rlfest_detail::FestNextEdition(*F) ? "Defending " + Brand + " champion" : Brand + " " + std::to_string(F->Year) + " champion";
+}
+
+/** A trophy case's pieces (§2.6.4, §2.8.7), oldest first: Awards (bracelets and rings, oldest first; the Ring Rush and Championship
+ *  Online Main trophies are among them) with Npc's festival pieces from the world's Honors: a festival trophy (any other festival's Main
+ *  title), a belt (a crown Honor) and a championship's title object (a Mini or Micro title of a brand that has one, fest::TrophyName's
+ *  tier 1: RCOP's have none), by date, an award first on a tie. Each pair holds one of the two. The hero's (Npc -1) Career trophy case
+ *  and a person's card shelf. */
+std::vector<std::pair<const world::Award*, const world::Honor*>> NetFestCase(const std::vector<world::Award>& Awards, const world::World& W, int Npc)
+{
+	std::vector<std::pair<int, std::pair<const world::Award*, const world::Honor*>>> Dated;
+	for (const world::Award& A : Awards)
+	{
+		Dated.push_back({A.Day, {&A, nullptr}});
+	}
+	for (const world::Honor& H : W.Honors())
+	{
+		world::FestSlot Slot = world::FestSlot::None;
+		const fest::Festival* F = H.Npc == Npc ? world::FestOfHonor(H, Slot) : nullptr;
+		const bool Trophy = F && Slot == world::FestSlot::Main && F->Which != fest::Brand::RingRush && F->Which != fest::Brand::Tco;
+		const bool Object = F && (Slot == world::FestSlot::Mini || Slot == world::FestSlot::Micro) && fest::TrophyName(F->Which, 1)[0] != '\0';
+		if (Trophy || Object || (F && Slot == world::FestSlot::Crown))
+		{
+			Dated.push_back({net::DayOf(H.At), {nullptr, &H}});
+		}
+	}
+	std::stable_sort(Dated.begin(), Dated.end(), [](const std::pair<int, std::pair<const world::Award*, const world::Honor*>>& A, const std::pair<int, std::pair<const world::Award*, const world::Honor*>>& B) {
+		return A.first < B.first;
+	});
+	std::vector<std::pair<const world::Award*, const world::Honor*>> Out;
+	Out.reserve(Dated.size());
+	for (const std::pair<int, std::pair<const world::Award*, const world::Honor*>>& D : Dated)
+	{
+		Out.push_back(D.second);
+	}
+	return Out;
+}
+
+/** One trophy case piece centred at (Cx, Cy) (§2.7.5): a bracelet or ring through eventart::Trophy; a festival trophy, a belt or a title
+ *  object through F-look's art (the RCOP Cup engraved with each RCOP edition's Main field up to its own, from the roll, oldest first). */
+void NetFestPiece(Canvas& Cv, const world::World& W, const std::pair<const world::Award*, const world::Honor*>& Piece, float Cx, float Cy, float Size, double Time)
+{
+	if (Piece.first)
+	{
+		eventart::Trophy(Cv, *Piece.first, Cx, Cy, Size, Time);
+		return;
+	}
+	world::FestSlot Slot = world::FestSlot::None;
+	const fest::Festival* F = Piece.second ? world::FestOfHonor(*Piece.second, Slot) : nullptr;
+	if (!F)
+	{
+		return;
+	}
+	if (Slot == world::FestSlot::Crown)
+	{
+		festart::FestBelt(Cv, F->Which, Cx, Cy, Size, Time, Size <= 30.0f);
+		return;
+	}
+	std::vector<int> Fields;
+	if (F->Which == fest::Brand::Rcop && Slot == world::FestSlot::Main)
+	{
+		const std::vector<world::FestRollRow> Roll = world::FestRoll(W, F->Which);
+		for (auto It = Roll.rbegin(); It != Roll.rend(); ++It)
+		{
+			if (It->Main && It->Year <= F->Year)
+			{
+				Fields.push_back(It->Main->Entries);
+			}
+		}
+	}
+	festart::FestTrophy(Cv, F->Which, Cx, Cy, Size, Time, Size <= 30.0f, Fields, Slot == world::FestSlot::Main ? 0 : 1);
 }
 } // namespace rlnet_detail
 
@@ -617,6 +753,12 @@ void RiverLine::PlayerName(int Index, float X, float Y, float Size, float MaxW, 
 	if (P.Rival)
 	{
 		NetPill(*C, "RIVAL", Px, Y - Size * 0.78f, Hex(0xb36bff), true, 9.0f);
+	}
+	else if (NetFestDefends(S.Living(), Index, World))
+	{
+		// Update 4 G1 (SPEC v1.7 §2.6.3, U21; F-hubs FH-6b): DEFENDING CHAMPION from the defended edition's Announced phase to its crown,
+		// the one pill after RIVAL (the seat plate's own, priority 3 after PASSED YOU and RIVAL, lands with G2's one-pill rule).
+		NetPill(*C, "DEFENDING CHAMPION", Px, Y - Size * 0.78f, pal::Gold, false, 9.0f);
 	}
 	else if (P.Pro && Gw <= 0.0f && Frame != badge::FrameGold)
 	{
@@ -3031,7 +3173,8 @@ namespace rlfest_detail
  *  and U1 run over them with the hub's. Declared and called in UI/RiverLineFestival.cpp (stream A); each "<kind>\t<text>" (§2.11), its
  *  placeholders the hub's sample names ({FESTIVAL} the Short, {N}, {Days}, {D}, {Gtd}, {Added}, {FirstDate}, {LastDate}, {Time},
  *  {Name}), filled from the sim when drawn. FH-3b: the takeover's words (U15, U22, U32 and the floor's Main cabinet). FH-4B: the
- *  register sheets' YOUR strip (U5, U10 without its race clause, the race at its right), U37 and the wallets' step ticket rows. */
+ *  register sheets' YOUR strip (U5, U10 without its race clause, the race at its right), U37 and the wallets' step ticket rows. FH-6b:
+ *  the trophy cases' festival words (U20), DEFENDING CHAMPION and the honorific line (U21). */
 std::vector<std::string> HostUiStrings()
 {
 	return {
@@ -3083,6 +3226,21 @@ std::vector<std::string> HostUiStrings()
 		"label\t1 event \xC2\xB7 1 cash \xC2\xB7 best {Best} of {Field}",
 		"sentence\tGood on {Dates}.",
 		"label\tTICKET",
+		// FH-6b (§2.6.3, §2.6.4, §2.8.7; U20, U21): the Career trophy case's count line (U20's festival words after today's bracelets and
+		// rings), a card shelf's label words, DEFENDING CHAMPION (the card's and the lobby names' pill) and the honorific line's three
+		// forms ({Festival} the edition's name without its year, NetFestBrandName).
+		"label\t{N} festival trophy",
+		"label\t{N} festival trophies",
+		"label\t{N} belt",
+		"label\t{N} belts",
+		"label\tFESTIVAL TROPHY",
+		"label\tFESTIVAL TROPHIES",
+		"label\tBELT",
+		"label\tBELTS",
+		"label\tDEFENDING CHAMPION",
+		"label\tDefending {Festival} champion",
+		"label\t{Festival} {Year} champion",
+		"label\t{Festival} {Year} Player of the Series",
 	};
 }
 
@@ -4372,25 +4530,31 @@ void RiverLine::CareerPage(double Now)
 		UI.RRect({Bar.X, Bar.Y, std::max(8.0f, Bar.W * Frac), Bar.H}, 4.0f, Paint::Linear({Bar.X, 0.0f}, {Bar.X + Bar.W, 0.0f}, Lc, Hex(Tiers[Lv + 1].Col)));
 		UI.Text(Money(To - You.Earnings) + " in winnings to " + Tiers[Lv + 1].Name, P.X + 176.0f, P.Y + 170.0f, Ts(13.0f, 600, pal::Muted));
 	}
-	// The trophy case: the player's bracelets and rings, the latest first.
+	// The trophy case: the player's bracelets and rings, the latest first. Update 4 G1 (SPEC v1.7 §2.8.7, U20; F-hubs FH-6b): their
+	// festival trophies, belts and championship title objects join them by date (NetFestCase), three shown, and the count line names them
+	// (a title object counts as a festival trophy); Pawn & Loan's stamps stay on the awards alone.
 	if (const world::World* Wd = Net.Attached())
 	{
 		const std::vector<world::Award>& Won = Wd->HeroAwards();
-		if (!Won.empty())
+		const std::vector<std::pair<const world::Award*, const world::Honor*>> Case = NetFestCase(Won, *Wd, -1);
+		if (!Case.empty())
 		{
-			const size_t Shown = std::min<size_t>(Won.size(), 3);
+			const size_t Shown = std::min<size_t>(Case.size(), 3);
 			const float Cx0 = P.X + 572.0f;
 			NetSpaced(*C, "TROPHY CASE", Cx0 - 26.0f, P.Y + 44.0f, 10.5f, 800, pal::Orange, 1.6f);
 			C->FillRoundRect({Cx0 - 30.0f, P.Y + 132.0f, Nf(Shown) * 56.0f + 4.0f, 5.0f}, 2.5f, Paint::Linear({Cx0, 0.0f}, {Cx0 + 170.0f, 0.0f}, Hex(0x6b4e16), Hex(0x3a2a0c)));
 			for (size_t K = 0; K < Shown; ++K)
 			{
-				eventart::Trophy(*C, Won[Won.size() - 1 - K], Cx0 + Nf(K) * 56.0f, P.Y + 102.0f, 54.0f * (0.85f + 0.15f * In), Now + 0.7 * static_cast<double>(K));
+				NetFestPiece(*C, *Wd, Case[Case.size() - 1 - K], Cx0 + Nf(K) * 56.0f, P.Y + 102.0f, 54.0f * (0.85f + 0.15f * In), Now + 0.7 * static_cast<double>(K));
 			}
 			// At Northside Pawn & Loan (realism spec §5.8, §7.4 P1): the piece is stamped IN PAWN or SOLD; the title stays.
 			// The stamps go on after every piece is in the case, so a neighbor's sparkle never covers one.
 			for (size_t K = 0; K < Shown; ++K)
 			{
-				shopart::DrawAwardStamp(*C, shopart::AwardStamp(S, Won[Won.size() - 1 - K]), Cx0 + Nf(K) * 56.0f, P.Y + 102.0f, 54.0f);
+				if (const world::Award* Piece = Case[Case.size() - 1 - K].first)
+				{
+					shopart::DrawAwardStamp(*C, shopart::AwardStamp(S, *Piece), Cx0 + Nf(K) * 56.0f, P.Y + 102.0f, 54.0f);
+				}
 			}
 			int Bracelets = 0;
 			for (const world::Award& A : Won)
@@ -4398,8 +4562,16 @@ void RiverLine::CareerPage(double Now)
 				Bracelets += A.Ring ? 0 : 1;
 			}
 			const int Rings = static_cast<int>(Won.size()) - Bracelets;
+			int Belts = 0;
+			for (const std::pair<const world::Award*, const world::Honor*>& Piece : Case)
+			{
+				Belts += Piece.second && world::IsCrownHonor(*Piece.second) ? 1 : 0;
+			}
+			const int Trophies = static_cast<int>(Case.size() - Won.size()) - Belts;
 			std::string Count = Bracelets > 0 ? std::to_string(Bracelets) + (Bracelets == 1 ? " bracelet" : " bracelets") : std::string();
 			Count += Rings > 0 ? (Count.empty() ? "" : " \xC2\xB7 ") + std::to_string(Rings) + (Rings == 1 ? " ring" : " rings") : "";
+			Count += Trophies > 0 ? (Count.empty() ? "" : " \xC2\xB7 ") + std::to_string(Trophies) + (Trophies == 1 ? " festival trophy" : " festival trophies") : "";
+			Count += Belts > 0 ? (Count.empty() ? "" : " \xC2\xB7 ") + std::to_string(Belts) + (Belts == 1 ? " belt" : " belts") : "";
 			UI.Text(Count, Cx0 - 26.0f, P.Y + 162.0f, Ts(13.0f, 700, pal::Gold));
 		}
 	}
@@ -4622,8 +4794,15 @@ void RiverLine::CareerPage(double Now)
 		UI.Text(St.Desc, Cx + 30.0f, Y + 36.0f, Ts(13.0f, 500, St.Locked ? pal::Dim : pal::Muted, Align::Left, Baseline::Alphabetic, false, Rt.W - 100.0f));
 	}
 
-	// RiverLine Rewards (update 2 §5.7): the month's tier, above the rival.
-	RewardsCard({1092.0f, 660.0f, 484.0f, 100.0f}, Now);
+	// Update 4 G1 (SPEC v1.7 §2.8.7; F-hubs FH-6b): the pin wall in its band (stream A's CareerPins: hidden until the hero's first
+	// festival event). The band is not free: RiverLine Rewards (update 2 §5.7) draws there, so the card keeps it while the wall is hidden
+	// (every Career page before that event, as before G1) and yields it once the wall shows (world::HeroFestPins, the wall's own test).
+	CareerPins({1092.0f, 656.0f, 484.0f, 104.0f}, Now);
+	if (world::HeroFestPins(S.Living()).empty())
+	{
+		// RiverLine Rewards (update 2 §5.7): the month's tier, above the rival.
+		RewardsCard({1092.0f, 660.0f, 484.0f, 100.0f}, Now);
+	}
 
 	// The rival: RiverLine's (Career is RiverLine's page, on Shared(): a rival network has no rival of its own, its
 	// RivalIndex is -1). A world without one shows none.

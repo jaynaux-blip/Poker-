@@ -21,6 +21,10 @@
 // RunItTwice's Prospectus once the hero has played the edition, none before and none on a plain series event; LEAD_CALLS R-18: U37 on
 // a step event's sheet, Ignite's wallet ticket row and RunItTwice's step tickets apart from its WELCOME TICKETS); FestCopyUi's B half
 // gains the strip's, U37's and the ticket rows' strings.
+// G1 FH-6b: FestHonestLines' true-defender half (PLAN_FHUBS Q16: DEFENDING CHAMPION on the card and on the lobby's names, and the card's
+// honorific line, only for a true defender, from the roll and the calendar; rlnet_detail::NetFestDefends, NetFestHonorific), the pin
+// wall's band on the Career page (RiverLine Rewards keeps it while the wall is hidden) and the trophy case's festival pieces (U20,
+// rlnet_detail::NetFestCase) with the Career page's cost printed (asserted at FH-7); FestCopyUi's B half gains U20's and U21's strings.
 #include "UiSeg.h"
 
 #include "CopyLint.h"
@@ -31,9 +35,11 @@
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
+#include "ShortStack/Game/WorldFest.h"
 #include "ShortStack/UI/EventArt.h"
 #include "ShortStack/UI/RiverLine.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
+#include "../../Source/ShortStackCore/Private/ShortStack/Game/WorldFestDetail.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/UI/RitArt.h"
 
 #include <algorithm>
@@ -63,6 +69,10 @@ const net::SeriesInfo* NetWireSeries(const net::Network& Net, double World, cons
 // UI/RiverLineNet.cpp (FH-4B): the edition a register sheet belongs to, and a wallet ticket as a festival step ticket.
 const fest::Festival* NetSheetEdition(const net::Network& Net, const net::EventInstance& E);
 int NetStepTicket(net::SiteId Site, const std::string& Ticket, double World, const fest::Festival*& Edition, std::string& GoodOn);
+// UI/RiverLineNet.cpp (FH-6b): the edition a person defends, the card's honorific line and a trophy case's pieces.
+const fest::Festival* NetFestDefends(const world::World& W, int Npc, double WorldMin);
+std::string NetFestHonorific(const world::World& W, int Npc, double WorldMin);
+std::vector<std::pair<const world::Award*, const world::Honor*>> NetFestCase(const std::vector<world::Award>& Awards, const world::World& W, int Npc);
 } // namespace rlnet_detail
 namespace rlignite_detail
 {
@@ -579,7 +589,7 @@ void FestCopyUiHosts()
 	const std::pair<const char*, const char*> Extra[] = {{"D", "12"}, {"N", "4"}, {"Days", "22"}, {"FirstDate", "Mar 30"}, {"LastDate", "Apr 11"}, {"Gtd", "$281,100"},
 		{"Added", "$2,500"}, {"FESTIVAL", "PENNANT"}, {"Time", "9:00 PM"}, {"Name", "MRS. PARK"}, {"Festival", "RCOP 2027"}, {"BuyIn", "$5,250"},
 		{"Prize", "$795.32"}, {"Date", "Oct 6"}, {"Rank", "38th"}, {"Scorers", "1,124"}, {"Events", "3"}, {"Cashes", "2"}, {"Best", "9th"},
-		{"Field", "1,104"}, {"Dates", "Apr 7 and Apr 9"}};
+		{"Field", "1,104"}, {"Dates", "Apr 7 and Apr 9"}, {"Year", "2027"}};
 	for (const auto& Kv : Extra)
 	{
 		Vars[Kv.first] = Kv.second;
@@ -1265,6 +1275,8 @@ std::string HostsWantWire(const ss::fest::Festival& F, const std::string& Short,
 	return std::string();
 }
 
+void FestHonestDefenders(HostsLaptop& P); // FH-6b: below, after the YOUR strip's helpers it plays the hero's event with
+
 /**
  * FestHonestLines (§2.15.2; F-hubs' stream B half, FH-3a; PLAN_G1 items 9 and 29): RiverLine's copy reads the sim and types no past.
  * Slide 0 prints RCOP 2026's $78,203,400 from SeriesInfo::GtdCents and the Main's buy-in and guarantee from its template
@@ -1437,6 +1449,8 @@ void FestHonestLines()
 		Gtd.c_str(), Night.Vertices.size(), HostsRuns(Night), Live.Vertices.size(), HostsRuns(Live), LiveDay - Rcop->FirstDay + 1,
 		static_cast<long long>(Live.Vertices.size()) - static_cast<long long>(Night.Vertices.size()), Plain ? Plain->Name.c_str() : "none",
 		std::chrono::duration<double>(std::chrono::steady_clock::now() - Began).count());
+	// FH-6b: the true defenders, the pin wall's band and the trophy case, on the same career a year on.
+	FestHonestDefenders(P);
 }
 /** FH-4B: one of edition F's runs on F's site at the laptop's clock: Kind 0 a numbered event (its series F's) in play now (late
  *  registration, running, the final table), 1 a numbered event still taking entries later today, 2 a satellite of F (Festival::
@@ -1881,6 +1895,440 @@ void FestYourStripSheets()
 	FestYourStripHost(P, *Writ, false, Report);
 	FestYourStripTickets(P, Report);
 	std::printf("FestYourStrip (sheets):%s %.2f s\n", Report.c_str(), std::chrono::duration<double>(std::chrono::steady_clock::now() - Began).count());
+}
+
+/** FH-6b: brand B's edition of Year (nullptr when the calendar has none). */
+const ss::fest::Festival* HostsEditionOf(ss::fest::Brand B, int Year)
+{
+	for (const ss::fest::Festival& F : ss::fest::All())
+	{
+		if (F.Which == B && F.Year == Year)
+		{
+			return &F;
+		}
+	}
+	return nullptr;
+}
+
+/** FH-6b: the edition E's champion defends, the earliest of E's brand opening after E's last day: the oracle's own walk of fest::All()
+ *  (never rlfest_detail::FestNextEdition, which the code under test reads). */
+const ss::fest::Festival* HostsAfter(const ss::fest::Festival& E)
+{
+	const ss::fest::Festival* Best = nullptr;
+	for (const ss::fest::Festival& G : ss::fest::All())
+	{
+		if (G.Which == E.Which && G.FirstDay > E.LastDay && (!Best || G.FirstDay < Best->FirstDay))
+		{
+			Best = &G;
+		}
+	}
+	return Best;
+}
+
+/** FH-6b: U21's {Festival} worked out from the edition: its name less " {Year}". */
+std::string HostsBrandWord(const ss::fest::Festival& F)
+{
+	const std::string Tail = " " + std::to_string(F.Year);
+	return F.Name.size() > Tail.size() && F.Name.compare(F.Name.size() - Tail.size(), Tail.size(), Tail) == 0 ? F.Name.substr(0, F.Name.size() - Tail.size()) : F.Name;
+}
+
+/** FH-6b: who defends at a world minute, from the roll and the calendar alone (§2.6.3): a roll row's Main champion (a person) while the
+ *  brand's next edition is Announced, building up, Live or on its Main day, so up to its crown. Unsure: the Main champion of a row whose
+ *  next edition is Closing (after its last event, before its crown, the world's latest roll entry takes over: no assertion either way).
+ *  People: every person on any roll (Main, belt, Mini, Micro). */
+struct HostsDefenders
+{
+	std::map<int, const ss::fest::Festival*> Defends;
+	std::vector<int> People;
+	std::vector<int> Unsure;
+};
+HostsDefenders HostsDefendersAt(const ss::world::World& W, double World)
+{
+	using ss::fest::Phase;
+	HostsDefenders D;
+	for (int B = static_cast<int>(ss::fest::Brand::None) + 1; B < static_cast<int>(ss::fest::Brand::Count); ++B)
+	{
+		for (const ss::world::FestRollRow& Row : ss::world::FestRoll(W, static_cast<ss::fest::Brand>(B)))
+		{
+			for (const ss::world::Honor* H : {Row.Main, Row.Crown, Row.Mini, Row.Micro})
+			{
+				if (H && H->Npc >= 0)
+				{
+					D.People.push_back(H->Npc);
+				}
+			}
+			const ss::fest::Festival* E = ss::fest::FestivalOf(Row.Key);
+			const ss::fest::Festival* Next = E ? HostsAfter(*E) : nullptr;
+			const Phase Ph = Next ? ss::fest::PhaseOf(*Next, World, &W) : Phase::Off;
+			if (!Row.Main || Row.Main->Npc < 0)
+			{
+				continue;
+			}
+			if (Ph == Phase::Closing)
+			{
+				D.Unsure.push_back(Row.Main->Npc);
+			}
+			else if (Ph == Phase::Announced || Ph == Phase::Buildup || Ph == Phase::Live || Ph == Phase::MainDay)
+			{
+				D.Defends[Row.Main->Npc] = Next;
+			}
+		}
+	}
+	for (std::vector<int>* V : {&D.People, &D.Unsure})
+	{
+		std::sort(V->begin(), V->end());
+		V->erase(std::unique(V->begin(), V->end()), V->end());
+	}
+	return D;
+}
+
+/** FH-6b: the honorific line a person's card must read (§2.6.3, U21): their top title by the title order (F-world's FestTopTitle), as
+ *  "Defending {Festival} champion" when the oracle has them defending that Main, "{Festival} {Year} champion" for another Main title,
+ *  "{Festival} {Year} Player of the Series" for a belt; "" for none and for a Mini or Micro title. */
+std::string HostsHonorificWant(const ss::world::World& W, int Npc, const HostsDefenders& D)
+{
+	const ss::world::Honor* Top = ss::world::FestTopTitle(W, Npc);
+	ss::world::FestSlot Slot = ss::world::FestSlot::None;
+	const ss::fest::Festival* F = Top ? ss::world::FestOfHonor(*Top, Slot) : nullptr;
+	if (!F)
+	{
+		return std::string();
+	}
+	if (Slot == ss::world::FestSlot::Crown)
+	{
+		return HostsBrandWord(*F) + " " + std::to_string(F->Year) + " Player of the Series";
+	}
+	if (Slot != ss::world::FestSlot::Main)
+	{
+		return std::string();
+	}
+	const auto It = D.Defends.find(Npc);
+	return It != D.Defends.end() && It->second == HostsAfter(*F) ? "Defending " + HostsBrandWord(*F) + " champion" : HostsBrandWord(*F) + " " + std::to_string(F->Year) + " champion";
+}
+
+/** FH-6b: any run in an honorific's form (U21's three) on a frame: the first such text, "" when none. */
+std::string HostsHonorificRun(const ss::ui::DrawList& L)
+{
+	auto Ends = [](const std::string& S, const std::string& Tail) { return S.size() >= Tail.size() && S.compare(S.size() - Tail.size(), Tail.size(), Tail) == 0; };
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		const std::string& T = Cmd.Text.Text;
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && (T.compare(0, 10, "Defending ") == 0 || Ends(T, " champion") || Ends(T, " Player of the Series")))
+		{
+			return T;
+		}
+	}
+	return std::string();
+}
+
+/** FH-6b: on a frame, whether the first run reading Name has a DEFENDING CHAMPION run beside it on its row (to its right, its baseline
+ *  within the name's height: PlayerName's one pill); Found false when no run reads Name. */
+bool HostsPillBeside(const ss::ui::DrawList& L, const std::string& Name, bool& Found)
+{
+	Found = false;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type != ss::ui::DrawCmd::Kind::Text || Cmd.Text.Text != Name)
+		{
+			continue;
+		}
+		Found = true;
+		for (const ss::ui::DrawCmd& Pc : L.Cmds)
+		{
+			if (Pc.Type == ss::ui::DrawCmd::Kind::Text && Pc.Text.Text == "DEFENDING CHAMPION" && Pc.Text.X > Cmd.Text.X && Pc.Text.X < Cmd.Text.X + 700.0f &&
+				std::fabs(Pc.Text.BaselineY - Cmd.Text.BaselineY) < 14.0f)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+	return false;
+}
+
+/**
+ * FestHonestLines' true-defender half (§2.6.3, §2.6.4, §2.8.7; F-hubs FH-6b; PLAN_FHUBS Q16, accepted): DEFENDING CHAMPION (the card's
+ * pill beside RIVAL, PlayerName's pill on the lobby's names) and the card's honorific line belong to true defenders only. On RCOP
+ * 2027's third day (Live: RCOP 2026's Main champion defends; WRIT 2028 not yet Announced, so WRIT 2027's does not) and on WRIT 2028's
+ * second Announced day (RCOP 2027 crowned: RCOP 2026's champion no longer defends, WRIT 2027's does), every person on any roll is held to
+ * HostsDefendersAt (the roll and the calendar alone): rlnet_detail::NetFestDefends, NetFestHonorific, and their card drawn (the pill; the
+ * honorific line from the title order in U21's words, "Defending {Festival} champion" only for the defended Main, a belt's "Player of the
+ * Series", none for a Mini or Micro title); the boards' rows and an event panel's Players tab (PlayerName) carry the pill beside a
+ * defender's name and no one else's. The Career page on the first day: RiverLine Rewards keeps the pin wall's band while the wall is
+ * hidden (the hero has played no festival event) and yields it after the hero's first (an RCOP 2027 event); on the second, the trophy case
+ * shows the hero's festival pieces from their Honors (planted through World::Read: FEIGN 2026's Main a festival trophy, RCOP 2026's belt,
+ * PENNANT 2027's Mini a title object counted as one; the Championship Online 2027's Main stays its bracelet, RCOP 2026's Mini has no
+ * title object), by date, with U20's count line; the Career page's cost before and after is printed (the page within its measured cost
+ * + 4k, FH-7).
+ * Plants: the pill for any roll champion; the pill from the Honor on (no Announced phase); "Defending" for any Main title; the
+ * Championship Online's Main counted as a festival trophy too; the Rewards card kept under the wall.
+ */
+void FestHonestDefenders(HostsLaptop& P)
+{
+	namespace rn = ss::ui::rlnet_detail;
+	namespace world = ss::world;
+	using ss::fest::Brand;
+	const auto Began = std::chrono::steady_clock::now();
+	const ss::fest::Festival* R26 = HostsEditionOf(Brand::Rcop, 2026);
+	const ss::fest::Festival* R27 = HostsEditionOf(Brand::Rcop, 2027);
+	if (!R26 || !R27)
+	{
+		ui_test::Expect(false, "FestHonestLines (defenders): RCOP 2026 and RCOP 2027 are in fest::All()");
+		return;
+	}
+	// The first day: FEIGN 2027's second Announced day while RCOP 2027 is Live (else RCOP 2027's third day). The second: WRIT 2028's second
+	// Announced day (RCOP 2027 and FEIGN 2027 crowned weeks before), so WRIT 2027's champion defends.
+	const ss::fest::Festival* Feign26 = HostsEditionOf(Brand::Feign, 2026);
+	const ss::fest::Festival* Feign27 = HostsEditionOf(Brand::Feign, 2027);
+	const ss::fest::Festival* Writ28 = HostsEditionOf(Brand::Writ, 2028);
+	const int FeignOn = Feign27 ? Feign27->FirstDay - ss::fest::kAnnounceDays + 1 : -1;
+	const int Days[2] = {FeignOn >= R27->FirstDay + 2 && FeignOn < R27->LastDay ? FeignOn : R27->FirstDay + 2,
+		Writ28 && Writ28->FirstDay - ss::fest::kAnnounceDays + 1 > R27->LastDay + 3 ? Writ28->FirstDay - ss::fest::kAnnounceDays + 1 : R27->LastDay + 3};
+	int Planted = -1;
+	int Cards = 0, CardPills = 0, CardLines = 0, Helper = 0, NameRows = 0, NamePills = 0;
+	std::string Report;
+	ss::ui::DrawList Before, After;
+	for (int K = 0; K < 2; ++K)
+	{
+		P.At(static_cast<double>(Days[K]) * ss::net::MinutesPerDay + 12.0 * 60.0);
+		HostsOpenRiverLine(P, ss::ui::RiverLine::Page::Lobby);
+		const world::World& W = P.S.Living();
+		const double Now = P.S.WorldMinutes();
+		const int Day = ss::net::DayOf(Now);
+		const std::string On = " (day " + std::to_string(Day) + ")";
+		if (K == 0 && Feign26 && Day == FeignOn)
+		{
+			// PlayerName's pill on a real row: when this world's FEIGN 2026 roll holds no Main (no person won it), its Main title is planted
+			// (World::Read's honor line, as the world keeps titles) for the Money List's fourth, a row PlayerName draws, so FEIGN 2027's
+			// Announced phase makes them a defender on the board.
+			bool HasMain = false;
+			for (const world::FestRollRow& Row : world::FestRoll(W, Brand::Feign))
+			{
+				HasMain = HasMain || (Row.Key == Feign26->SeriesId && Row.Main);
+			}
+			const std::vector<ss::net::BoardRow> Money = ss::net::Shared().Leaderboard(ss::net::Board::Earnings, Now, ss::net::HeroStats(), 60, nullptr);
+			const int Fourth = Money.size() > 3 ? Money[3].Player : -1;
+			if (!HasMain && Fourth >= 0 && W.Get(Fourth) && !ss::net::Shared().Players()[static_cast<size_t>(Fourth)].Rival)
+			{
+				P.S.DrainWorld();
+				char AtText[32];
+				std::snprintf(AtText, sizeof(AtText), "%.1f", Feign26->MainStart + 600.0);
+				P.S.Living().Read({"world", "honor", "2026", Feign26->Name + " Main Event", Feign26->MainId + "@" + std::to_string(static_cast<long long>(Feign26->MainStart)),
+					std::to_string(Fourth), W.Get(Fourth)->Name, "2500000", "1400", AtText});
+				Planted = Fourth;
+			}
+		}
+		const HostsDefenders D = HostsDefendersAt(W, Now);
+		auto Unsure = [&D](int Npc) { return std::binary_search(D.Unsure.begin(), D.Unsure.end(), Npc); };
+		int Champions = 0;
+		for (int Npc : D.People)
+		{
+			Champions += D.Defends.count(Npc) == 0 && !Unsure(Npc) ? 1 : 0;
+		}
+		ui_test::Expect(!D.Defends.empty() && Champions > 0, ("FestHonestLines (defenders): the roll holds a defender and a champion who is not one" + On).c_str());
+		const world::Honor* Last = nullptr;
+		for (const world::FestRollRow& Row : world::FestRoll(W, Brand::Rcop))
+		{
+			Last = Row.Key == R26->SeriesId ? Row.Main : Last;
+		}
+		ui_test::Expect(Last && Last->Npc >= 0 && (D.Defends.count(Last->Npc) == 1) == (K == 0),
+			(std::string("FestHonestLines (defenders): RCOP 2026's Main champion ") + (K == 0 ? "defends while RCOP 2027 is Live" : "no longer defends once RCOP 2027 is crowned") + On).c_str());
+		// Every person on a roll: the helpers, then their card. A card is drawn for each defender and up to twelve others a day.
+		int Others = 0;
+		for (int Npc : D.People)
+		{
+			if (Unsure(Npc))
+			{
+				continue;
+			}
+			const auto Def = D.Defends.find(Npc);
+			const bool Want = Def != D.Defends.end();
+			const world::Npc* N = W.Get(Npc);
+			const std::string Who = (N ? N->Name : std::string("npc ") + std::to_string(Npc)) + On;
+			const ss::fest::Festival* Got = rn::NetFestDefends(W, Npc, Now);
+			const std::string Line = HostsHonorificWant(W, Npc, D);
+			const std::string GotLine = rn::NetFestHonorific(W, Npc, Now);
+			ui_test::Expect((Got != nullptr) == Want && (!Want || Got == Def->second), ("FestHonestLines (defenders): " + Who + (Want ? " defends " + Def->second->Name : std::string(" defends nothing")) +
+				", NetFestDefends reads " + (Got ? Got->Name : std::string("none"))).c_str());
+			ui_test::Expect(!Want || world::IsDefending(W, Npc, Day), ("FestHonestLines (defenders): " + Who + " is world::IsDefending's").c_str());
+			ui_test::Expect(GotLine == Line, ("FestHonestLines (defenders): " + Who + "'s honorific reads \"" + Line + "\", not \"" + GotLine + "\"").c_str());
+			++Helper;
+			if (!Want && Others >= 12)
+			{
+				continue;
+			}
+			Others += Want ? 0 : 1;
+			P.RL.ShowPlayer(Npc, P.Now);
+			const ss::ui::DrawList Card = P.Settled();
+			const bool Pill = ui_test::DrewRun(Card, "DEFENDING CHAMPION");
+			const std::string Drawn = HostsHonorificRun(Card);
+			ui_test::Expect(P.RL.CardOpen() && Pill == Want, ("FestHonestLines (defenders): " + Who + "'s card " + (Want ? "carries" : "carries no") + " DEFENDING CHAMPION").c_str());
+			ui_test::Expect(Line.empty() ? Drawn.empty() : ui_test::DrewRun(Card, Line),
+				("FestHonestLines (defenders): " + Who + "'s card draws the honorific line \"" + Line + "\" (drawn: \"" + Drawn + "\")").c_str());
+			P.RL.ShowPlayer(-1, P.Now);
+			P.Settled();
+			++Cards;
+			CardPills += Pill ? 1 : 0;
+			CardLines += Line.empty() ? 0 : 1;
+		}
+		// The boards' names (PlayerName): the pill beside a defender's name, beside no other roll champion's.
+		HostsOpenRiverLine(P, ss::ui::RiverLine::Page::Leaderboards);
+		for (ss::net::Board B : {ss::net::Board::Earnings, ss::net::Board::Season, ss::net::Board::Wins, ss::net::Board::FinalTables, ss::net::Board::Series})
+		{
+			P.RL.ShowBoard(B, P.Now);
+			const ss::ui::DrawList Board = P.Settled();
+			for (int Npc : D.People)
+			{
+				const world::Npc* N = W.Get(Npc);
+				bool Found = false;
+				const bool Pill = N && !Unsure(Npc) && HostsPillBeside(Board, N->Name, Found);
+				if (!N || Unsure(Npc) || !Found)
+				{
+					continue;
+				}
+				const bool Want = D.Defends.count(Npc) > 0;
+				ui_test::Expect(Pill == Want, ("FestHonestLines (defenders): board " + std::to_string(static_cast<int>(B)) + " draws " + N->Name + (Want ? " with" : " without") + " DEFENDING CHAMPION" + On).c_str());
+				NameRows += Want ? 1 : 0;
+				NamePills += Pill ? 1 : 0;
+			}
+		}
+		// An event panel's Players tab (PlayerName): an event of the next hours with a defender among its first six regulars (the panel lists
+		// the best known first), the tab opened by a press on its label; the pill beside the defender and beside no other roll champion.
+		{
+			const ss::net::Network& Net = ss::net::Site(ss::net::SiteId::RiverLine);
+			world::World& Wm = P.S.Living();
+			std::string Pick;
+			for (const ss::net::EventInstance& E : Net.Window(Now - 3.0 * 60.0, Now + 20.0 * 60.0))
+			{
+				if (Net.Live(E, Now).St == ss::net::Status::Finished)
+				{
+					continue;
+				}
+				std::vector<int> Who = Wm.Registered(E.Id);
+				std::stable_sort(Who.begin(), Who.end(), [&Wm](int A, int B) { return Wm.Get(A)->RepOf(world::Rep::Overall) > Wm.Get(B)->RepOf(world::Rep::Overall); });
+				for (size_t I = 0; I < Who.size() && I < 6 && Pick.empty(); ++I)
+				{
+					Pick = D.Defends.count(Who[I]) ? E.Id : Pick;
+				}
+				if (!Pick.empty())
+				{
+					break;
+				}
+			}
+			if (!Pick.empty())
+			{
+				HostsOpenRiverLine(P, ss::ui::RiverLine::Page::Lobby);
+				P.RL.SelectEvent(Pick);
+				const ss::ui::DrawList Sel = P.Settled();
+				float Tx = -1.0f, Ty = -1.0f;
+				for (const ss::ui::DrawCmd& Cmd : Sel.Cmds)
+				{
+					if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == "Players")
+					{
+						Tx = Cmd.Text.X;
+						Ty = Cmd.Text.BaselineY;
+					}
+				}
+				ui_test::Expect(Tx >= 0.0f, ("FestHonestLines (defenders): " + Pick + "'s panel has its Players tab" + On).c_str());
+				P.Press(Tx + 12.0f, Ty - 5.0f);
+				const ss::ui::DrawList Tab = P.Settled();
+				for (int Npc : D.People)
+				{
+					const world::Npc* N = W.Get(Npc);
+					bool Found = false;
+					const bool Pill = N && !Unsure(Npc) && HostsPillBeside(Tab, N->Name, Found);
+					if (!N || Unsure(Npc) || !Found)
+					{
+						continue;
+					}
+					const bool Want = D.Defends.count(Npc) > 0;
+					ui_test::Expect(Pill == Want, ("FestHonestLines (defenders): " + Pick + "'s Players tab draws " + N->Name + (Want ? " with" : " without") + " DEFENDING CHAMPION" + On).c_str());
+					NameRows += Want ? 1 : 0;
+					NamePills += Pill ? 1 : 0;
+				}
+				P.RL.SelectEvent(std::string());
+			}
+			Report += Pick.empty() ? std::string() : " " + Pick + "'s Players tab;";
+		}
+		Report += " day " + std::to_string(Day) + ": " + std::to_string(D.Defends.size()) + " defending of " + std::to_string(D.People.size()) + " on the rolls;";
+		if (K != 0)
+		{
+			continue;
+		}
+		// The Career page on RCOP 2027's third day: the wall hidden, RiverLine Rewards keeps its band.
+		ui_test::Expect(world::HeroFestPins(W).empty(), "FestHonestLines (Career): this career's hero has played no festival event yet");
+		HostsOpenRiverLine(P, ss::ui::RiverLine::Page::Career);
+		const ss::ui::DrawList Hidden = P.Settled();
+		ui_test::Expect(ui_test::Drew(Hidden, " of RiverLine rake this month"), "FestHonestLines (Career): RiverLine Rewards keeps the pin wall's band while the wall is hidden");
+		ss::net::EventInstance Ev;
+		const bool InPlay = HostsStripRun(*R27, Now, 0, Ev);
+		ui_test::Expect(InPlay, "FestHonestLines (Career): an RCOP 2027 event is in play on its third day");
+		if (InPlay)
+		{
+			HostsStripPlay(P, Ev.Id, std::max(1, Ev.Entries), 0);
+		}
+		ui_test::Expect(!world::HeroFestPins(P.S.Living()).empty(), "FestHonestLines (Career): the hero's first festival event gives them a pin");
+		HostsOpenRiverLine(P, ss::ui::RiverLine::Page::Career);
+		const ss::ui::DrawList Played = P.Settled();
+		ui_test::Expect(!ui_test::Drew(Played, " of RiverLine rake this month"), "FestHonestLines (Career): once the wall shows, RiverLine Rewards yields its band");
+	}
+	// The hero's festival pieces on the second day, planted as the world keeps titles (World::Read's honor lines, Npc -1); the Career page
+	// before and after them.
+	const ss::fest::Festival* Pen27 = HostsEditionOf(Brand::Pennant, 2027);
+	const ss::fest::Festival* Tco27 = HostsEditionOf(Brand::Tco, 2027);
+	if (!Feign26 || !Pen27 || !Tco27 || Pen27->TitleIds.size() < 2 || R26->TitleIds.size() < 2)
+	{
+		ui_test::Expect(false, "FestHonestLines (Career): FEIGN 2026, PENNANT 2027 (with its Mini) and the Championship Online 2027 are in fest::All()");
+	}
+	else
+	{
+		HostsOpenRiverLine(P, ss::ui::RiverLine::Page::Career);
+		Before = P.Settled();
+		P.S.DrainWorld();
+		auto Plant = [&P](int Year, const std::string& Title, const std::string& EventId, long long Prize, int Entries, double At) {
+			char AtText[32];
+			std::snprintf(AtText, sizeof(AtText), "%.1f", At);
+			P.S.Living().Read({"world", "honor", std::to_string(Year), Title, EventId, "-1", P.S.HeroName, std::to_string(Prize), std::to_string(Entries), AtText});
+		};
+		auto Minute = [](double At) { return std::to_string(static_cast<long long>(At)); };
+		const double BeltAt = static_cast<double>(R26->LastDay) * ss::net::MinutesPerDay + 23.0 * 60.0;
+		const double PenAt = static_cast<double>(Pen27->FirstDay + 1) * ss::net::MinutesPerDay + 20.0 * 60.0;
+		Plant(2026, R26->Name + " Player of the Series", R26->SeriesId + "#pos", 0, 1210, BeltAt);
+		Plant(2026, R26->Name + " Mini Main Event", R26->TitleIds[1] + "@" + Minute(BeltAt - 600.0), 1200000, 900, BeltAt - 300.0);
+		Plant(2026, Feign26->Name + " Main Event", Feign26->MainId + "@" + Minute(Feign26->MainStart), 2500000, 1400, Feign26->MainStart + 600.0);
+		Plant(2027, Pen27->Name + " Mini Main Event", Pen27->TitleIds[1] + "@" + Minute(PenAt), 79532, 2766, PenAt + 300.0);
+		Plant(2027, Tco27->Name + " Main Event", Tco27->MainId + "@" + Minute(Tco27->MainStart), 9000000, 5000, Tco27->MainStart + 600.0);
+		const std::vector<std::pair<const world::Award*, const world::Honor*>> Case = rn::NetFestCase(P.S.Living().HeroAwards(), P.S.Living(), -1);
+		std::vector<std::string> Pieces;
+		for (const std::pair<const world::Award*, const world::Honor*>& Pc : Case)
+		{
+			Pieces.push_back(Pc.second ? Pc.second->EventId : std::string("award"));
+		}
+		const std::vector<std::string> WantTail = {R26->SeriesId + "#pos", Feign26->MainId + "@" + Minute(Feign26->MainStart), Pen27->TitleIds[1] + "@" + Minute(PenAt)};
+		const bool Tail = Pieces.size() >= 3 && std::equal(WantTail.begin(), WantTail.end(), Pieces.end() - 3) && std::count(Pieces.begin(), Pieces.end(), std::string("award")) == static_cast<std::ptrdiff_t>(Pieces.size()) - 3;
+		ui_test::Expect(Tail, "FestHonestLines (Career): the trophy case holds RCOP 2026's belt, FEIGN 2026's trophy and the Pennant Ribbon by date, never the Championship Online's Main (its bracelet) or RCOP's Mini (no title object)");
+		int Bracelets = 0, Rings = 0;
+		for (const world::Award& A : P.S.Living().HeroAwards())
+		{
+			Bracelets += A.Ring ? 0 : 1;
+			Rings += A.Ring ? 1 : 0;
+		}
+		std::string Count = Bracelets > 0 ? std::to_string(Bracelets) + (Bracelets == 1 ? " bracelet" : " bracelets") : std::string();
+		Count += Rings > 0 ? (Count.empty() ? "" : " \xC2\xB7 ") + std::to_string(Rings) + (Rings == 1 ? " ring" : " rings") : "";
+		Count += (Count.empty() ? "" : " \xC2\xB7 ") + std::string("2 festival trophies \xC2\xB7 1 belt");
+		HostsOpenRiverLine(P, ss::ui::RiverLine::Page::Career);
+		After = P.Settled();
+		ui_test::Expect(ui_test::DrewRun(After, Count), ("FestHonestLines (Career): the trophy case's count line reads \"" + Count + "\" (U20)").c_str());
+		ui_test::Expect(!ui_test::Drew(After, " of RiverLine rake this month"), "FestHonestLines (Career): the trophy case's pieces leave the wall's band to the wall");
+		Report += " the trophy case \"" + Count + "\";";
+	}
+	ui_test::Expect(Planted < 0 || NameRows > 0, "FestHonestLines (defenders): a board or a Players tab draws a defender's name (PlayerName's pill checked on a real row)");
+	Report += Planted >= 0 ? " FEIGN 2026's Main planted for the Money List's fourth (npc " + std::to_string(Planted) + ");" : std::string(" no FEIGN 2026 Main planted (its roll holds one);");
+	std::printf("FestHonestLines (defenders):%s %d roll people read through the helpers, %d cards drawn (%d with DEFENDING CHAMPION, %d with an honorific line), "
+				"%d defender rows on the boards (%d pills); the Career page %zu vertices / %zu runs before the hero's festival pieces, %zu / %zu with them "
+				"(%+lld; the page within its measured cost + 4k, FH-7); %.2f s\n",
+		Report.c_str(), Helper, Cards, CardPills, CardLines, NameRows, NamePills, Before.Vertices.size(), HostsRuns(Before), After.Vertices.size(), HostsRuns(After),
+		static_cast<long long>(After.Vertices.size()) - static_cast<long long>(Before.Vertices.size()), std::chrono::duration<double>(std::chrono::steady_clock::now() - Began).count());
 }
 } // namespace
 
