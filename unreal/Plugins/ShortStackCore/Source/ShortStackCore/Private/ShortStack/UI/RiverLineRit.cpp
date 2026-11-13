@@ -23,6 +23,7 @@
 #include "ShortStack/Game/SiteShow.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/World.h"
+#include "ShortStack/Game/WorldFest.h"
 #include "ShortStack/Tournament.h"
 #include "ShortStack/UI/ChartArt.h"
 #include "ShortStack/UI/SiteArt.h"
@@ -36,6 +37,15 @@ namespace ss
 {
 namespace ui
 {
+namespace rlnet_detail
+{
+// Update 4 G1 (SPEC v1.7 §2.8.2, LEAD_CALLS R-18; F-hubs FH-4B): the register sheet's YOUR strip, U37 on a step event's sheet and the
+// wallet's festival step tickets, defined in UI/RiverLineNet.cpp beside EventPanel.
+bool NetSheetStrip(const Session& S, const net::EventInstance& E, std::string& Head, std::string& Race, std::string& Counts);
+std::string NetSheetGoodOn(const Session& S, const net::EventInstance& E, double World);
+int NetStepTicket(net::SiteId Site, const std::string& Ticket, double World, const fest::Festival*& Edition, std::string& GoodOn);
+} // namespace rlnet_detail
+
 namespace rlrit_detail
 {
 constexpr float RitRailW = 216.0f;   // the rail
@@ -227,12 +237,56 @@ std::string RitEventName(const std::string& Name)
 	return Short;
 }
 
-/** The tags after an event's name: what kind of night it is. */
+/** Update 4 G1 (SPEC v1.7 §2.7.4; F-hubs FH-3b): the festival's Short ("GRIT", "WRIT", "REIGN") for a festival series' id, "" for a
+ *  plain series (or none). */
+std::string RitFestShort(const std::string& SeriesId)
+{
+	const fest::Festival* F = SeriesId.empty() ? nullptr : fest::FestivalOf(SeriesId);
+	const net::SeriesInfo* Sr = F ? net::Site(F->Site).FindSeries(F->SeriesId) : nullptr;
+	return Sr ? Sr->Short : std::string();
+}
+
+/** Update 4 G1 (SPEC v1.7 §2.3.2, the lead's N-2; F-hubs FH-5a): a festival event's code as RunItTwice keeps it on its own surfaces,
+ *  the instance's name up to and including its ": " (Network::NameOf, so GRIT's two runs keep "-E" and "-L"), when the template's
+ *  series is a festival edition (fest::FestivalOf, the felt's test); "" for every other event, which keeps today's text. THE BOARD,
+ *  the Prospectus and the table header put it in front of what they print today; NetShortName and RitEventName are unchanged. */
+std::string RitFestCode(const net::Network& Net, const net::EventInstance& E)
+{
+	const net::EventTemplate& T = Net.TemplateOf(E);
+	if (T.Series.empty() || !fest::FestivalOf(T.Series))
+	{
+		return std::string();
+	}
+	const std::string Name = Net.NameOf(E);
+	const size_t Colon = Name.find(": ");
+	return Colon == std::string::npos ? std::string() : Name.substr(0, Colon + 2);
+}
+
+/** The table header's code (N-2): the seated table's instance (its spec's id) when it is a festival event's, else "". The id names one
+ *  instance and its name is a pure function of it, so the last table's code is kept: a festival table pays the instance lookup once,
+ *  not every frame. */
+std::string RitTableCode(const std::string& EventId)
+{
+	static std::pair<std::string, std::string> RitLastTableCode;
+	if (RitLastTableCode.first == EventId)
+	{
+		return RitLastTableCode.second;
+	}
+	const net::Network& Net = net::Site(RitSite);
+	const net::EventTemplate* T = Net.FindTemplate(RitTemplateOf(EventId));
+	net::EventInstance E;
+	const bool Fest = T && !T->Series.empty() && fest::FestivalOf(T->Series) && Net.FindInstance(EventId, E);
+	RitLastTableCode = {EventId, Fest ? RitFestCode(Net, E) : std::string()};
+	return RitLastTableCode.second;
+}
+
+/** The tags after an event's name: what kind of night it is. A festival's events read its Short, never "SERIES" (§2.7.4). */
 std::string RitTagOf(const net::EventTemplate& T)
 {
 	if (!T.Series.empty())
 	{
-		return "SERIES";
+		const std::string Fest = RitFestShort(T.Series);
+		return Fest.empty() ? std::string("SERIES") : Fest;
 	}
 	if (T.BuyInCents >= 20000)
 	{
@@ -595,11 +649,149 @@ void RitRail(RitCtx& X, bool Collapsed)
 
 // ------------------------------------------------------------------ the red tape (§3.4 Ticker)
 
+/** Update 4 G1 (SPEC v1.7 §2.7.4, U15; F-hubs FH-3b): RunItTwice's festival on the tape at World: the edition Live today (fest::LiveOn),
+ *  else the one in its Buildup (the countdown; an edition on stage in its Closing or Afterglow comes first, as the hub's routing
+ *  orders them; its Afterglow item is RitTapeChampion's, FH-5c). Null when none. */
+const fest::Festival* RitTapeFest(double World, fest::Phase& P)
+{
+	const net::Network& Net = net::Site(RitSite);
+	const int Today = net::DayOf(World);
+	if (const fest::Festival* L = fest::LiveOn(RitSite, Today))
+	{
+		P = fest::Phase::Live;
+		return L;
+	}
+	constexpr int TailDays = 14;
+	for (const fest::Festival* F : fest::Festivals(Today - TailDays, Today + fest::kBuildupDays + 1))
+	{
+		if (F->Site != RitSite)
+		{
+			continue;
+		}
+		P = fest::PhaseOf(*F, World, Net.Attached());
+		if (P == fest::Phase::Buildup || P == fest::Phase::Closing || P == fest::Phase::Afterglow)
+		{
+			return F;
+		}
+	}
+	P = fest::Phase::Off;
+	return nullptr;
+}
+
+/** The tape's festival countdown (U15): "{SHORT} · OPENS IN {D}D" in the Buildup; "{SHORT} · DAY {N} OF {M}" while Live, GRIT's
+ *  nightly form "GRIT · NIGHT {N} OF {Nights} · SHOWS AT {Show1} AND {Show2}" when its night's shows are two (today's first two
+ *  distinct starts of its events); "" otherwise. Every figure from the edition, its templates and the clock. */
+std::string RitTapeCountdown(const fest::Festival& F, fest::Phase P, double World)
+{
+	const std::string Short = RitFestShort(F.SeriesId);
+	const int Today = net::DayOf(World);
+	const int Days = F.LastDay - F.FirstDay + 1;
+	if (Short.empty())
+	{
+		return std::string();
+	}
+	if (P == fest::Phase::Buildup)
+	{
+		return Short + " \xC2\xB7 OPENS IN " + std::to_string(std::max(1, F.FirstDay - Today)) + "D";
+	}
+	if (P != fest::Phase::Live)
+	{
+		return std::string();
+	}
+	const int Day = std::min(Days, std::max(1, Today - F.FirstDay + 1));
+	if (F.Which == fest::Brand::Grit)
+	{
+		const net::Network& Net = net::Site(RitSite);
+		const double Midnight = static_cast<double>(Today) * net::MinutesPerDay;
+		std::vector<double> Shows;
+		for (const net::EventInstance& E : Net.Window(Midnight, Midnight + net::MinutesPerDay))
+		{
+			if (Net.TemplateOf(E).Series == F.SeriesId && E.Start >= Midnight && std::find(Shows.begin(), Shows.end(), E.Start) == Shows.end())
+			{
+				Shows.push_back(E.Start);
+			}
+		}
+		std::sort(Shows.begin(), Shows.end());
+		if (Shows.size() >= 2)
+		{
+			return Short + " \xC2\xB7 NIGHT " + std::to_string(Day) + " OF " + std::to_string(Days) + " \xC2\xB7 SHOWS AT " + RitClock(Shows[0]) + " AND " + RitClock(Shows[1]);
+		}
+	}
+	return Short + " \xC2\xB7 DAY " + std::to_string(Day) + " OF " + std::to_string(Days);
+}
+
+/** The tape's race leader (§2.7.4, §2.5.2): "{SHORT} · {NAME} LEADS THE RACE · {Points} PTS" while the edition's race runs and has a
+ *  leader (the world's FestTop; the hero reads YOU); "" otherwise. */
+std::string RitTapeLeader(const fest::Festival& F, const world::World& W)
+{
+	const std::string Short = RitFestShort(F.SeriesId);
+	if (Short.empty() || world::FestRaceKey(W) != F.SeriesId)
+	{
+		return std::string();
+	}
+	const std::vector<std::pair<int, world::FestScore>> Top = world::FestTop(W, 1);
+	if (Top.empty() || Top.front().second.Points <= 0.0)
+	{
+		return std::string();
+	}
+	const world::Npc* N = Top.front().first >= 0 ? W.Get(Top.front().first) : nullptr;
+	const std::string Who = Top.front().first < 0 ? std::string("YOU") : N ? RitUpper(N->Name) : std::string();
+	if (Who.empty())
+	{
+		return std::string();
+	}
+	return Short + " \xC2\xB7 " + Who + (Top.front().first < 0 ? " LEAD THE RACE \xC2\xB7 " : " LEADS THE RACE \xC2\xB7 ") +
+		Grouped(static_cast<int64_t>(std::llround(Top.front().second.Points))) + " PTS";
+}
+
+/** Update 4 G1 (SPEC v1.7 §2.1.4, U15; PLAN_FHUBS Q23; F-hubs FH-5c): RunItTwice's front page in a festival's Afterglow carries the
+ *  champion on the tape: "{SHORT} CHAMPION · {NAME}", the edition's Main Event champion on the world's roll (world::FestRoll, the
+ *  attached world's); "" while the roll holds no Main for it (no world, or nobody crowned), so the tape never invents one. */
+std::string RitTapeChampion(const fest::Festival& F)
+{
+	const std::string Short = RitFestShort(F.SeriesId);
+	const world::World* W = net::Site(RitSite).Attached();
+	if (Short.empty() || !W)
+	{
+		return std::string();
+	}
+	for (const world::FestRollRow& Row : world::FestRoll(*W, F.Which))
+	{
+		if (Row.Key == F.SeriesId && Row.Main)
+		{
+			return Short + " CHAMPION \xC2\xB7 " + RitUpper(Row.Main->Name);
+		}
+	}
+	return std::string();
+}
+
 /** The tape's items: world facts only, rebuilt each world minute (W5: nothing invented, no hashed counts). */
 std::vector<RitTapeItem> RitTapeBuild(RitCtx& X)
 {
 	std::vector<RitTapeItem> Out = X.U.Extra; // the tables' own lines first: the latest wins
 	const net::Network& Net = net::Site(RitSite);
+	// Update 4 G1 (SPEC v1.7 §2.7.4, FH-3b): the festival's countdown (Buildup) or its day (Live), and its race's leader, in white.
+	// FH-5c (§2.1.4, U15, Q23): its champion through the Afterglow.
+	fest::Phase FestP = fest::Phase::Off;
+	const fest::Festival* Fest = RitTapeFest(X.World, FestP);
+	if (Fest)
+	{
+		const std::string Count = RitTapeCountdown(*Fest, FestP, X.World);
+		if (!Count.empty())
+		{
+			Out.push_back({"fest:count", Count, RitWhite, 0});
+		}
+		const std::string Champ = FestP == fest::Phase::Afterglow ? RitTapeChampion(*Fest) : std::string();
+		if (!Champ.empty())
+		{
+			Out.push_back({"fest:champ", Champ, RitWhite, 0});
+		}
+		const std::string Lead = FestP == fest::Phase::Live ? RitTapeLeader(*Fest, X.S.Living()) : std::string();
+		if (!Lead.empty())
+		{
+			Out.push_back({"fest:lead", Lead, RitInk, 0});
+		}
+	}
 	// G2: the desk bells first (a starred event projected short as its late registration closes), in amber.
 	for (const RitBellView& B : X.P.Bells)
 	{
@@ -698,7 +890,8 @@ std::vector<RitTapeItem> RitTapeBuild(RitCtx& X)
 		}
 		Out.push_back({"big:" + Biggest->Id, Line, RitInk, 0});
 	}
-	// Projected overlays, the biggest two (amber: a money opportunity, never red).
+	// Projected overlays, the biggest two (amber: a money opportunity, never red). Update 4 G1 (SPEC v1.7 §2.7.4, FH-3b): while a
+	// festival is Live its headliners' projected overlays (its guaranteed events) go first.
 	std::vector<std::pair<Chips, std::string>> Shorts;
 	for (const net::EventInstance& E : Recent)
 	{
@@ -709,7 +902,15 @@ std::vector<RitTapeItem> RitTapeBuild(RitCtx& X)
 			Shorts.push_back({V.Cents, "ov:" + E.Id});
 		}
 	}
-	std::sort(Shorts.begin(), Shorts.end(), [](const auto& A, const auto& B) { return A.first > B.first; });
+	const auto Headliner = [&Net, Fest, FestP](const std::string& Key) {
+		net::EventInstance E;
+		return Fest && FestP == fest::Phase::Live && Net.FindInstance(Key.substr(3), E) && Net.TemplateOf(E).Series == Fest->SeriesId && Net.TemplateOf(E).GtdCents > 0;
+	};
+	std::sort(Shorts.begin(), Shorts.end(), [&Headliner](const auto& A, const auto& B) {
+		const bool Ha = Headliner(A.second);
+		const bool Hb = Headliner(B.second);
+		return Ha != Hb ? Ha : A.first > B.first;
+	});
 	for (size_t I = 0; I < Shorts.size() && I < 2; ++I)
 	{
 		net::EventInstance E;
@@ -848,15 +1049,16 @@ void RitTapeBar(RitCtx& X, float X0)
 
 // ------------------------------------------------------------------ the header (§3.4 Header) and the section slab
 
-void RitSectionSlab(RitCtx& X, float X0, const std::string& Name)
+void RitSectionSlab(RitCtx& X, float X0, const std::string& Name, float Least = 22.0f)
 {
 	X.C.FillPolygon({{X0, 32.0f}, {X0 + 300.0f, 32.0f}, {X0 + 283.0f, 84.0f}, {X0, 84.0f}}, RitC(RitRed));
 	X.C.FillPolygon({{X0, 32.0f}, {X0 + 300.0f, 32.0f}, {X0 + 291.5f, 58.0f}, {X0, 58.0f}}, RitC(RitWhite, 0.05f));
 	RitLedEdge(X.C, X0, 32.0f, 300.0f);
 	// The page's name in BoldCondensed 30 caps, Hot White, twice-printed in Deep Red; a long name (a table's event) fits down
-	// to 22, below 28 prints once, then ends with an ellipsis (the text box is x0+16 to x0+275).
+	// to 22 (a festival table's, its code in front, to 18: update 4 G1 N-2), below 28 prints once, then ends with an ellipsis (the
+	// text box is x0+16 to x0+275).
 	const std::string Words = RitUpper(Name);
-	const float Size = RitFit(X.C, Words, 30.0f, 22.0f, 259.0f);
+	const float Size = RitFit(X.C, Words, 30.0f, Least, 259.0f);
 	const float Base = 58.0f + Size * 0.36f;
 	if (Size >= RitTwiceFrom)
 	{
@@ -869,12 +1071,12 @@ void RitSectionSlab(RitCtx& X, float X0, const std::string& Name)
 	RitTwinSlash(X.C, X0 + 304.0f, 32.0f, 52.0f);
 }
 
-void RitHeaderBar(RitCtx& X, float X0, const std::string& Name, bool AtTable)
+void RitHeaderBar(RitCtx& X, float X0, const std::string& Name, bool AtTable, float Least = 22.0f)
 {
 	RitPanelBegin();
 	X.C.FillRect({X0, 32.0f, 1600.0f - X0, 52.0f}, RitC(RitOnyx));
 	X.C.FillRect({X0, 83.0f, 1600.0f - X0, 1.0f}, RitC(RitHair));
-	RitSectionSlab(X, X0, Name);
+	RitSectionSlab(X, X0, Name, Least);
 	const net::Network& Net = net::Site(RitSite);
 	if (!AtTable)
 	{
@@ -1309,9 +1511,13 @@ void RitBoardRow(RitCtx& X, const RitRow& Row, const Rect& R, int Visible, int I
 	}
 	// TIME, a flap tile (24-hour).
 	RitFlap(X.C, RitColTime, R.Y + 6.0f, RitClock(Row.E.Start), 14.0f, 22.0f, 5, RitTile::Gloss, Words);
-	// EVENT and its tag.
-	const std::string Name = rlnet_detail::NetShortName(T.Name);
-	const float Nw = RitText(X.C, Name, RitColEvent, R.Y + 22.0f, 14.0f, Words, RitFace::Body, Align::Left, Baseline::Alphabetic, 196.0f);
+	// EVENT and its tag. A festival event keeps its code in front (N-2): "WRIT 13: $1,050 NLHE [Main Event]", its name running on to
+	// the buy-in figure as screens 02 and 11 print it (every other row keeps its 196 units); the tag only beside a name under 186.
+	const std::string Code = RitFestCode(Net, Row.E);
+	const std::string Name = Code + rlnet_detail::NetShortName(T.Name);
+	const std::string Buy = RitBuyIn(T.BuyInCents);
+	const float Room = Code.empty() ? 196.0f : RitColBuy - RitMeasure(X.C, Buy, 15.0f, RitFace::Cond) - 12.0f - RitColEvent;
+	const float Nw = RitText(X.C, Name, RitColEvent, R.Y + 22.0f, 14.0f, Words, RitFace::Body, Align::Left, Baseline::Alphabetic, Room);
 	const std::string Tag = RitTagOf(T);
 	if (!Tag.empty() && Nw < 186.0f)
 	{
@@ -1319,7 +1525,7 @@ void RitBoardRow(RitCtx& X, const RitRow& Row, const Rect& R, int Visible, int I
 		RitText(X.C, Tag, RitColEvent + Nw + 8.0f, R.Y + 21.5f, 11.0f, RitC(Lit ? RitChrome : RitMuted), RitFace::Cond, Align::Left, Baseline::Alphabetic, RitColBuy - 74.0f - (RitColEvent + Nw + 8.0f));
 	}
 	// BUY-IN, GTD, FIELD with its chrome bar (the count so far against the template's usual field).
-	RitText(X.C, RitBuyIn(T.BuyInCents), RitColBuy, Fig, 15.0f, Words, RitFace::Cond, Align::Right);
+	RitText(X.C, Buy, RitColBuy, Fig, 15.0f, Words, RitFace::Cond, Align::Right);
 	RitText(X.C, T.GtdCents > 0 ? rlnet_detail::NetMoney(T.GtdCents) : std::string("\xE2\x80\x94"), RitColGtd, Fig, 15.0f, RitC(T.GtdCents > 0 && !St.Dim ? RitWhite : RitMuted), RitFace::Cond,
 		Align::Right);
 	const bool Counted = L.St != net::Status::Announced;
@@ -1561,8 +1767,9 @@ void RitProspectus(RitCtx& X, const std::vector<RitRow>& Rows, float LeadY)
 	}
 	const int StartMin = static_cast<int>(std::fmod(E.Start, net::MinutesPerDay));
 	RitText(X.C, "RIT-" + std::to_string(StartMin / 60 * 100 + StartMin % 60), Rx, 126.0f, 12.0f, RitC(RitChrome), RitFace::Mono, Align::Right);
-	// The name, twice-printed (fit down to 22), the twin stripe under it (the panel's one), FEATURED.
-	const std::string Name = RitUpper(rlnet_detail::NetShortName(T.Name));
+	// The name, twice-printed (fit down to 22), the twin stripe under it (the panel's one), FEATURED. A festival event keeps its code
+	// (N-2): "WRIT 13: $1,050 NLHE [MAIN EVENT]".
+	const std::string Name = RitUpper(RitFestCode(Net, E) + rlnet_detail::NetShortName(T.Name));
 	const float Ns = RitFit(X.C, Name, 30.0f, 22.0f, Rx - L - (T.Featured ? 76.0f : 0.0f));
 	RitTwice(X.C, Name, L, 164.0f, Ns, RitC(RitInk));
 	RitTwinH(X.C, L, 174.0f, 72.0f, 0.5f);
@@ -1678,6 +1885,29 @@ void RitProspectus(RitCtx& X, const std::vector<RitRow>& Rows, float LeadY)
 	Y += 18.0f;
 	X.C.FillRect({L, Y, Rx - L, 1.0f}, RitC(RitHair));
 	Y += 26.0f;
+	// Update 4 G1 (SPEC v1.7 §2.8.2, LEAD_CALLS R-18; F-hubs FH-4B): YOUR {FESTIVAL} once the hero has played the event's edition
+	// ("YOUR WRIT" with the race in Mono at its right, U10's line under it, mockup 02), then U37 while the hero holds the step ticket
+	// it takes; the tabs below give up the room they need (TabFloor).
+	std::string FestHead;
+	std::string FestRace;
+	std::string FestCounts;
+	if (rlnet_detail::NetSheetStrip(X.S, E, FestHead, FestRace, FestCounts))
+	{
+		const float Hw = RitText(X.C, FestHead, L, Y, 13.0f, RitC(RitInk), RitFace::Cond, Align::Left, Baseline::Alphabetic, (Rx - L) / 2.0f);
+		if (!FestRace.empty())
+		{
+			RitText(X.C, FestRace, Rx, Y, 13.0f, RitC(RitWhite), RitFace::Mono, Align::Right, Baseline::Alphabetic, Rx - L - Hw - 16.0f);
+		}
+		Y += 21.0f;
+		RitText(X.C, FestCounts, L, Y, 12.0f, RitC(RitMuted), RitFace::Body, Align::Left, Baseline::Alphabetic, Rx - L);
+		Y += 23.0f;
+	}
+	const std::string FestGoodOn = rlnet_detail::NetSheetGoodOn(X.S, E, X.World);
+	if (!FestGoodOn.empty())
+	{
+		RitText(X.C, FestGoodOn, L, Y, 12.0f, RitC(RitAmber), RitFace::Body, Align::Left, Baseline::Alphabetic, Rx - L);
+		Y += 22.0f;
+	}
 	// The League line (G2): what a win here scores at your division by core's LeagueScore, and the night's Matchday.
 	{
 		const int Day6 = net::DayOf(E.Start - 6.0 * 60.0);
@@ -1741,6 +1971,9 @@ void RitProspectus(RitCtx& X, const std::vector<RitRow>& Rows, float LeadY)
 	}
 	X.C.FillRect({L, Y + 27.0f, Rx - L, 1.0f}, RitC(RitHair));
 	const float By = Y + 52.0f;
+	// The last baseline a tab may print on above the register block's rule at 830 (FH-4B: only the festival lines above ever reach it).
+	const float TabFloor = 826.0f;
+	const auto TabLines = [TabFloor](float Top, int Most) { return Top > TabFloor ? 0 : std::min(Most, static_cast<int>((TabFloor - Top) / 18.0f) + 1); };
 	switch (X.U.Tab)
 	{
 	case 1:
@@ -1748,14 +1981,23 @@ void RitProspectus(RitCtx& X, const std::vector<RitRow>& Rows, float LeadY)
 		const int LateLevels = static_cast<int>(std::ceil(E.LateReg / std::max(1.0, T.LevelMinutes)));
 		RitTerm(X, L, Rx, By, "LEVEL 1", T.StartStack > 10000 ? std::string("100/200") : std::string("50/100"), RitInk);
 		RitTerm(X, L, Rx, By + 24.0f, "LEVELS", "every " + std::to_string(static_cast<int>(T.LevelMinutes)) + " min", RitInk);
-		RitTerm(X, L, Rx, By + 48.0f, "LATE REG", net::Countdown(E.LateReg) + " (to level " + std::to_string(LateLevels + 1) + ")", RitInk);
-		RitTerm(X, L, Rx, By + 72.0f, "STARTS", RitDay(net::DayOf(E.Start)) + " " + RitClock(E.Start), RitInk);
+		if (By + 48.0f <= TabFloor)
+		{
+			RitTerm(X, L, Rx, By + 48.0f, "LATE REG", net::Countdown(E.LateReg) + " (to level " + std::to_string(LateLevels + 1) + ")", RitInk);
+		}
+		if (By + 72.0f <= TabFloor)
+		{
+			RitTerm(X, L, Rx, By + 72.0f, "STARTS", RitDay(net::DayOf(E.Start)) + " " + RitClock(E.Start), RitInk);
+		}
 		break;
 	}
 	case 2:
 		RitTerm(X, L, Rx, By, "POOL SO FAR", Money(PoolNow), RitWhite);
 		RitTerm(X, L, Rx, By + 24.0f, "PER ENTRY", Money(Each), RitInk);
-		RitParagraph(X.C, RitPaysGrow, L, By + 50.0f, Rx - L, 13.0f, RitC(RitMuted), 18.0f, 3);
+		if (TabLines(By + 50.0f, 3) > 0)
+		{
+			RitParagraph(X.C, RitPaysGrow, L, By + 50.0f, Rx - L, 13.0f, RitC(RitMuted), 18.0f, TabLines(By + 50.0f, 3));
+		}
 		break;
 	case 3:
 	{
@@ -1823,7 +2065,7 @@ void RitProspectus(RitCtx& X, const std::vector<RitRow>& Rows, float LeadY)
 		int Shown = 0;
 		for (const RitEntrant& En : Ents)
 		{
-			if (Shown >= 3)
+			if (Shown >= 3 || By + static_cast<float>(Shown) * 34.0f > TabFloor)
 			{
 				break;
 			}
@@ -1849,7 +2091,7 @@ void RitProspectus(RitCtx& X, const std::vector<RitRow>& Rows, float LeadY)
 		break;
 	}
 	default:
-		RitParagraph(X.C, !T.Blurb.empty() ? T.Blurb : std::string(RitPaysGrow), L, By - 4.0f, Rx - L, 13.0f, RitC(RitMuted), 18.0f, 4);
+		RitParagraph(X.C, !T.Blurb.empty() ? T.Blurb : std::string(RitPaysGrow), L, By - 4.0f, Rx - L, 13.0f, RitC(RitMuted), 18.0f, std::max(1, TabLines(By - 4.0f, 4)));
 		break;
 	}
 	// The register block {1128,830,448,110}: the line, the countdown flap, the shared RegisterBlock as a red slab.
@@ -1872,6 +2114,79 @@ void RitProspectus(RitCtx& X, const std::vector<RitRow>& Rows, float LeadY)
 	RitText(X.C, RitSettles, Rx, 940.0f, 11.0f, RitC(RitMuted), RitFace::Body, Align::Right);
 }
 
+/** Update 4 G1 (SPEC v1.7 §2.8.2, the lead's N-3; F-hubs FH-5a): a selection held on RunItTwice, by laptop: the instance a festival
+ *  hub's Main card opened and the Board's filter, toggles and sort when it did. */
+struct RitHeldEvent
+{
+	std::string EventId;
+	RiverLine::Filter Filter = RiverLine::Filter::All;
+	bool GtdOnly = false;
+	bool LateOnly = false;
+	bool Mine = false;
+	int Sort = 0;
+};
+
+std::map<const RiverLine*, RitHeldEvent>& RitHeldEvents()
+{
+	static std::map<const RiverLine*, RitHeldEvent> ByLaptop;
+	return ByLaptop;
+}
+
+/** The Main card's Details on RunItTwice (§2.8.2, N-3): selects the instance (the Main's, Network::Next(MainId)) and holds it, so the
+ *  Prospectus opens on it, drawn as a Board row would draw it, even while THE BOARD's 24-hour window doesn't list it, and the Board's
+ *  fallback leaves it there until the player picks a row, a filter or a sort. The festival hub calls it (stream A's fsmain). */
+void RitHoldSelection(RiverLine& RL, const std::string& InstanceId)
+{
+	RL.SelectEvent(InstanceId);
+	const RitUi& U = RitOf(&RL);
+	RitHeldEvent& H = RitHeldEvents()[&RL];
+	H.EventId = InstanceId;
+	H.Filter = Access::FilterShown(RL);
+	H.GtdOnly = U.GtdOnly;
+	H.LateOnly = U.LateOnly;
+	H.Mine = U.Mine;
+	H.Sort = U.Sort;
+}
+
+/** A laptop going (RiverLineCard.cpp's ForgetNet, from ~RiverLine): its held selection with it. */
+void RitForgetHeld(const RiverLine* RL)
+{
+	RitHeldEvents().erase(RL);
+}
+
+/** The held selection's row when it still holds (N-3): the selection is still the held instance, the filter, toggles and sort are
+ *  as they were, and the instance is one the Board would list (announced, registering or in late registration). Else the hold goes. */
+bool RitHeldRow(RitCtx& X, RitRow& Out)
+{
+	auto& Held = RitHeldEvents();
+	const auto It = Held.find(&X.RL);
+	if (It == Held.end())
+	{
+		return false;
+	}
+	const RitHeldEvent& H = It->second;
+	const net::Network& Net = net::Site(RitSite);
+	net::EventInstance E;
+	bool Holds = H.EventId == X.RL.SelectedEvent() && H.Filter == Access::FilterShown(X.RL) && H.GtdOnly == X.U.GtdOnly && H.LateOnly == X.U.LateOnly &&
+		H.Mine == X.U.Mine && H.Sort == X.U.Sort && Net.FindInstance(H.EventId, E);
+	net::LiveState L;
+	if (Holds)
+	{
+		L = Net.Live(E, X.World);
+		Holds = L.St == net::Status::Announced || L.St == net::Status::Registering || L.St == net::Status::LateReg;
+	}
+	if (!Holds)
+	{
+		Held.erase(It);
+		return false;
+	}
+	Out.E = E;
+	Out.L = L;
+	Out.Lock.clear();
+	Out.Joinable = Net.Joinable(E, &Out.Lock, X.S.Unlocks());
+	return true;
+}
+
 void RitBoardPage(RitCtx& X)
 {
 	// The wave: on every open the visible statuses flip into place row by row.
@@ -1888,7 +2203,11 @@ void RitBoardPage(RitCtx& X)
 	{
 		Has = Has || R.E.Id == X.RL.SelectedEvent();
 	}
-	if (!Has && !Rows.empty())
+	// A held selection (N-3: a festival hub's Main card) isn't swapped out: the Prospectus draws it off the Board's window. The hold is
+	// checked every frame, so a row pick (on or off the Board), a filter or a sort ends it at once.
+	RitRow Held;
+	const bool Holding = RitHeldRow(X, Held) && !Has;
+	if (!Has && !Holding && !Rows.empty())
 	{
 		const RitRow* Pick = &Rows.front();
 		for (const RitRow& R : Rows)
@@ -1905,6 +2224,13 @@ void RitBoardPage(RitCtx& X)
 	float LeadY = -1.0f;
 	RitPanelBegin();
 	RitBoardGrid(X, Rows, RitArrivals(X), LeadY);
+	if (Holding)
+	{
+		std::vector<RitRow> Shown = Rows;
+		Shown.push_back(Held);
+		RitProspectus(X, Shown, LeadY);
+		return;
+	}
 	RitProspectus(X, Rows, LeadY);
 }
 
@@ -3206,9 +3532,13 @@ void RitClubPage(RitCtx& X)
 	float Ty = Wel.Y + 64.0f;
 	int Held = 0;
 	const std::string Prefix = std::string(net::KeyOf(RitSite)) + ".";
+	// Update 4 G1 (LEAD_CALLS R-18; F-hubs FH-4B): a festival step ticket is no welcome ticket: it is listed apart below them.
+	const auto StepTicket = [&X](const std::string& Key, const fest::Festival*& Ed, std::string& GoodOn) { return rlnet_detail::NetStepTicket(RitSite, Key, X.World, Ed, GoodOn); };
 	for (const auto& Tk : X.S.Life.Tickets)
 	{
-		if (Tk.second <= 0 || Tk.first.compare(0, Prefix.size(), Prefix) != 0 || Ty > Wel.Y + Wel.H - 16.0f)
+		const fest::Festival* StepEd = nullptr;
+		std::string StepGood;
+		if (Tk.second <= 0 || Tk.first.compare(0, Prefix.size(), Prefix) != 0 || Ty > Wel.Y + Wel.H - 16.0f || StepTicket(Tk.first, StepEd, StepGood) > 0)
 		{
 			continue;
 		}
@@ -3228,6 +3558,22 @@ void RitClubPage(RitCtx& X)
 	{
 		RitText(X.C, RitTicketsNone, Wel.X + 24.0f, Ty, 14.0f, RitC(RitMuted), RitFace::Body);
 		RitParagraph(X.C, RitTicketsRule, Wel.X + 24.0f, Ty + 26.0f, 600.0f, 13.0f, RitC(RitMuted), 18.0f, 2);
+	}
+	// The festival step tickets, apart: a STEP {K} tag (U35) in amber, the edition and U37 while its runs still take entries.
+	float Sy = Held > 0 ? Ty : Ty + 76.0f;
+	for (const auto& Tk : X.S.Life.Tickets)
+	{
+		const fest::Festival* Ed = nullptr;
+		std::string GoodOn;
+		const int Step = Tk.second > 0 && Tk.first.compare(0, Prefix.size(), Prefix) == 0 ? StepTicket(Tk.first, Ed, GoodOn) : 0;
+		if (Step <= 0 || !Ed || Sy > Wel.Y + Wel.H - 16.0f)
+		{
+			continue;
+		}
+		const float Tw = RitTag(X.C, Wel.X + 24.0f, Sy - 13.0f, "STEP " + std::to_string(Step), RitAmber, RitOnyx, 11.0f);
+		RitText(X.C, Ed->Name + (Tk.second > 1 ? " x" + std::to_string(Tk.second) : std::string()) + (GoodOn.empty() ? std::string() : " \xC2\xB7 " + GoodOn), Wel.X + 32.0f + Tw, Sy, 15.0f,
+			RitC(RitInk), RitFace::Name, Align::Left, Baseline::Alphabetic, 620.0f - Tw);
+		Sy += 28.0f;
 	}
 	X.C.FillRect({Wel.X + 680.0f, Wel.Y + 16.0f, 1.0f, Wel.H - 32.0f}, RitC(RitHair));
 	RitLabel(X.C, "From RunItTwice", Wel.X + 704.0f, Wel.Y + 32.0f, 12.0f, RitC(RitMuted));
@@ -4335,7 +4681,10 @@ void RiverLine::RitFrame(double Now, bool Preview)
 		// The tape and the header before any overlay: the card's backdrop (from y 64) and the autoplay panel draw over them and
 		// take the clicks where they overlap, as over RiverLine's top bar (a click on the scrim never reaches a header chip).
 		RitTapeBar(X, RitRailMini);
-		RitHeaderBar(X, RitRailMini, S.T ? RitEventName(S.T->Spec.Name) : std::string("THE TABLE"), true);
+		// A festival table's header keeps the event's code (N-2): "GRIT 02-E: Box Office PKO", fit down to 18 so the code and the
+		// event's name both print.
+		const std::string TableCode = S.T ? RitTableCode(S.T->Spec.Id) : std::string();
+		RitHeaderBar(X, RitRailMini, S.T ? TableCode + RitEventName(S.T->Spec.Name) : std::string("THE TABLE"), true, TableCode.empty() ? 22.0f : 18.0f);
 		if (!Preview)
 		{
 			U.SeenPage = Page::Embercrest; // not on a page: the Board waves again when it's opened
@@ -4426,9 +4775,12 @@ void RiverLine::RitFrame(double Now, bool Preview)
 			case Page::Desk: RitDeskPage(X); break;
 			case Page::Series:
 				// Update 4 G1 (SPEC v1.7 §2.8.1, FH-1c): a festival (WRIT, GRIT, REIGN) is its hub in RunItTwice's content rect, one
-				// panel as the programme is; a plain series keeps the programme.
+				// panel as the programme is; a plain series keeps the programme. FH-3b (§2.7.4): the section slab twice-prints the
+				// festival's name (its Short: "REIGN").
 				if (const fest::Festival* HubFest = rlnet_detail::NetHubEdition(RitSite, SeriesId, World))
 				{
+					const std::string FestName = RitFestShort(HubFest->SeriesId);
+					Name = FestName.empty() ? Name : FestName;
 					RitPanelBegin();
 					FestivalHub(rlnet_detail::NetHubRect(RitSite), *HubFest, Now);
 				}

@@ -5,8 +5,10 @@
 #include "RiverLineShared.h"
 
 #include "ShortStack/Game/Badges.h"
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/World.h"
+#include "ShortStack/Game/WorldFest.h"
 #include "ShortStack/UI/BadgeArt.h"
 #include "ShortStack/UI/EventArt.h"
 
@@ -181,6 +183,11 @@ void CardBadgeTiles(Canvas& Cv, Ui& UI, const Session& S, int Npc, const badge::
 }
 } // namespace rlcard_detail
 
+namespace rlrit_detail
+{
+void RitForgetHeld(const RiverLine* RL); // UI/RiverLineRit.cpp (update 4 G1, FH-5a): a festival hub's held RunItTwice selection, by laptop
+} // namespace rlrit_detail
+
 namespace rlnet_detail
 {
 std::map<const RiverLine*, NetTip>& TipMap()
@@ -209,7 +216,14 @@ void ForgetNet(const RiverLine* RL)
 {
 	TipMap().erase(RL);
 	ChoiceMap().erase(RL);
+	rlrit_detail::RitForgetHeld(RL); // RunItTwice's held selection (update 4 G1 N-3, FH-5a)
 }
+
+// Update 4 G1 (SPEC v1.7 §2.6.3, §2.6.4; F-hubs FH-6b; UI/RiverLineNet.cpp): the defender, the honorific line, the festival pieces.
+const fest::Festival* NetFestDefends(const world::World& W, int Npc, double WorldMin);
+std::string NetFestHonorific(const world::World& W, int Npc, double WorldMin);
+std::vector<std::pair<const world::Award*, const world::Honor*>> NetFestCase(const std::vector<world::Award>& Awards, const world::World& W, int Npc);
+void NetFestPiece(Canvas& Cv, const world::World& W, const std::pair<const world::Award*, const world::Honor*>& Piece, float Cx, float Cy, float Size, double Time);
 } // namespace rlnet_detail
 
 using namespace rlcard_detail;
@@ -263,6 +277,12 @@ void RiverLine::PlayerCard(double Now)
 	{
 		Nx += NetPill(*C, "RIVAL", Nx, R.Y + 40.0f, Hex(0xb36bff), true, 10.0f) + 8.0f;
 	}
+	// Update 4 G1 (SPEC v1.7 §2.6.3, U21; F-hubs FH-6b): DEFENDING CHAMPION beside RIVAL, from the defended edition's Announced phase to
+	// its crown (NetFestDefends; never for a belt, a Mini or a Micro title).
+	if (NetFestDefends(W, CardShown, World))
+	{
+		Nx += NetPill(*C, "DEFENDING CHAMPION", Nx, R.Y + 40.0f, pal::Gold, false, 10.0f) + 8.0f;
+	}
 	const badge::Set& Held = NetBadgesOf(S, CardShown);
 	const std::vector<badge::Badge> Shows = NetCardBadges(Held, 32, Frame);
 	const std::vector<badge::Badge> Rail(Shows.begin(), Shows.begin() + static_cast<std::ptrdiff_t>(std::min<size_t>(Shows.size(), 6)));
@@ -306,31 +326,50 @@ void RiverLine::PlayerCard(double Now)
 			NetPill(*C, "NEW FACE", Nx, R.Y + 40.0f, pal::Accent, true, 10.0f);
 		}
 	}
-	// Their bracelets and rings on a shelf, the latest first (the TROPHIES tab has them all).
-	if (!P.Awards.empty())
+	// Their bracelets and rings on a shelf, the latest first (the TROPHIES tab has them all). Update 4 G1 (SPEC v1.7 §2.6.4; F-hubs FH-6b):
+	// their festival trophies, belts and championship title objects join them by date, from their Honors (NetFestCase), and the label
+	// names them.
+	const std::vector<std::pair<const world::Award*, const world::Honor*>> Shelf = NetFestCase(P.Awards, W, CardShown);
+	if (!Shelf.empty())
 	{
-		const size_t Shown = std::min<size_t>(P.Awards.size(), 4);
+		const size_t Shown = std::min<size_t>(Shelf.size(), 4);
 		float Sx = R.X + R.W - 30.0f;
 		const float Sy = R.Y + 112.0f;
-		if (P.Awards.size() > Shown)
+		if (Shelf.size() > Shown)
 		{
-			Sx -= UI.Text("+" + std::to_string(P.Awards.size() - Shown), Sx, Sy + 6.0f, Ts(15.0f, 800, pal::Gold, Align::Right, Baseline::Alphabetic, true)) + 10.0f;
+			Sx -= UI.Text("+" + std::to_string(Shelf.size() - Shown), Sx, Sy + 6.0f, Ts(15.0f, 800, pal::Gold, Align::Right, Baseline::Alphabetic, true)) + 10.0f;
 		}
 		const float Left = Sx - Nf(Shown) * 52.0f;
 		C->FillRoundRect({Left - 8.0f, Sy + 20.0f, Sx - Left + 12.0f, 5.0f}, 2.5f, Paint::Linear({Left, 0.0f}, {Sx, 0.0f}, Hex(0x3a2a0c), Hex(0x6b4e16)));
 		for (size_t K = 0; K < Shown; ++K)
 		{
-			const world::Award& A = P.Awards[P.Awards.size() - 1 - K];
 			const float X = Sx - 26.0f - Nf(K) * 52.0f;
-			eventart::Trophy(*C, A, X, Sy, 50.0f, Now + 0.7 * static_cast<double>(K));
+			NetFestPiece(*C, W, Shelf[Shelf.size() - 1 - K], X, Sy, 50.0f, Now + 0.7 * static_cast<double>(K));
 		}
-		NetSpaced(*C, P.Bracelets > 0 && P.Rings > 0 ? "BRACELETS & RINGS" : P.Bracelets > 0 ? (P.Bracelets == 1 ? "BRACELET" : "BRACELETS") : (P.Rings == 1 ? "RING" : "RINGS"),
-			Sx, Sy - 30.0f, 9.5f, 800, pal::Orange, 1.6f, Align::Right);
+		int Belts = 0;
+		for (const std::pair<const world::Award*, const world::Honor*>& Piece : Shelf)
+		{
+			Belts += Piece.second && world::IsCrownHonor(*Piece.second) ? 1 : 0;
+		}
+		const int Trophies = static_cast<int>(Shelf.size() - P.Awards.size()) - Belts;
+		std::string Label = P.Bracelets > 0 && P.Rings > 0 ? "BRACELETS & RINGS" : P.Bracelets > 0 ? (P.Bracelets == 1 ? "BRACELET" : "BRACELETS") : (P.Rings == 1 ? "RING" : "RINGS");
+		if (Trophies + Belts > 0)
+		{
+			Label = P.Bracelets > 0 ? (P.Bracelets == 1 ? "BRACELET" : "BRACELETS") : std::string();
+			Label += P.Rings > 0 ? (Label.empty() ? "" : " \xC2\xB7 ") + std::string(P.Rings == 1 ? "RING" : "RINGS") : std::string();
+			Label += Trophies > 0 ? (Label.empty() ? "" : " \xC2\xB7 ") + std::string(Trophies == 1 ? "FESTIVAL TROPHY" : "FESTIVAL TROPHIES") : std::string();
+			Label += Belts > 0 ? (Label.empty() ? "" : " \xC2\xB7 ") + std::string(Belts == 1 ? "BELT" : "BELTS") : std::string();
+		}
+		NetSpaced(*C, Label, Sx, Sy - 30.0f, 9.5f, 800, pal::Orange, 1.6f, Align::Right);
 	}
 	const std::string Since = P.Arrived >= 0 ? "on " + CardJoinedSite(N) + " since " + net::DateLabel(P.Arrived) + ", " + std::to_string(world::YearOf(P.Arrived))
 											 : "on the scene since " + std::to_string(P.Since);
-	UI.Text(P.Known + "  \xC2\xB7  " + std::to_string(P.Age) + "  \xC2\xB7  " + Since, R.X + 142.0f, R.Y + 98.0f,
-		Ts(16.0f, 600, CardSoft(), Align::Left, Baseline::Alphabetic, false, 640.0f));
+	// Update 4 G1 (SPEC v1.7 §2.6.3, U21; F-hubs FH-6b): the honorific line leads what the world calls them, in gold: their top title by
+	// the title order (NetFestHonorific); nobody without a festival title draws it, so their line is as before.
+	const std::string Honorific = NetFestHonorific(W, CardShown, World);
+	const float Hw = Honorific.empty() ? 0.0f : UI.Text(Honorific, R.X + 142.0f, R.Y + 98.0f, Ts(16.0f, 700, pal::Gold, Align::Left, Baseline::Alphabetic, false, 640.0f));
+	UI.Text((Honorific.empty() ? std::string() : std::string("  \xC2\xB7  ")) + P.Known + "  \xC2\xB7  " + std::to_string(P.Age) + "  \xC2\xB7  " + Since, R.X + 142.0f + Hw, R.Y + 98.0f,
+		Ts(16.0f, 600, CardSoft(), Align::Left, Baseline::Alphabetic, false, 640.0f - Hw));
 	UI.Text(P.Stakes + "  \xC2\xB7  " + P.Live + "  \xC2\xB7  " + P.Style + (P.Streams ? "  \xC2\xB7  Kast, " + Grouped(P.Followers) + " followers" : std::string()), R.X + 142.0f, R.Y + 124.0f,
 		Ts(14.0f, 500, pal::Muted, Align::Left, Baseline::Alphabetic, false, 700.0f));
 	// Update 4 (SPEC v1.7 §3.19.3; step A-2, LEAD_CALLS Q-6): the OVERVIEW's TPI line under the identity line (RiverLineCardStory.cpp,

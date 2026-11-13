@@ -7,6 +7,7 @@
 #include "RiverLineKastGrowth.h"
 #include "RiverLineShared.h"
 
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Session.h"
@@ -63,6 +64,10 @@ std::pair<int, std::string> Word(const life::Mark& M)
 	case site::MarkBonus: return {5, "BONUS"};
 	case site::MarkRewards: return {6, "REWARDS"};
 	case site::MarkSeries: return {8, "SERIES"};
+	// Update 4 G1 (SPEC v1.7 §2.9.1, U22; F-hubs FH-3b): the festivals' marks (fest::Marks, F-net's; Session::Marks merges them), every
+	// festival from its Announced phase, account or not: its first day and its Main Event's start.
+	case fest::MarkFestival: return {7, "FESTIVAL"};
+	case fest::MarkFestMain: return {6, "MAIN"};
 	default: return {9, std::string()};
 	}
 }
