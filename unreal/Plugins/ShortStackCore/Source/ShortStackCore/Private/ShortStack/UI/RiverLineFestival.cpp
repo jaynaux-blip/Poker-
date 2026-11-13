@@ -86,6 +86,32 @@
 //   HubSteps) carry "STEP {K}" in the number's place on the row's first line (a satellite has no number) and "FOR A STEP {K} TICKET"
 //   or "FOR A MAIN EVENT SEAT" in SATELLITE's place, each figure from the ladder itself (the rung counted from the bottom; the rung its
 //   seat is), never typed. RCOP's recurring step1-4 are no edition's own ladder and keep SATELLITE (U35 lists STEP 1-3).
+//
+// G1 FH-5b (stream A, after F-world's FW-4: WHO'S IN; SPEC v1.7 §2.8.4, §2.8.2, §2.1.4, §2.6.3, §2.6.7, §4.7.3, §2.11 U4, U13, U14,
+// U38; PLAN_G1 §2.1, PLAN_FHUBS §4 FH-5 and its Corrections; LEAD_CALLS R-16, R-21, R-33): Main Event Day, the Afterglow and WHO'S IN.
+// - The broadcast (Phase::MainDay, and Closing until the crown): the banner becomes the hero band (the crest, the word-mark at 34,
+//   MAIN EVENT DAY, a split-flap row of 44 x 64 cells counting down to the Main's start and then flipping to its state, REGISTERING,
+//   LATE REG, RUNNING, FINAL TABLE or COMPLETE, and "LIVE · {Left} LEFT OF {Entries}" from Network::Live); the opening bell (the look's
+//   sting once per laptop and Main, and "The Main Event is under way." on an Accent band for 3 s, when the hub draws within three world
+//   minutes of the Main's start); the guarantee meter inside the Main card (THE GUARANTEE, the pool so far against a tick at the
+//   guarantee, PROJ SHORT or PROJ OVER from site::show::OverlayOf while registering, OVERLAY once registration closed short); the
+//   schedule's place taken by REGISTRATIONS (site::show::Registrations as ChartArt's LineChart in the skin's theme) and WHO'S IN.
+// - WHO'S IN from World::FieldStoriesOf(<the Main's instance>) (FW-4; a const view, cached per world state): the first twelve people
+//   in the query's one order (eight on Ignite, R-33's two columns at 48), each an r 12 avatar, PlayerName and its line: the three
+//   championship reasons through FestWhyLine (R-16, R-21), the others U38's labels ("Met {N}x" from the bond's encounters, "Defending
+//   champion", "Won a seat in {Satellite}" naming the edition's one satellite into the Main, else "a satellite", "Team pro", "Streams on
+//   Kast") and a roll champion's "{Festival} champion" (§4.7.3's "slychip · RCOP 2026 champion"); the Qualifiers group's count line
+//   (U14, "regulars", singular at one) only when it is 1 or more. Empty (after the event, or before anyone registered): not drawn.
+// - The reel and the champion card, once the Main's result exists (Network::Result): the reel takes REGISTRATIONS' place, FINAL TABLE
+//   from 9th to 1st, one row every 0.6 s from the laptop's first draw after the result (PlayerName, prizes in NetMoney: the world's
+//   result, or the engine's when the hero played); the champion card takes the Main card's (CHAMPION, the trophy at 64, the name or
+//   YOU, the prize, U14's line "{Name} won {Trophy} and {Prize}." and the journey from World::ProfileOf: the arrival line and the
+//   titles on record). The champion card stays through the Afterglow, where the hub is the schedule again (the banner's COMPLETE,
+//   CHAMPIONS preselected).
+// - The Main card's U4 line, "DEFENDING CHAMPION · {Name} · registered", while FieldStoriesOf lists a DefendingChampion (no Registered
+//   call, Q17). A championship's Mini and Micro rows are pinned at the top of their day's rows (the broadcast is the Main's day only).
+// - Previews (FestPreviewStill's flap, bell and reel half): every flap cell its settled character, the reel whole, no bell, no sound;
+//   nothing a still draws touches the side state.
 #include "ShortStack/UI/RiverLine.h"
 
 #include "../Game/SitesDetail.h"
@@ -99,8 +125,10 @@
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/World.h"
 #include "ShortStack/Game/WorldFest.h"
+#include "ShortStack/UI/ChartArt.h"
 #include "ShortStack/UI/EventArt.h"
 #include "ShortStack/UI/FestivalArt.h"
+#include "ShortStack/UI/SiteMotion.h"
 
 #include <algorithm>
 #include <cmath>
@@ -238,6 +266,43 @@ std::vector<std::string> FestUiInventory()
 		"label\t{Prize} \xC2\xB7 1st of {Entries}",
 		"label\t{Points} pts",
 		"label\t{Place} of {Entries}",
+		// FH-5b. U4: the Main card's defending champion while registered. U13: the broadcast's labels, the guarantee meter's forms and
+		// the reel's and the champion card's titles; the Main's states on the flap (§2.8.4, §2.1.4's Closing).
+		"label\tDEFENDING CHAMPION \xC2\xB7 {Name} \xC2\xB7 registered",
+		"label\tMAIN EVENT DAY",
+		"label\tREGISTRATIONS",
+		"label\tTHE GUARANTEE",
+		"label\tPROJ SHORT \xC2\xB7 {Amount}",
+		"label\tPROJ OVER \xC2\xB7 {Amount}",
+		"label\tOVERLAY \xC2\xB7 {Amount}",
+		"label\tWHO'S IN",
+		"label\tLIVE \xC2\xB7 {Left} LEFT OF {Entries}",
+		"label\tFINAL TABLE",
+		"label\tCHAMPION",
+		"label\tREGISTERING",
+		"label\tLATE REG",
+		"label\tRUNNING",
+		"label\t{H}:{M}:{S}",
+		// U14: the opening bell's band, the champion card's line and WHO'S IN's Qualifiers count (singular at one); the journey's parts
+		// from the person's card (World::ProfileOf: the arrival line, the titles on record).
+		"sentence\tThe Main Event is under way.",
+		"sentence\t{Name} won {Trophy} and {Prize}. {Journey}",
+		"sentence\t{N} regulars won their seat by satellite.",
+		"sentence\t1 regular won their seat by satellite.",
+		"sentence\tOn {Site} since {Year}.",
+		"sentence\tOn the scene since {Year}.",
+		"sentence\tFirst title on record.",
+		"sentence\t{N} titles on record.",
+		"label\tYOU",
+		// U38: WHO'S IN's other labels (the three who:fest:* lines print through F-world's FestWhyLine, R-16, R-21), and a roll champion's
+		// line (§4.7.3: "slychip · RCOP 2026 champion"; a belt holder's "Player of the Series, {Festival}", no year before "Player": X1).
+		"label\tMet {N}x",
+		"label\tDefending champion",
+		"label\tWon a seat in {Satellite}",
+		"label\tTeam pro",
+		"label\tStreams on Kast",
+		"label\t{Festival} champion",
+		"label\tPlayer of the Series, {Festival}",
 	};
 	for (std::string& Line : ui::rlfest_detail::HostUiStrings())
 	{
@@ -271,6 +336,11 @@ struct Access
 	static double WorldOf(const RiverLine& RL) { return RL.World; }
 	// FH-4A: a name as the lobby draws it (its flag, the name opening the card, one badge and one pill; the player's own in neon).
 	static void PlayerName(RiverLine& RL, int Npc, float X, float Y, float Size, float MaxW, uint8_t Frame) { RL.PlayerName(Npc, X, Y, Size, MaxW, true, Frame); }
+	// FH-5b: a placing's name as the lobby draws it (someone nobody follows: their flag and screen name), and a laptop cue (the opening
+	// bell's sting; the session plays it once an id every 50 ms).
+	static void PlacingPlayer(RiverLine& RL, const net::Placing& P, float X, float Y, float Size, float MaxW) { RL.PlayerName(P, X, Y, Size, MaxW, true); }
+	static void Sound(RiverLine& RL, SoundId Id, float Vol) { RL.S.UiSound(Id, Vol); }
+	static void SetPreviewing(RiverLine& RL, bool On) { RL.Previewing = On; }
 };
 
 /** THE FESTIVAL YEAR's ten brands in calendar order (§2.8.2: the cells' ids fsy0..9). */
@@ -386,7 +456,81 @@ struct HubFacts
 	world::HeroFestPin Pin;                 // the edition's pin (Grade 0: none)
 	world::HeroFestMark Mark;               // the hero's kept mark for the edition (world::HeroMarks; None before the crown)
 	std::vector<world::HeroFestResult> Results; // world::HeroFestResults, newest first
+	// FH-5b: Main Event Day (§2.8.4), read here and nowhere else.
+	bool Broadcast = false;                 // Phase::MainDay or Closing with the Main's instance: the hero band and the broadcast
+	net::LiveState MainLive;                // Network::Live(Main, World)
+	bool HasResult = false;                 // the Main has finished and its final table exists (the reel, the champion card)
+	std::vector<net::Placing> FinalTable;   // Network::Result(Main), places 1..9
+	::ss::site::show::OverlayView MainOverlay; // the guarantee meter (site::show::OverlayOf)
+	double MainEach = 0.0;                  // cents an entry adds to the Main's pool (the rake's prize share)
+	struct Who
+	{
+		int Npc = -1;
+		std::string Line;                   // the person's reason line ("" for the rival: PlayerName's own pill says it)
+	};
+	std::vector<Who> WhoIn;                 // World::FieldStoriesOf(Main): its people in the query's order, at most twelve
+	int Qualifiers = 0;                     // the Qualifiers group: registered regulars who won their seat by satellite
+	int Defender = -1;                      // FieldStoriesOf's DefendingChampion (U4), -1 none
+	std::vector<::ss::site::show::RegPoint> Regs; // site::show::Registrations(Main, 48) while broadcasting before the result
 };
+
+/** WHO'S IN's "Won a seat in {Satellite}" (U38): the edition's one satellite into its Main by name, else "a satellite" (the world keeps
+ *  a seat's ticket, not the satellite it came from, so with several the line never guesses). */
+std::string HubSeatFrom(const net::Network& Net, const fest::Festival& F)
+{
+	const std::string MainTicket = Net.TicketOf(F.MainId);
+	const net::EventTemplate* Only = nullptr;
+	int Count = 0;
+	for (const std::string& Id : F.Satellites)
+	{
+		const net::EventTemplate* T = Net.FindTemplate(Id);
+		if (T && T->SeatTicket == MainTicket)
+		{
+			Only = T;
+			++Count;
+		}
+	}
+	return Count == 1 && Only ? rlnet_detail::NetShortName(Only->Name) : std::string("a satellite");
+}
+
+/** WHO'S IN's line for one person (§2.8.4, §4.7.3, §2.6.7; U38): FestWhyLine's championship lines, U38's labels, a roll champion's
+ *  "{Festival} champion" (the person's latest Main on the brand's roll, else "Player of the Series, {Festival}"); "" for the rival. */
+std::string HubWhoLine(const world::World& W, const net::Network& Net, const fest::Festival& F, const std::vector<world::FestRollRow>& Roll, const world::StoryPerson& P,
+	const std::string& MainId)
+{
+	switch (P.Why)
+	{
+	case world::StoryWhy::Met:
+	{
+		const auto It = W.Bonds().find(P.Npc);
+		const int Met = It == W.Bonds().end() ? 1 : std::max<int>(1, std::max(It->second.Encounters, static_cast<int>(It->second.Memories.size())));
+		return "Met " + std::to_string(Met) + "x";
+	}
+	case world::StoryWhy::DefendingChampion: return "Defending champion";
+	case world::StoryWhy::DefendingSeries:
+	case world::StoryWhy::YearChampion:
+	case world::StoryWhy::TitleHolder: return world::FestWhyLine(W, P, MainId);
+	case world::StoryWhy::Champion:
+		for (const bool Belt : {false, true})
+		{
+			for (const world::FestRollRow& R : Roll)
+			{
+				const world::Honor* H = Belt ? R.Crown : R.Main;
+				const fest::Festival* Ed = H && H->Npc == P.Npc ? fest::FestivalOf(R.Key) : nullptr;
+				if (Ed)
+				{
+					return Belt ? "Player of the Series, " + Ed->Name : Ed->Name + " champion";
+				}
+			}
+		}
+		return std::string();
+	case world::StoryWhy::TeamPro: return "Team pro";
+	case world::StoryWhy::Streamer: return "Streams on Kast";
+	case world::StoryWhy::Qualifier: return "Won a seat in " + HubSeatFrom(Net, F);
+	default: break;
+	}
+	return std::string();
+}
 
 /** THE RACE's read (FH-4A): the hero's standing, the people the player knows and the whole race once per world state and day, kept in
  *  the laptop's HubRaceMemo with the movement column's yesterday. */
@@ -598,6 +742,40 @@ HubFacts Gather(const RiverLine& RL, const Session& S, const fest::Festival& F, 
 		{
 			H.Results = world::HeroFestResults(*W, F.SeriesId);
 		}
+		// FH-5b: WHO'S IN over the Main's registered field (FW-4's const view, cached per world state; the same read gives U4).
+		if (H.HasMain)
+		{
+			const world::FieldStories& Field = W->FieldStoriesOf(H.Main.Id);
+			H.Qualifiers = Field.Groups[static_cast<size_t>(world::StoryGroup::Qualifiers)];
+			for (const world::StoryPerson& P : Field.People)
+			{
+				H.Defender = H.Defender < 0 && P.Why == world::StoryWhy::DefendingChampion ? P.Npc : H.Defender;
+				if (H.WhoIn.size() < 12)
+				{
+					H.WhoIn.push_back({P.Npc, HubWhoLine(*W, Net, F, H.Roll, P, H.Main.Id)});
+				}
+			}
+		}
+	}
+	// FH-5b: Main Event Day's facts (§2.8.4): the Main's state, its result, the guarantee meter's and the registrations' reads.
+	if (H.HasMain)
+	{
+		H.MainLive = Net.Live(H.Main, World);
+		if (H.MainLive.St == net::Status::Finished)
+		{
+			H.FinalTable = Net.Result(H.Main).FinalTable;
+			H.HasResult = !H.FinalTable.empty();
+		}
+		H.Broadcast = H.Ph == fest::Phase::MainDay || H.Ph == fest::Phase::Closing;
+		if (H.Broadcast && H.MainGtd > 0)
+		{
+			H.MainOverlay = ::ss::site::show::OverlayOf(Net, H.Main, World);
+			H.MainEach = static_cast<double>(H.MainBuyIn) * Net.Definition().Rake.PrizeShare(Net.TemplateOf(H.Main));
+		}
+		if (H.Broadcast && !H.HasResult)
+		{
+			H.Regs = ::ss::site::show::Registrations(Net, H.Main, World, 48);
+		}
 	}
 	HubYear(S, World, W, H);
 	for (size_t K = 1; K < F.TitleIds.size(); ++K)
@@ -634,6 +812,9 @@ struct HubFrame
 	float LegendY = 914.0f;
 	float PinSize = 96.0f;
 	int YourResults = 6;
+	// FH-5b (§2.8.4; Ignite's WHO'S IN to y 870 under R-33, F-hubs' Q13: eight people in two columns at 48): REGISTRATIONS (the reel's
+	// place) and WHO'S IN, where the day strip, the rows and the ticker stand on other days.
+	Rect Regs, Who;
 };
 
 const HubFrame& HubFrameOf(net::SiteId Site)
@@ -651,6 +832,8 @@ const HubFrame& HubFrameOf(net::SiteId Site)
 		Fr.CrestX = 114.0f;
 		Fr.CrestY = 234.0f;
 		Fr.WordX = 210.0f;
+		Fr.Regs = {24.0f, 348.0f, 1000.0f, 250.0f};
+		Fr.Who = {24.0f, 610.0f, 1000.0f, 340.0f};
 		return Fr;
 	}();
 	// Ignite (L7): RiverLine's rects but the rows' (cut at y 870, above the dock) and the body's (to y 870), and no overlay ticker.
@@ -668,6 +851,7 @@ const HubFrame& HubFrameOf(net::SiteId Site)
 		Fr.LegendY = 834.0f;
 		Fr.PinSize = 72.0f;
 		Fr.YourResults = 4;
+		Fr.Who = {24.0f, 610.0f, 1000.0f, 260.0f};
 		return Fr;
 	}();
 	// RunItTwice: §2.8.2's bracketed rects, right of the rail; the stats a little closer, so the fourth clears the Main card at x 1170.
@@ -691,6 +875,9 @@ const HubFrame& HubFrameOf(net::SiteId Site)
 		// §2.8.2's [852]: the YOU row under the tenth row, the legend beneath it.
 		Fr.YouY = 852.0f;
 		Fr.LegendY = 910.0f;
+		// §2.8.4's rects moved to the bracketed frame: the rows' column, ending where the frame does (y 950).
+		Fr.Regs = {232.0f, 352.0f, 860.0f, 250.0f};
+		Fr.Who = {232.0f, 614.0f, 860.0f, 336.0f};
 		return Fr;
 	}();
 	switch (Site)
@@ -739,7 +926,28 @@ struct HubUi
 	// FH-4A: THE RACE's toggle (0 EVERYONE, 1 PEOPLE YOU KNOW) and the movement marks its last frame drew (HubRaceMoves).
 	int RaceView = 0;
 	int MovesShown = 0;
+	// FH-5b: the hero band's flap row as last drawn (each cell's character and when it last changed; the first draw waves from the
+	// hub's open, 50 ms a cell).
+	std::string FlapText;
+	std::vector<double> FlapAt;
 };
+
+/** FH-5b: what Main Event Day keeps per laptop across hub opens (the HubRaceBooks precedent): the opening bell rung for one Main (and
+ *  when), the reel's start per Main (the laptop's first draw after the result: it plays once), the champion's journey line. */
+struct HubCast
+{
+	std::string BellFor;
+	double BellAt = -100.0;
+	std::map<std::string, double> ReelAt;
+	std::string JourneyFor;
+	std::string Journey;
+};
+
+std::map<const RiverLine*, HubCast>& HubCasts()
+{
+	static std::map<const RiverLine*, HubCast> FestCastByLaptop;
+	return FestCastByLaptop;
+}
 
 std::map<const RiverLine*, HubUi>& HubStates()
 {
@@ -865,6 +1073,334 @@ void HubBanner(HubCtx& X)
 	}
 }
 
+void HubName(HubCtx& X, int Npc, const std::string& Kept, float Ax, float Nx, float Base, float Size, float MaxW, float Ring);
+
+/** The guarantee meter (§2.8.4, U13; FH-5b) in R inside the Main card: THE GUARANTEE, a track with the pool so far (the registered
+ *  entries' prize share) against a gold tick at the guarantee and a hollow mark at the projection, and at the right PROJ SHORT or
+ *  PROJ OVER while registering (site::show::OverlayOf: the guarantee against the pool), OVERLAY once registration closed short. A Main
+ *  with no guarantee draws none. */
+void HubMeter(HubCtx& X, const Rect& R)
+{
+	const HubFacts& H = X.H;
+	if (H.MainGtd <= 0)
+	{
+		return;
+	}
+	const ::ss::site::show::OverlayView& V = H.MainOverlay;
+	const bool Closed = V.Actual || H.MainLive.St >= net::Status::Running;
+	const int Entries = Closed ? H.MainLive.Entries : V.Registered;
+	const double Pool = static_cast<double>(Entries) * H.MainEach;
+	const double Projected = Closed ? Pool : V.Entries * H.MainEach;
+	const double Gtd = static_cast<double>(H.MainGtd);
+	const double Scale = std::max({Gtd, Pool, Projected}) * 1.08;
+	X.UI.Text("THE GUARANTEE", R.X, R.Y + 10.0f, Ts(10.0f, 800, pal::Muted));
+	std::string Status;
+	Color Col = pal::Orange;
+	if (V.Shown && V.Actual && V.Cents > 0)
+	{
+		Status = "OVERLAY \xC2\xB7 " + NetMoney(V.Cents);
+	}
+	else if (V.Shown && !V.Actual && V.Cents > 0)
+	{
+		Status = "PROJ SHORT \xC2\xB7 " + NetMoney(V.Cents);
+	}
+	else if (V.Shown && !V.Actual && Projected > Gtd)
+	{
+		Status = "PROJ OVER \xC2\xB7 " + NetMoney(static_cast<Chips>(std::llround(Projected - Gtd)));
+		Col = pal::Green;
+	}
+	if (!Status.empty())
+	{
+		X.UI.Text(Status, R.X + R.W, R.Y + 10.0f, Ts(11.0f, 800, Col, Align::Right));
+	}
+	const Rect Track{R.X, R.Y + 20.0f, R.W, 10.0f};
+	X.C.FillRoundRect(Track, 5.0f, rlsites_detail::SitesTone(0x16233a));
+	const float Fill = static_cast<float>(std::min(1.0, Pool / Scale));
+	if (Fill > 0.0f)
+	{
+		X.C.FillRoundRect({Track.X, Track.Y, std::max(10.0f, Track.W * Fill), Track.H}, 5.0f, Pool >= Gtd ? pal::Green : pal::Accent);
+	}
+	if (!Closed && Projected > Pool)
+	{
+		const float Px = Track.X + Track.W * static_cast<float>(std::min(1.0, Projected / Scale));
+		X.C.StrokeEllipse(Px, Track.Y + Track.H / 2.0f, 4.0f, 4.0f, pal::Ink, 1.5f);
+	}
+	const float Gx = Track.X + Track.W * static_cast<float>(Gtd / Scale);
+	X.C.FillRect({Gx - 1.0f, Track.Y - 4.0f, 2.0f, Track.H + 8.0f}, pal::Gold);
+	X.UI.Text(NetMoney(static_cast<Chips>(std::llround(Pool))), R.X, R.Y + 46.0f, Ts(11.0f, 700, pal::Ink, Align::Left, Baseline::Alphabetic, true));
+	X.UI.Text(NetMoney(H.MainGtd), Gx, R.Y + 46.0f, Ts(11.0f, 700, pal::Gold, Gx > R.X + R.W - 60.0f ? Align::Right : Align::Center, Baseline::Alphabetic, true));
+}
+
+/** The split-flap row (§2.8.4; motion::Flap): Text in 44 x 64 cells from (X0, Y0), 4 apart. A cell shows its character once settled (0.25
+ *  s after it last changed; the hub's first draw waves in from the page's or the series' open, 50 ms a cell), and before that a glyph that turns with real
+ *  time (a closed form of the clock, no random number). A still (the preview) draws every cell settled and keeps no memo. */
+void HubFlap(HubCtx& X, HubUi& U, const std::string& Text, float X0, float Y0)
+{
+	static const char HubFlapTurn[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+	if (!X.Still)
+	{
+		const bool Wave = U.FlapText.empty();
+		const double Opened = std::max(Access::PageAt(X.RL), Access::SeriesAt(X.RL)); // the page's or the series' open, not the first draw
+		U.FlapAt.resize(Text.size(), X.Now);
+		for (size_t I = 0; I < Text.size(); ++I)
+		{
+			if (Wave)
+			{
+				U.FlapAt[I] = std::min(X.Now, Opened) + 0.05 * static_cast<double>(I);
+			}
+			else if (I >= U.FlapText.size() || U.FlapText[I] != Text[I])
+			{
+				U.FlapAt[I] = X.Now;
+			}
+		}
+		U.FlapText = Text;
+	}
+	for (size_t I = 0; I < Text.size(); ++I)
+	{
+		const Rect Cell{X0 + 48.0f * static_cast<float>(I), Y0, 44.0f, 64.0f};
+		X.C.FillRoundRect(Cell, 6.0f, Paint::Linear({0.0f, Cell.Y}, {0.0f, Cell.Y + Cell.H}, rlsites_detail::SitesTone(0x1b2638), rlsites_detail::SitesTone(0x0c121d)));
+		X.C.FillRect({Cell.X, Cell.Y + Cell.H / 2.0f - 0.5f, Cell.W, 1.0f}, Rgba(0, 0, 0, 0.55f));
+		const bool Settled = X.Still || I >= U.FlapAt.size() || motion::Flap(X.Now, U.FlapAt[I], 1) > 0;
+		char Ch = Text[I];
+		if (!Settled)
+		{
+			const double Turned = (X.Now - U.FlapAt[I]) * 24.0 + 7.0 * static_cast<double>(I);
+			Ch = HubFlapTurn[static_cast<size_t>(std::max(0.0, std::floor(Turned))) % (sizeof(HubFlapTurn) - 1)];
+		}
+		if (Ch != ' ')
+		{
+			X.UI.Text(std::string(1, Ch), Cell.X + Cell.W / 2.0f, Cell.Y + Cell.H / 2.0f + 1.0f, Ts(38.0f, 900, Settled ? pal::Ink : pal::Muted, Align::Center, Baseline::Middle));
+		}
+	}
+}
+
+/** The Main's state on the flap (§2.8.4, §2.1.4's Closing): a countdown to the start ("15:00:00", world seconds: the lobby's world
+ *  second is a real second) while it hasn't started, then REGISTERING, LATE REG, RUNNING, FINAL TABLE or COMPLETE. */
+std::string HubFlapText(const HubFacts& H)
+{
+	const net::LiveState& L = H.MainLive;
+	if ((L.St == net::Status::Announced || L.St == net::Status::Registering) && H.World < H.Main.Start)
+	{
+		const long long S = std::max(0LL, static_cast<long long>(std::ceil((H.Main.Start - H.World) * 60.0 - 1.0e-6)));
+		return rlnet_detail::NetPad2(S / 3600) + ":" + rlnet_detail::NetPad2((S / 60) % 60) + ":" + rlnet_detail::NetPad2(S % 60);
+	}
+	switch (L.St)
+	{
+	case net::Status::Announced:
+	case net::Status::Registering: return "REGISTERING";
+	case net::Status::LateReg: return "LATE REG";
+	case net::Status::Running: return "RUNNING";
+	case net::Status::FinalTable: return "FINAL TABLE";
+	default: break;
+	}
+	return "COMPLETE";
+}
+
+/** The hero band (§2.8.4; FH-5b) in the banner's rect on Main Event Day and through Closing: the look's banner with its Main-day light,
+ *  today's crest at 150, the word-mark at 34, MAIN EVENT DAY, the flap row, and under it "LIVE · {Left} LEFT OF {Entries}" while the
+ *  Main runs (REGISTERING's word before its start); the opening bell's band over the flap for 3 s. */
+void HubHeroBand(HubCtx& X, HubUi& U)
+{
+	const HubFacts& H = X.H;
+	const Rect& B = X.Fr.Banner;
+	X.C.FillRoundRect(B, 18.0f, Paint::Linear({B.X, 0.0f}, {B.X + B.W, 0.0f}, rlsites_detail::SitesTone(0x0e1726), rlsites_detail::SitesTone(0x111c2e)));
+	festart::FestBanner(X.C, X.Look, B, X.SinceOpen, H.DayProgress, true, X.Still);
+	X.C.StrokeRoundRect(B, 18.0f, NetA(pal::Line, 0.9f), 1.0f);
+	eventart::SeriesCrest(X.C, *H.Series, X.Fr.CrestX, X.Fr.CrestY, 150.0f, X.Still ? 0.0 : X.Now);
+	// PC-10: the overload with DayProgress and Still.
+	festart::FestWordMark(X.C, X.Look, H.F->Name, X.Fr.WordX, B.Y + 48.0f, 34.0f, X.SinceOpen, H.DayProgress, X.Still);
+	if (X.Look.Which == fest::Brand::None)
+	{
+		X.UI.Text(H.F->Name, X.Fr.WordX, B.Y + 48.0f, Ts(34.0f, 900, pal::Ink));
+	}
+	X.UI.Text("MAIN EVENT DAY", X.Fr.WordX, B.Y + 72.0f, Ts(12.0f, 800, pal::Accent));
+	const float FlapY = B.Y + 84.0f;
+	HubFlap(X, U, HubFlapText(H), X.Fr.WordX, FlapY);
+	const net::Status St = H.MainLive.St;
+	if (St == net::Status::LateReg || St == net::Status::Running || St == net::Status::FinalTable)
+	{
+		X.UI.Text("LIVE \xC2\xB7 " + Grouped(H.MainLive.Left) + " LEFT OF " + Grouped(H.MainLive.Entries), X.Fr.WordX, B.Y + 176.0f,
+			Ts(18.0f, 800, pal::Ink, Align::Left, Baseline::Alphabetic, false, X.Fr.Main.X - X.Fr.WordX - 24.0f));
+		X.C.FillCircle(X.Fr.WordX - 12.0f, B.Y + 170.0f, 4.0f, pal::Red);
+	}
+	else if (St == net::Status::Announced || St == net::Status::Registering)
+	{
+		X.UI.Text("REGISTERING", X.Fr.WordX, B.Y + 176.0f, Ts(14.0f, 800, pal::Muted));
+	}
+	// The opening bell (§2.8.4): once per laptop and Main, when the hub draws within three world minutes of the start (never in a still).
+	HubCast& Cast = HubCasts()[&X.RL];
+	if (!X.Still && H.World >= H.Main.Start && H.World - H.Main.Start < 3.0 && Cast.BellFor != H.Main.Id)
+	{
+		Cast.BellFor = H.Main.Id;
+		Cast.BellAt = X.Now;
+		Access::Sound(X.RL, X.Look.Sting, 0.5f);
+	}
+	if (!X.Still && Cast.BellFor == H.Main.Id && X.Now - Cast.BellAt < 3.0)
+	{
+		const Rect Band{X.Fr.WordX - 14.0f, FlapY - 6.0f, X.Fr.Main.X - X.Fr.WordX - 10.0f, 76.0f};
+		X.C.FillRoundRect(Band, 10.0f, pal::Accent);
+		X.UI.Text("The Main Event is under way.", Band.X + Band.W / 2.0f, Band.Y + Band.H / 2.0f + 1.0f,
+			Ts(26.0f, 800, rlsites_detail::SitesLabelInk(Hex(0x0b1220), pal::Accent, pal::Accent), Align::Center, Baseline::Middle, false, Band.W - 32.0f));
+	}
+}
+
+/** The champion card (§2.8.4; FH-5b) in the Main card's rect once the Main's result exists, through the Afterglow: CHAMPION, the trophy
+ *  (FestTrophy at 64), the name (PlayerName with its flag; the player's "YOU"), the prize (NetMoney), U14's "{Name} won {Trophy} and
+ *  {Prize}." and the journey from the person's card (World::ProfileOf: "On {Site} since {Year}." or "On the scene since {Year}.", then
+ *  "First title on record." or "{N} titles on record."), kept per laptop for the Main. */
+void HubChampCard(HubCtx& X)
+{
+	const HubFacts& H = X.H;
+	const Rect& M = X.Fr.Main;
+	const net::Placing& P = H.FinalTable.front();
+	X.UI.RRect(M, 14.0f, Rgba(4, 8, 16, 0.6f), pal::Gold);
+	X.UI.Text("CHAMPION", M.X + 18.0f, M.Y + 26.0f, Ts(11.0f, 800, pal::Gold));
+	festart::FestTrophy(X.C, H.F->Which, M.X + 58.0f, M.Y + 82.0f, 64.0f, X.Still ? 0.0 : X.Now, false);
+	const bool Hero = P.Player == -1;
+	if (Hero)
+	{
+		X.UI.Text("YOU", M.X + 106.0f, M.Y + 58.0f, Ts(20.0f, 900, pal::Ink));
+	}
+	else
+	{
+		Access::PlacingPlayer(X.RL, P, M.X + 106.0f, M.Y + 58.0f, 18.0f, M.W - 124.0f);
+	}
+	X.UI.Text(NetMoney(P.Prize), M.X + 106.0f, M.Y + 90.0f, Ts(22.0f, 900, pal::Gold, Align::Left, Baseline::Alphabetic, true, M.W - 124.0f));
+	HubCast& Cast = HubCasts()[&X.RL];
+	if (Cast.JourneyFor != H.Main.Id + "/" + std::to_string(P.Player))
+	{
+		std::string Journey;
+		const world::Npc* N = !Hero && H.W && P.Player >= 0 ? H.W->Get(P.Player) : nullptr;
+		if (N)
+		{
+			const world::Profile Pr = H.W->ProfileOf(P.Player);
+			const std::string Site = !N->Path.empty() && N->Path.front().Kind == world::StepKind::Joined && !N->Path.front().What.empty() ? N->Path.front().What : std::string("RiverLine");
+			Journey = Pr.Arrived >= 0 ? "On " + Site + " since " + std::to_string(world::YearOf(Pr.Arrived)) + "." : "On the scene since " + std::to_string(Pr.Since) + ".";
+			Journey += Pr.Titles == 1 ? std::string(" First title on record.") : Pr.Titles > 1 ? " " + std::to_string(Pr.Titles) + " titles on record." : std::string();
+		}
+		Cast.JourneyFor = H.Main.Id + "/" + std::to_string(P.Player);
+		Cast.Journey = Journey;
+	}
+	const std::string Name = Hero ? std::string("You") : Access::PlacingName(X.RL, P);
+	X.UI.Text(Name + " won " + fest::TrophyName(H.F->Which) + " and " + NetMoney(P.Prize) + ".", M.X + 18.0f, M.Y + 130.0f,
+		Ts(12.0f, 600, pal::Ink, Align::Left, Baseline::Alphabetic, false, M.W - 36.0f));
+	if (!Cast.Journey.empty())
+	{
+		X.UI.Text(Cast.Journey, M.X + 18.0f, M.Y + 150.0f, Ts(12.0f, 500, pal::Muted, Align::Left, Baseline::Alphabetic, false, M.W - 36.0f));
+	}
+}
+
+/** REGISTRATIONS (§2.8.4; FH-5b): site::show::Registrations(Main, 48) as ChartArt's LineChart in the skin's theme, the Main's count so
+ *  far at the right ("MAIN EVENT · {Entries} registered"), times under the line. */
+void HubRegsChart(HubCtx& X)
+{
+	const HubFacts& H = X.H;
+	const Rect& R = X.Fr.Regs;
+	X.UI.RRect(R, 14.0f, rlsites_detail::SitesTone(0x0e1726), NetA(pal::Line, 0.9f));
+	X.UI.Text("REGISTRATIONS", R.X + 20.0f, R.Y + 28.0f, Ts(12.0f, 800, pal::Accent));
+	if (!H.Regs.empty())
+	{
+		X.UI.Text("MAIN EVENT \xC2\xB7 " + Grouped(H.Regs.back().Entries) + " registered", R.X + R.W - 20.0f, R.Y + 28.0f, Ts(13.0f, 700, pal::Ink, Align::Right));
+	}
+	chart::Series Line;
+	chart::LineOpts O;
+	for (size_t I = 0; I < H.Regs.size(); ++I)
+	{
+		Line.Y.push_back(static_cast<double>(H.Regs[I].Entries));
+		O.X.Labels.push_back(I % 8 == 0 || I + 1 == H.Regs.size() ? net::TimeLabel(H.Regs[I].At) : std::string());
+	}
+	Line.Col = pal::Accent;
+	Line.Width = 2.0f;
+	Line.Area = 0.18f;
+	Line.Last = true;
+	Line.Name = "Registered";
+	O.Y = chart::Units::Count;
+	O.Integer = true;
+	O.Zero = true;
+	O.X.Count = 6;
+	O.Reveal = X.Still ? 1.0f : static_cast<float>(std::min(1.0, std::max(0.0, X.SinceOpen / 0.6)));
+	O.Mouse = Vec2{-1.0f, -1.0f};
+	if (H.Regs.size() >= 2)
+	{
+		chart::LineChart(X.C, {R.X + 16.0f, R.Y + 40.0f, R.W - 32.0f, R.H - 50.0f}, {Line}, O, chart::FromSkin(Skin::Current()));
+	}
+}
+
+/** The reel (§2.8.4; FH-5b) in REGISTRATIONS' place once the Main's result exists: FINAL TABLE, 9th to 1st, one row every 0.6 s from
+ *  the laptop's first draw after the result (kept per Main: it plays once), each the place, PlayerName and the prize (NetMoney: the
+ *  world's result, or the engine's when the player played it); a still draws the reel whole. */
+void HubReel(HubCtx& X)
+{
+	const HubFacts& H = X.H;
+	const Rect& R = X.Fr.Regs;
+	X.UI.RRect(R, 14.0f, rlsites_detail::SitesTone(0x0e1726), NetA(pal::Line, 0.9f));
+	X.UI.Text("FINAL TABLE", R.X + 20.0f, R.Y + 28.0f, Ts(12.0f, 800, pal::Accent));
+	const int N = static_cast<int>(H.FinalTable.size());
+	int Shown = N;
+	if (!X.Still)
+	{
+		HubCast& Cast = HubCasts()[&X.RL];
+		const auto It = Cast.ReelAt.emplace(H.Main.Id, X.Now).first;
+		Shown = std::min(N, static_cast<int>(std::floor((X.Now - It->second) / 0.6)) + 1);
+	}
+	const float Pitch = std::min(22.0f, (R.H - 44.0f) / static_cast<float>(std::max(1, N)));
+	for (int K = 0; K < Shown; ++K)
+	{
+		// K counts the reel's rows from the top: the last place first, the champion last.
+		const net::Placing& P = H.FinalTable[static_cast<size_t>(N - 1 - K)];
+		const float Base = R.Y + 44.0f + Pitch * static_cast<float>(K) + Pitch * 0.72f;
+		const bool First = P.Place == 1;
+		if (First)
+		{
+			X.C.FillRoundRect({R.X + 10.0f, Base - Pitch * 0.72f, R.W - 20.0f, Pitch}, 6.0f, NetA(pal::Gold, 0.14f));
+		}
+		X.UI.Text(ss::Ordinal(P.Place), R.X + 60.0f, Base, Ts(13.0f, 800, First ? pal::Gold : pal::Muted, Align::Right, Baseline::Alphabetic, true));
+		if (P.Player == -1)
+		{
+			X.UI.Text("YOU", R.X + 76.0f, Base, Ts(13.0f, 900, pal::Ink));
+		}
+		else
+		{
+			Access::PlacingPlayer(X.RL, P, R.X + 76.0f, Base, 13.0f, R.W - 300.0f);
+		}
+		X.UI.Text(NetMoney(P.Prize), R.X + R.W - 20.0f, Base, Ts(13.0f, 800, First ? pal::Gold : pal::Ink, Align::Right, Baseline::Alphabetic, true));
+	}
+}
+
+/** WHO'S IN (§2.8.4, §4.7.3; FH-5b): the people of FieldStoriesOf(Main) in its one order, two columns of rows at 48 (twelve people;
+ *  eight in Ignite's 260, R-33), each an r 12 avatar, PlayerName and its line; the Qualifiers group's line at the right of the title
+ *  when it is 1 or more (U14, "regulars"). Nothing when the field holds no story. */
+void HubWhoIn(HubCtx& X)
+{
+	const HubFacts& H = X.H;
+	const Rect& R = X.Fr.Who;
+	if (H.WhoIn.empty() && H.Qualifiers <= 0)
+	{
+		return;
+	}
+	X.UI.RRect(R, 14.0f, rlsites_detail::SitesTone(0x0e1726), NetA(pal::Line, 0.9f));
+	X.UI.Text("WHO'S IN", R.X + 20.0f, R.Y + 28.0f, Ts(12.0f, 800, pal::Accent));
+	if (H.Qualifiers > 0)
+	{
+		X.UI.Text(H.Qualifiers == 1 ? std::string("1 regular won their seat by satellite.") : Grouped(H.Qualifiers) + " regulars won their seat by satellite.", R.X + R.W - 20.0f,
+			R.Y + 28.0f, Ts(13.0f, 600, pal::Muted, Align::Right));
+	}
+	const int Rows = static_cast<int>(std::floor((R.H - 44.0f) / 48.0f));
+	const float ColW = (R.W - 40.0f) / 2.0f;
+	const int Max = std::min(static_cast<int>(H.WhoIn.size()), Rows * 2);
+	for (int I = 0; I < Max; ++I)
+	{
+		const HubFacts::Who& P = H.WhoIn[static_cast<size_t>(I)];
+		const float Cx = R.X + 20.0f + ColW * static_cast<float>(I / Rows);
+		const float Top = R.Y + 44.0f + 48.0f * static_cast<float>(I % Rows);
+		HubName(X, P.Npc, std::string(), Cx + 14.0f, Cx + 36.0f, Top + 20.0f, 14.0f, ColW - 52.0f, 12.0f);
+		if (!P.Line.empty())
+		{
+			X.UI.Text(P.Line, Cx + 36.0f, Top + 38.0f, Ts(12.0f, 600, pal::Muted, Align::Left, Baseline::Alphabetic, false, ColW - 52.0f));
+		}
+	}
+}
+
 /** The Main card (§2.8.2): MAIN EVENT with the date and start, "{Gtd} GUARANTEED", the buy-in and stack, "+ {Added} ADDED" (the rival
  *  Mains), the lock line while the Main isn't joinable (§2.2.3), "{N} SEATS WON BY SATELLITE" once a seat is won, and Details
  *  (`fsmain`), which opens the lobby's event panel on the Main. The defending champion (U4) and "Last year: {Prize}." (U23) are
@@ -881,6 +1417,46 @@ void HubMainCard(HubCtx& X)
 	const int Day = net::DayOf(H.Main.Start);
 	rlnet_detail::NetSpaced(X.C, "MAIN EVENT \xC2\xB7 " + NetUpper(net::WeekdayName(Day)) + " " + NetUpper(net::DateLabel(Day)) + " \xC2\xB7 " + net::TimeLabel(H.Main.Start),
 		M.X + 18.0f, M.Y + 26.0f, 10.5f, 800, pal::Gold, 1.5f);
+	// FH-5b, U4: the defending champion while FieldStoriesOf lists them in the Main's field (no Registered call, Q17).
+	const world::Npc* DefNpc = H.Defender >= 0 && H.W ? H.W->Get(H.Defender) : nullptr;
+	const std::string Defends = DefNpc ? "DEFENDING CHAMPION \xC2\xB7 " + DefNpc->Name + " \xC2\xB7 registered" : std::string();
+	ButtonOpts O;
+	O.Size = 14.0f;
+	if (H.Broadcast)
+	{
+		// Main Event Day (§2.8.4): Details beside the guarantee, one line over the meter (the lock line, else the buy-in) and one
+		// under it (U4, else the added money, else the seats won).
+		if (H.MainGtd > 0)
+		{
+			X.UI.Text(NetMoney(H.MainGtd) + " GUARANTEED", M.X + 18.0f, M.Y + 58.0f, Ts(22.0f, 900, pal::Gold, Align::Left, Baseline::Alphabetic, false, M.W - 132.0f));
+		}
+		if (!H.MainLock.empty())
+		{
+			rlnet_detail::NetLockIcon(X.C, M.X + 18.0f, M.Y + 70.0f, 11.0f, pal::Orange);
+			X.UI.Text(H.MainLock, M.X + 34.0f, M.Y + 80.0f, Ts(12.0f, 600, pal::Orange, Align::Left, Baseline::Alphabetic, false, M.W - 52.0f));
+		}
+		else
+		{
+			X.UI.Text(net::BuyIn(H.MainBuyIn) + " buy-in \xC2\xB7 " + Grouped(H.MainStack) + " chips", M.X + 18.0f, M.Y + 80.0f, Ts(13.0f, 600, rlsites_detail::SitesTone(0xc3cedf)));
+		}
+		HubMeter(X, {M.X + 16.0f, M.Y + 98.0f, M.W - 32.0f, 48.0f});
+		const std::string Foot = !Defends.empty() ? Defends
+			: H.MainAdded > 0                     ? "+ " + NetMoney(H.MainAdded) + " ADDED"
+			: H.SeatsWon > 1                      ? std::to_string(H.SeatsWon) + " SEATS WON BY SATELLITE"
+			: H.SeatsWon == 1                     ? std::string("1 SEAT WON BY SATELLITE")
+												  : std::string();
+		if (!Foot.empty())
+		{
+			X.UI.Text(Foot, M.X + 18.0f, M.Y + 158.0f, Ts(11.0f, 800, !Defends.empty() ? pal::Gold : H.MainAdded > 0 ? pal::Accent : pal::Muted, Align::Left, Baseline::Alphabetic, false,
+				M.W - 36.0f));
+		}
+		if (rlsites_detail::SitesButton(X.UI, X.C, "fsmain", {M.X + M.W - 104.0f, M.Y + 36.0f, 88.0f, 28.0f}, "Details", O) && !X.Still)
+		{
+			Access::SelectEvent(X.RL, H.Main.Id);
+			Access::OpenPage(X.RL, RiverLine::Page::Lobby, X.Now);
+		}
+		return;
+	}
 	if (H.MainGtd > 0)
 	{
 		X.UI.Text(NetMoney(H.MainGtd) + " GUARANTEED", M.X + 18.0f, M.Y + 58.0f, Ts(22.0f, 900, pal::Gold, Align::Left, Baseline::Alphabetic, false, M.W - 36.0f));
@@ -903,8 +1479,12 @@ void HubMainCard(HubCtx& X)
 		Y += 20.0f;
 		X.UI.Text(H.SeatsWon == 1 ? std::string("1 SEAT WON BY SATELLITE") : std::to_string(H.SeatsWon) + " SEATS WON BY SATELLITE", M.X + 18.0f, Y, Ts(11.0f, 800, pal::Muted));
 	}
-	ButtonOpts O;
-	O.Size = 14.0f;
+	if (!Defends.empty())
+	{
+		// FH-5b, U4 (§2.6.3): under the card's other lines, clear of Details once it reaches the button's band.
+		Y += 20.0f;
+		X.UI.Text(Defends, M.X + 18.0f, Y, Ts(11.0f, 800, pal::Gold, Align::Left, Baseline::Alphabetic, false, Y > M.Y + M.H - 50.0f ? M.W - 140.0f : M.W - 36.0f));
+	}
 	if (rlsites_detail::SitesButton(X.UI, X.C, "fsmain", {M.X + M.W - 114.0f, M.Y + M.H - 44.0f, 96.0f, 32.0f}, "Details", O) && !X.Still)
 	{
 		Access::SelectEvent(X.RL, H.Main.Id);
@@ -1199,6 +1779,29 @@ void HubDayRows(const net::Network& Net, const fest::Festival& F, HubUi& U, int 
 		U.Rows.push_back(std::move(E));
 		U.Late.emplace_back();
 	}
+	// FH-5b (§2.8.4): a championship's Mini and Micro Main Event rows pinned at the top of their day (the edition's other title
+	// templates; the Main's day is the broadcast), each keeping its place among the rest.
+	std::vector<size_t> Order;
+	for (const bool Title : {true, false})
+	{
+		for (size_t I = 0; I < U.Rows.size(); ++I)
+		{
+			const std::string& Tid = Net.TemplateOf(U.Rows[I]).Id;
+			if ((std::find(F.TitleIds.begin() + (F.TitleIds.empty() ? 0 : 1), F.TitleIds.end(), Tid) != F.TitleIds.end()) == Title)
+			{
+				Order.push_back(I);
+			}
+		}
+	}
+	std::vector<net::EventInstance> Rows;
+	std::vector<net::EventInstance> Late;
+	for (const size_t I : Order)
+	{
+		Rows.push_back(std::move(U.Rows[I]));
+		Late.push_back(std::move(U.Late[I]));
+	}
+	U.Rows = std::move(Rows);
+	U.Late = std::move(Late);
 }
 
 /** A satellite's seat followed up its ladder to the Main it ends in: that Main's lock line while it isn't joinable (§2.2.3), else "". */
@@ -2121,6 +2724,12 @@ void HubBody(HubCtx& X, HubUi& U, int Tab)
 	}
 }
 
+/** u4_ui (FH-5b, FestPreviewStill): the laptop drawn as the stream preview draws it (Previewing: no input, no side effects). */
+void HubPreviewing(RiverLine& RL, bool On)
+{
+	Access::SetPreviewing(RL, On);
+}
+
 /** u4_ui (FH-4A): the movement marks THE RACE drew in the laptop's last hub frame (0 before any). */
 int HubRaceMoves(const RiverLine& RL)
 {
@@ -2235,10 +2844,41 @@ void RiverLine::FestivalHub(const Rect& R, const fest::Festival& F, double Now)
 	}
 	C->PushClip(R);
 	rlfest_detail::HubYearStrip(X, U, R);
-	rlfest_detail::HubBanner(X);
-	rlfest_detail::HubMainCard(X);
-	rlfest_detail::HubRows(X, U, rlfest_detail::HubDays(X, U));
-	rlfest_detail::HubTicker(X, U);
+	if (H.Broadcast)
+	{
+		// FH-5b, Main Event Day and Closing (§2.8.4): the hero band, the Main card with its meter (the champion card once the result
+		// exists), REGISTRATIONS (the reel once the result exists) and WHO'S IN where the day strip, the rows and the ticker stand.
+		rlfest_detail::HubHeroBand(X, U);
+		if (H.HasResult)
+		{
+			rlfest_detail::HubChampCard(X);
+			rlfest_detail::HubReel(X);
+		}
+		else
+		{
+			rlfest_detail::HubMainCard(X);
+			rlfest_detail::HubRegsChart(X);
+		}
+		rlfest_detail::HubWhoIn(X);
+		if (!X.Still)
+		{
+			rlfest_detail::Access::SetListed(*this, {});
+		}
+	}
+	else
+	{
+		rlfest_detail::HubBanner(X);
+		if (H.HasResult)
+		{
+			rlfest_detail::HubChampCard(X); // FH-5b: the Main's champion through the Afterglow
+		}
+		else
+		{
+			rlfest_detail::HubMainCard(X);
+		}
+		rlfest_detail::HubRows(X, U, rlfest_detail::HubDays(X, U));
+		rlfest_detail::HubTicker(X, U);
+	}
 	rlfest_detail::HubBody(X, U, rlfest_detail::HubTabs(X, U));
 	C->PopClip();
 	if (PopUp)
