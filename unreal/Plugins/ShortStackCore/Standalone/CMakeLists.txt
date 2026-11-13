@@ -268,6 +268,21 @@ set_tests_properties(festivals PROPERTIES TIMEOUT 30)
 set_tests_properties(world_u4 PROPERTIES TIMEOUT 45)
 set_tests_properties(big_field PROPERTIES TIMEOUT 30)
 set_tests_properties(u4_ui PROPERTIES TIMEOUT 60)
+# G1 (the lead's mid-wave commit H2; SPEC v1.7 §7.5, §8.1; PLAN_G1 §4.2 L8): the timing assertions' runs. A check that asserts
+# milliseconds asserts them only behind SS_PERF=1, as the median of 5 runs, and prints them otherwise; these three run the same
+# executables with SS_PERF=1, label perf and RUN_SERIAL (nothing else running beside them). The comparison tool's main run is
+# "ctest -LE perf", which leaves them out; "ctest -L perf" runs them alone. festivals_perf: fest::All(), FestHour, the crown,
+# RecordOf and HeroFestPins (§2.14); rival_sites_perf: "rivals <= 40% of RiverLine's build" (§8.5, tests/sites_main.cpp's
+# RiverLineUnchanged); u4_ui_perf: the festival hubs' milliseconds (§2.8.10, §2.14's UI row, F-hubs' FestHubBudgets). A check
+# whose code has not landed yet runs as its suite runs today and asserts once its track's package merges. Each TIMEOUT by P-4: its
+# suite's cap is its spec budget (the medians add well under a second); re-measured with the suites at the gate's integration.
+add_test(NAME festivals_perf COMMAND festivals_test)
+add_test(NAME rival_sites_perf COMMAND sites_test)
+add_test(NAME u4_ui_perf COMMAND u4_ui_test)
+set_tests_properties(festivals_perf rival_sites_perf u4_ui_perf PROPERTIES ENVIRONMENT "SS_PERF=1" LABELS perf RUN_SERIAL TRUE)
+set_tests_properties(festivals_perf PROPERTIES TIMEOUT 30)
+set_tests_properties(rival_sites_perf PROPERTIES TIMEOUT 30)
+set_tests_properties(u4_ui_perf PROPERTIES TIMEOUT 60)
 
 # Not a suite: core-styles' chart compiler (update 2 SPEC §2.4.2, §2.4.4), Tests/charts/*.txt into AI/ChartTables.cpp.
 add_executable(chartgen tools/chartgen/chartgen_main.cpp)

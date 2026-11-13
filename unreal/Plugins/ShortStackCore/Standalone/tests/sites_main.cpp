@@ -256,6 +256,27 @@ void RiverLineUnchanged()
 				"together %.0f%% of RiverLine's; registry %.4fs)\n",
 		Fresh.Templates().size(), Fresh.Series().size(), Fresh.Founding().size(), Before.size(), DumpSeconds, RiverLineSeconds, Ignite.Templates().size(), IgniteSeconds,
 		RunItTwice.Templates().size(), RunItTwiceSeconds, 100.0 * (IgniteSeconds + RunItTwiceSeconds) / std::max(1e-9, RiverLineSeconds), RegistrySeconds);
+	// G1 (the lead's H2; SPEC v1.7 §2.14, §8.5, §8.1): "rivals <= 40% of RiverLine's build" is asserted only under SS_PERF=1 (the
+	// perf label's rival_sites_perf, run alone), as the median of five rebuilds of the three networks; the default run prints the
+	// one build above and asserts nothing about time.
+	if (std::getenv("SS_PERF"))
+	{
+		std::array<double, 5> Shares{};
+		for (double& Share : Shares)
+		{
+			const auto R0 = std::chrono::steady_clock::now();
+			const net::Network RiverLineAgain;
+			const double RiverLineAgainSeconds = SitesSeconds(R0);
+			const auto R1 = std::chrono::steady_clock::now();
+			const net::Network IgniteAgain(SitesStub(net::SiteId::Ignite));
+			const net::Network RunItTwiceAgain(SitesStub(net::SiteId::RunItTwice));
+			Share = 100.0 * SitesSeconds(R1) / std::max(1e-9, RiverLineAgainSeconds);
+		}
+		std::sort(Shares.begin(), Shares.end());
+		std::printf("riverline (SS_PERF): rivals %.1f%% of RiverLine's build, the median of five (%.1f%% to %.1f%%)\n", Shares[2], Shares[0], Shares[4]);
+		Expect(Shares[2] <= 40.0, "rival_sites_perf: Ignite's and RunItTwice's builds together <= 40% of RiverLine's, the median of five ("
+			+ std::to_string(Shares[2]) + "%)");
+	}
 }
 
 uint64_t SitesFnv(uint64_t H, const std::string& S)
