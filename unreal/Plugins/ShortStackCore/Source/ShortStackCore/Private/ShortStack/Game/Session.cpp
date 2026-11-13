@@ -1,6 +1,7 @@
 #include "ShortStack/Game/Session.h"
 #include "../StrictFloat.h"
 #include "KastCopy.h"
+#include "SessionFestDetail.h"
 #include "SessionHold.h"
 #include "SitesDetail.h"
 
@@ -1449,6 +1450,7 @@ void Session::WorldSkip(int DayCount)
 		return; // not with tables open
 	}
 	LobbyMinutes += static_cast<double>(DayCount) * net::MinutesPerDay;
+	const double SkipFrom = CalendarAt;
 	CalendarAt = WorldMinutes();
 	// The skip goes around the calendar (a tool for seeing the world move on): the bills move with it, unbilled,
 	// so no deadline is left behind the clock where it would never come round.
@@ -1467,6 +1469,9 @@ void Session::WorldSkip(int DayCount)
 	WorldSaved.clear();
 	WorldSnapStamp = world::WorldStamp();
 	WorldSnapLent.reset();
+	// Update 4 G1 (SPEC v1.7 §2.9.3; FW-5, PHASEA_EXIT): the skip went around CheckCalendar, so Festival Season's keyed texts read the
+	// world here, after the advance (a crown inside the skip sends its lines once), from the calendar minute before it.
+	FestStep(SkipFrom, CalendarAt);
 	Save();
 }
 
@@ -3656,7 +3661,10 @@ void Session::ShowResults()
 		{
 			site::AddLine(Life.Sites, SeatSite, WorldMinutes(), 4, 0, "Seat won: " + T->Spec.Name);
 		}
-		StoryText("seat-" + T->Spec.SeatTicket, "Dee", T->Spec.SeatTicket == "rcop-main" ? "You WON A SEAT TO THE MAIN EVENT?? $5,250 for nothing. Twenty-five million guaranteed. Kid." : "A ticket up the ladder. Keep climbing.");
+		// Update 4 G1 (SPEC v1.7 §2.9.3, T11; FW-5): a seat into another festival Main by its Main ticket has its own line; a
+		// championship's Step 1 or Step 2 seat (a step ticket) keeps the ladder's, so a step win never reads as a Main seat.
+		const std::string FestSeat = session_fest_detail::FestSeatText(T->Spec.Id, T->Spec.SeatTicket, T->Spec.BuyInCents);
+		StoryText("seat-" + T->Spec.SeatTicket, "Dee", T->Spec.SeatTicket == "rcop-main" ? "You WON A SEAT TO THE MAIN EVENT?? $5,250 for nothing. Twenty-five million guaranteed. Kid." : !FestSeat.empty() ? FestSeat : "A ticket up the ladder. Keep climbing.");
 	}
 	if (BustPrize + BountyWon > 0 && Pot.Site == 0)
 	{
@@ -3728,7 +3736,22 @@ void Session::ShowResults()
 	const net::Network& EventNet = net::ForEvent(T->Spec.Id);
 	const net::EventTemplate* Tmpl = EventNet.FindTemplate(T->Spec.Id.substr(0, T->Spec.Id.find('@')));
 	const net::SeriesInfo* Played = Tmpl ? EventNet.FindSeries(Tmpl->Series) : nullptr;
-	if (Tmpl && BustPlace == 1 && Tmpl->Bracelet)
+	// Update 4 G1 (SPEC v1.7 §2.9.3, §2.8.5; FW-5): the festival branch comes first (a Main won or final-tabled, a championship's Mini
+	// or Micro won: Dee's festival line, inside the edition's cap), so a Championship Online Main win sends its festival line and the
+	// bracelet's waits for the next bracelet; the champion's moment (Kinds 1, 3 and 5) waits for the results screen, the result paid.
+	const session_fest_detail::FestResult Fest = session_fest_detail::FestResultOf(T->Spec.Id, BustPlace, SeatWon, BustPrize, TextsSeen);
+	if (Fest.Moment)
+	{
+		FestPending = Fest.Moment;
+	}
+	if (Fest.Branch)
+	{
+		if (!Fest.Key.empty())
+		{
+			StoryText(Fest.Key, "Dee", Fest.Body);
+		}
+	}
+	else if (Tmpl && BustPlace == 1 && Tmpl->Bracelet)
 	{
 		StoryText("bracelet-first", "Dee", "A BRACELET. A real Championship bracelet. Online counts, kid. Don't let anybody tell you different.");
 	}
@@ -3755,8 +3778,8 @@ void Session::ShowResults()
 	{
 		StoryText("mm-title", "Dee", "Your name is on the Micro Madness leaderboard. A TITLE. The whole laundromat is refreshing the page.");
 		// Update 4 (SPEC v1.7 §2.11 T12): the line comes from the festival texts' table (fest::TextInventory lists it), its {Step1} the
-		// typed $2.20 it always said until §2.2.2's fill reads the RCOP ladder's first step.
-		StoryText("mm-title-rival", RivalName, site::FillCopy(fest::fest_text_detail::FestText("T12"), {{"Step1", "$2.20"}}));
+		// RCOP ladder's first step (§2.2.2; FW-5): $2.20, the line byte for byte as it always read.
+		StoryText("mm-title-rival", RivalName, site::FillCopy(fest::fest_text_detail::FestText("T12"), {{"Step1", session_fest_detail::FestStep1Fill()}}));
 	}
 	else if (SeriesEvent && BustPlace <= 9)
 	{
