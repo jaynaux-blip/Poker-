@@ -157,6 +157,47 @@ const SiteCopyLine SiteCopyTable[] = {
 	{"news:overlay", "{Entries} entries left the {Gtd} guarantee {Amount} short. {Site} covered the difference.", true},
 	{"news:series:title", "{Series} starts {Day}", false},
 	{"news:series", "{Events} events over {Days} days, {Gtd} guaranteed. The Main Event closes it at {Buyin}.", true},
+	// Update 4 G1 (SPEC v1.7 §2.11, F-world's FW-1): Festival Season's News and headlines, one flat key a text (this key list is the
+	// contract F-net's News posts and F-world's headlines read: the championship announcement is one key a site), the Pass's
+	// invitations (L1-L4, site::Invite's Why 5, §2.10), the crown letter (L5-L6: its seat sentence because fest::kCrownTickets holds)
+	// and the step refund's ledger line (§2.6.1 item 8).
+	{"news:fest:announce:title", "{Festival} is coming to {Site}", false},
+	{"news:fest:announce", "{Festival} opens on {Date}: {Events} events, {Gtd} guaranteed, and a {MainBuyIn} Main Event with {Added} added.", true},
+	{"news:fest:announce:first", "It's {Site}'s first festival.", true},
+	{"news:fest:announce:champ:ignite", "Main Events at {MicroBuyIn}, {MiniBuyIn} and {MainBuyIn} close it. Satellites start at {Step1}.", true},
+	{"news:fest:announce:champ:runittwice", "It's the club's championship: Main Events at {MicroBuyIn}, {MiniBuyIn} and {MainBuyIn}, and satellites from {Step1}.", true},
+	{"news:fest:announce:rl", "{Festival} is back on {Date}: {Events} events and {Gtd} guaranteed. The {MainBuyIn} Main Event closes it on {MainDate}.", true},
+	{"news:fest:open:title", "{Festival} opens tonight", false},
+	{"news:fest:open", "Day 1 of {Days}. {Events} events, {Gtd} guaranteed. The Main Event is on {MainDate}.", true},
+	{"news:fest:open:grit", "Night 1 of {Nights}. Two shows a night, at {Show1} and {Show2}.", true},
+	{"news:fest:record:title", "{Event} draws a record field", false},
+	{"news:fest:record:ever", "{Entries} runners: the biggest field {Site} has ever had.", true},
+	{"news:fest:record:year", "{Entries} runners: {Site}'s biggest field this year.", true},
+	{"head:fest:main:title", "{Name} wins the {Festival} Main Event", false},
+	{"head:fest:main", "{Prize} and {Trophy}, from a field of {Entries}.", true},
+	{"head:fest:title:title", "{Name} wins the {Festival} {Tier} Main Event", false},
+	{"head:fest:title", "{Prize} and a {Festival} title, from a field of {Entries}.", true},
+	{"head:fest:crown:title", "{Name} is the {Festival} Player of the Series", false},
+	{"head:fest:crown", "{Name} takes the {Festival} belt: {Points} points from {Cashes} cashes.", true},
+	{"tag:fest:crown", "CROWN", false},
+	{"tag:fest:festival", "FESTIVAL", false},
+	{"invite:ignite:fest:subject", "You're on the list for {Festival}", false},
+	{"invite:ignite:fest",
+		"Hi, it's Bree from Ignite Poker. {Festival} opens on {Date}, and you're on the list. Bring friends. Bring snacks. Open an account and we'll match your "
+		"first deposit 100%, up to $100, released as you play: $5 for every $20 of rake inside 60 days. The {MainBuyIn} Main Event has money added. Accept below "
+		"and your Cashier's ready.",
+		true},
+	{"invite:runittwice:fest:subject", "An invitation to {Festival}", false},
+	{"invite:runittwice:fest",
+		"This is Ingrid Vale at RunItTwice. {Festival} opens on {Date}, and we'd like you at the table. Make a first deposit of $50 or more and we'll put $33 in "
+		"tickets on your account: a $22 Sunday Grind and two $5.50 Supper Stacks. Accept below and the Cashier's yours.",
+		true},
+	{"letter:fest:crown:subject", "{Festival} {Year}: the belt is yours", false},
+	{"letter:fest:crown",
+		"Congratulations. You finished first in the {Festival} {Year} race with {Points} points, and the belt is yours. Your seat in the next {Festival} Main "
+		"Event comes with it. See you at the next one.",
+		true},
+	{"ledger:festcredit", "Unused {Festival} Step {K} ticket refunded", false},
 	// Ledger and wallet labels, marks.
 	{"label:deposit", "Deposit: {Site}", false},
 	{"label:fee", "{Site} {Method} fee", false},

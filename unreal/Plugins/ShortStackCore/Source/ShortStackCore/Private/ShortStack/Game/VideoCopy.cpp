@@ -383,6 +383,25 @@ std::string StoryBig(const std::string& Key)
 	return Key.rfind("back", 0) == 0 ? "BACK HOME" : "STORY";
 }
 
+/** Update 4 G1 (SPEC v1.7 §2.9.4, §2.11's V1-V9; F-world's FW-1): a festival story's titles by the prefix of its StoryText key
+ *  (fest-main-, fest-belt-, fest-ft-), in the Story, Hype and Teaching styles. The one table (PLAN_G1 §1 item 26): fest::TextInventory
+ *  lists it (G/SessionFest.cpp); Rerun's story keys and Inventory() read it once the three prefixes are wired (§2.9.4). */
+const std::vector<std::pair<std::string, std::string>>& FestStoryTitles()
+{
+	static const std::vector<std::pair<std::string, std::string>> All = {
+		{"fest-main-", "I won the {Festival} Main Event"},
+		{"fest-main-", "{TROPHY} IS MINE"},
+		{"fest-main-", "How I won {Festival} from a {BuyIn} entry"},
+		{"fest-belt-", "I won the {Festival} belt"},
+		{"fest-belt-", "{N} events, one belt"},
+		{"fest-belt-", "How I became {Festival}'s Player of the Series"},
+		{"fest-ft-", "Final table at the {Festival} Main"},
+		{"fest-ft-", "I made the {Festival} final table"},
+		{"fest-ft-", "{Place} in the {Festival} Main Event"},
+	};
+	return All;
+}
+
 // ---------------------------------------------------------------- facts
 
 std::string Lower(std::string S)
