@@ -353,6 +353,36 @@ uint32 FsBeltStrap(ss::fest::Brand B)
 	}
 }
 
+/** What is drawn under Root, printed for §9.4's budgets: triangles (an instanced mesh's instances each counted) and draw sections (an
+ *  instanced mesh's sections drawn once for all its instances). The engraving strips are widgets, not counted. */
+void FsTally(const USceneComponent* Root, int32& OutTris, int32& OutSections)
+{
+	OutTris = 0;
+	OutSections = 0;
+	if (!Root)
+	{
+		return;
+	}
+	TArray<USceneComponent*> Parts;
+	Root->GetChildrenComponents(true, Parts);
+	for (const USceneComponent* Part : Parts)
+	{
+		const UStaticMeshComponent* M = Cast<UStaticMeshComponent>(Part);
+		const UStaticMesh* Mesh = M ? M->GetStaticMesh() : nullptr;
+		if (!Mesh || !M->IsVisible())
+		{
+			continue;
+		}
+		const UInstancedStaticMeshComponent* Many = Cast<UInstancedStaticMeshComponent>(M);
+		const int32 Count = Many ? Many->GetInstanceCount() : 1;
+		if (Count > 0)
+		{
+			OutTris += Mesh->GetNumTriangles(0) * Count;
+			OutSections += Mesh->GetNumSections(0);
+		}
+	}
+}
+
 /**
  * SM_FS_<Name> (SPEC §9.1 rule 7): the CC0 build under the git-ignored ThirdParty folder (/Game/ThirdParty/FestShelf/<mesh>, the lead's
  * import of g1/bakes/FL-8a_cc0 and FL-8b_cc0), else the committed procedural build the editor's setup script imports
@@ -766,9 +796,13 @@ void UFestShelf::Apply(const FestShelfDetail::FFsPlan& Plan, bool bPacked)
 		}
 	}
 	ShowPins(Plan);
-	// Printed, never assumed (§9.4): the lead's PIE reads the real draw calls (stat scenerendering) against 12.
-	UE_LOG(LogTemp, Log, TEXT("The festival shelf: %d trophies, %d belts, %d pins in %d pin groups"), TrophiesShown, static_cast<int32>(Plan.Belts.size()),
-		static_cast<int32>(Plan.Pins.size()), PinGroups.Num());
+	// Printed, never assumed (§9.4): the shelf against 40,000 triangles and 12 draws, the board against 5,000 triangles; the lead's PIE
+	// reads the real draw calls (stat scenerendering) beside these.
+	int32 ShelfTris = 0, ShelfSections = 0, BoardTris = 0, BoardSections = 0;
+	D::FsTally(ShelfRoot, ShelfTris, ShelfSections);
+	D::FsTally(BoardRoot, BoardTris, BoardSections);
+	UE_LOG(LogTemp, Log, TEXT("The festival shelf: %d trophies, %d belts, %d pins; the shelf %d triangles in %d mesh sections (+2 engraving strips; caps 40000 and 12), the board %d triangles in %d sections (cap 5000)"),
+		TrophiesShown, static_cast<int32>(Plan.Belts.size()), static_cast<int32>(Plan.Pins.size()), ShelfTris, ShelfSections, BoardTris, BoardSections);
 }
 
 void UFestShelf::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
