@@ -5,6 +5,7 @@
 
 #include "ShortStack/Cards.h"
 #include "ShortStack/Evaluator.h"
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/VideoAlgo.h"
@@ -403,20 +404,51 @@ const std::vector<std::pair<std::string, std::string>>& FestStoryTitles()
 	return All;
 }
 
+/** FW-5 (§2.11's articles rule, SPEC v1.7 §2.11 "Articles and dates"): Text with each {Festival} slot filled by what comes
+ *  before it. After "the " or "next " (any case, a word of its own) the edition's name drops a leading "The " (fest::NameAfterArticle:
+ *  V1, V4 and V7-V9 print "the Championship Online 2027"); anywhere else it prints whole (V3's "How I won The Championship Online 2027
+ *  from ...", V6's "How I became The Championship Online 2027's Player of the Series"). Name is the whole name the session packed
+ *  (G/SessionFest.cpp's FestStoryFacts); every other slot stays for the fill that follows. */
+std::string FestStoryNameFill(const std::string& Text, const std::string& Name)
+{
+	const std::string Slot = "{Festival}";
+	std::string Out = Text;
+	for (size_t At = Out.find(Slot); At != std::string::npos; At = Out.find(Slot, At))
+	{
+		bool AfterArticle = false;
+		for (const char* Word : {"the ", "next "})
+		{
+			const size_t Len = std::strlen(Word);
+			bool Same = At >= Len && (At == Len || !std::isalpha(static_cast<unsigned char>(Out[At - Len - 1])));
+			for (size_t K = 0; Same && K < Len; ++K)
+			{
+				Same = std::tolower(static_cast<unsigned char>(Out[At - Len + K])) == Word[K];
+			}
+			AfterArticle = AfterArticle || Same;
+		}
+		const std::string Fill = AfterArticle ? fest::NameAfterArticle(Name) : Name;
+		Out.replace(At, Slot.size(), Fill);
+		At += Fill.size();
+	}
+	return Out;
+}
+
 /** FW-5 (§2.9.4): a festival story's line for one style, filled from its packed facts (Candidate::IdeaFacts' display facts): Story
  *  V1/V4/V7, Hype V2/V5/V8, Teaching V3/V6/V9; none for Question or Plain, for any other key, or while a fact is missing. */
 std::vector<std::string> FestStoryLines(const std::string& Event, TitleStyle T, const std::string& IdeaFacts)
 {
 	std::vector<std::string> Out;
 	int N = 0;
+	const std::map<std::string, std::string> Shown = vcontent::DisplayFacts(IdeaFacts);
+	const auto Name = Shown.find("Festival"); // the whole name: the article rule fills it by context (FestStoryNameFill)
 	for (const std::pair<std::string, std::string>& V : FestStoryTitles())
 	{
 		if (Event.rfind(V.first, 0) != 0 || N++ != static_cast<int>(T))
 		{
 			continue;
 		}
-		std::string Line = V.second;
-		for (const auto& Kv : vcontent::DisplayFacts(IdeaFacts))
+		std::string Line = Name != Shown.end() ? FestStoryNameFill(V.second, Name->second) : V.second;
+		for (const auto& Kv : Shown)
 		{
 			const std::string Slot = "{" + Kv.first + "}";
 			for (size_t At = Line.find(Slot); At != std::string::npos; At = Line.find(Slot, At + Kv.second.size()))
@@ -2292,7 +2324,9 @@ std::vector<TitleOption> TitleOptions(const Choice& Ch, const std::vector<Candid
 				{
 					continue;
 				}
-				const std::string Filled = FillU3(X.Text, F);
+				// A festival story's row fills {Festival} by the article rule first (FW-5, video_copy::FestStoryNameFill).
+				const auto FestName = I < 0 ? F.V.find("Festival") : F.V.end();
+				const std::string Filled = FillU3(FestName != F.V.end() ? video_copy::FestStoryNameFill(X.Text, FestName->second) : X.Text, F);
 				if (Filled.empty())
 				{
 					continue;

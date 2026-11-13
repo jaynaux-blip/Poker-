@@ -336,7 +336,9 @@ std::vector<std::pair<std::string, std::string>> FestStoryFacts(const world::Wor
 	{
 		return Out;
 	}
-	Out.emplace_back("Festival", fest::NameAfterArticle(F->Name)); // V1, V4, V6-V9 write "the {Festival}"; V3 and V5 read it the same
+	// The whole name (§2.11's articles rule): V1, V4 and V7-V9 write "the {Festival}", so their fill drops a leading "The "; V3 and V6
+	// print it whole (G/VideoCopy.cpp's FestStoryNameFill, in Update 2's titles and Rerun 2.0's).
+	Out.emplace_back("Festival", F->Name);
 	if (P == 0)
 	{
 		Out.emplace_back("TROPHY", FestUpper(fest::TrophyName(F->Which, 0)));

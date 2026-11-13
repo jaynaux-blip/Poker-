@@ -3309,6 +3309,60 @@ void FestRerunStories()
 		Got += (S ? " | " : "") + First;
 	}
 	Expect(Each, "FestRerunStories: a PENNANT 2027 Main win's story leads with V1-V3 in their styles, filled from its facts (" + Got + "; facts " + Facts + ")");
+	// §2.11's articles rule on a name that starts with "The ": V1 and V4 (after "the ") drop it, V3 and V6 print it whole, and no
+	// title in Rerun 2.0's options or Update 2's lines holds "the The" (any case).
+	const ss::fest::Festival* Tco = FestEditionWorld(ss::fest::Brand::Tco, 2027);
+	Expect(Tco && Tco->Name.rfind("The ", 0) == 0, "FestRerunStories: The Championship Online 2027 exists, its name starting with \"The \"");
+	auto TheTheTco = [](const std::string& S) {
+		std::string L = S;
+		for (char& Ch : L)
+		{
+			Ch = Ch >= 'A' && Ch <= 'Z' ? static_cast<char>(Ch - 'A' + 'a') : Ch;
+		}
+		return L.find("the the ") != std::string::npos;
+	};
+	std::string TcoGot;
+	bool TcoEach = Tco != nullptr && Tco->Name.size() > 4;
+	for (int Belt = 0; TcoEach && Belt < 2; ++Belt)
+	{
+		const std::string TcoKey = (Belt ? "fest-belt-" : "fest-main-") + Tco->SeriesId;
+		std::string TcoFacts;
+		for (const std::pair<std::string, std::string>& F : sfd::FestStoryFacts(Fresh, TcoKey))
+		{
+			TcoFacts += (TcoFacts.empty() ? "" : ";") + F.first + "=" + video::vcontent::FactEsc(F.second);
+		}
+		const std::string Bare = Tco->Name.substr(4); // "Championship Online 2027"
+		const std::string WantTco[2][3] = {{"I won the " + Bare + " Main Event", "", "How I won " + Tco->Name + " from a "},
+			{"I won the " + Bare + " belt", "", "How I became " + Tco->Name + "'s Player of the Series"}};
+		video::Candidate TC = C;
+		TC.Id = "story:" + TcoKey;
+		TC.Event = TcoKey;
+		TC.IdeaFacts = TcoFacts;
+		for (int S = 0; S < 3; ++S)
+		{
+			video::Choice Ch;
+			Ch.Candidates = {TC.Id};
+			Ch.T = static_cast<video::TitleStyle>(S);
+			const std::vector<video::TitleOption> Opts = video::TitleOptions(Ch, {TC}, video::Channel(), 0, 3);
+			const std::vector<std::string> U2 = video::video_copy::FestStoryLines(TcoKey, Ch.T, TcoFacts);
+			const std::string First = Opts.empty() ? std::string() : Opts.front().Text;
+			const std::string& TcoWant = WantTco[Belt][S];
+			TcoEach = TcoEach && !Opts.empty() && Opts.front().Key.rfind(Belt ? "story.fest-belt." : "story.fest-main.", 0) == 0 && U2.size() == 1 &&
+				(TcoWant.empty() || (First.rfind(TcoWant, 0) == 0 && U2.front().rfind(TcoWant, 0) == 0));
+			for (const video::TitleOption& O : Opts)
+			{
+				TcoEach = TcoEach && !TheTheTco(O.Text);
+			}
+			for (const std::string& Line : U2)
+			{
+				TcoEach = TcoEach && !TheTheTco(Line);
+			}
+			TcoGot += (TcoGot.empty() ? "" : " | ") + First + (U2.empty() ? std::string(" / -") : " / " + U2.front());
+		}
+	}
+	Expect(TcoEach, "FestRerunStories: The Championship Online 2027's Main win and belt stories print \"the Championship Online 2027\" in V1 "
+					"and V4 and keep \"The\" in V3 and V6, in both fills, never \"the The\" (" + TcoGot + ")");
+	std::printf("  FestRerunStories: TCO 2027 %s\n", TcoGot.c_str());
 	// The session: the belt's text becomes Rerun's story at the next calendar step, a series event's (x1.3) with its facts packed; a
 	// festival line sent before the channel had state is marked told; a reload reads the facts again (a story's aren't saved).
 	const FestSessionRunWorld& Run = FestSessionWorld();

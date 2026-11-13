@@ -57,9 +57,10 @@ std::optional<FestMoment> FestMarkMoment(const world::World& W, const std::set<s
 /** Rerun's festival stories (§2.9.4): a text key's prefix, 0 "fest-main-", 1 "fest-belt-", 2 "fest-ft-" (matched with
  *  rfind(prefix, 0) == 0); -1 for every other key. */
 int FestStoryPrefix(const std::string& Key);
-/** The story's facts at NoteStory time (§2.9.4, V1-V9), as Candidate::IdeaFacts' display facts: Festival (after "the"), and TROPHY
- *  and BuyIn (a Main), N (the belt: the hero's events in the edition) or Place (a final table: the hero's Main finish). Empty for a
- *  key that is no festival story. */
+/** The story's facts at NoteStory time (§2.9.4, V1-V9), as Candidate::IdeaFacts' display facts: Festival (the edition's whole name;
+ *  a title's fill drops its leading "The " after "the " or "next ", G/VideoCopy.cpp's FestStoryNameFill), and TROPHY and BuyIn (a
+ *  Main), N (the belt: the hero's events in the edition) or Place (a final table: the hero's Main finish). Empty for a key that is no
+ *  festival story. */
 std::vector<std::pair<std::string, std::string>> FestStoryFacts(const world::World& W, const std::string& Key);
 } // namespace session_fest_detail
 } // namespace ss
