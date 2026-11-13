@@ -436,7 +436,8 @@ void SitesLooks()
 		SitesExpect(Cut.size() == 5 && Cut[1].X == 290.0f && Cut[1].Y == 50.0f && Cut[2].X == 300.0f && Cut[2].Y == 60.0f, "looks: the cut corner is a 45-degree cut of the top right");
 	}
 	// The night: Ignite's palette at 2 AM is its Afterburner one when core-sites-look has set it, at 9 PM its day one; RiverLine
-	// and RunItTwice wear theirs at every hour.
+	// and RunItTwice wear theirs at every hour outside a festival's window (Update 4 G1 FL-4, SPEC §2.7.3: RCOP 2026 dresses
+	// RiverLine from day 13 00:00 to day 35 06:00, so RiverLine's 2 AM is day 5's).
 	{
 		const double Day = 30.0 * SitesDay;
 		const auto Hexes = [](const ss::ui::Skin& K) { return SitesHexes(K); };
@@ -447,7 +448,7 @@ void SitesLooks()
 		SitesExpect(Prime == IgDay && (HasNight ? Night == Hexes(ss::ui::Skin::FromHex(ss::net::Def(SiteId::Ignite).NightPalette)) : Night == IgDay),
 			"looks: Ignite's skin is Afterburner's at 2 AM (when it has one) and the day's at 9 PM");
 		SitesExpect(Hexes(sd::SitesSkin(SiteId::RunItTwice, Day + 2.0 * 60.0)) == Hexes(ss::ui::Skin::FromHex(ss::net::Def(SiteId::RunItTwice).Palette)) &&
-				Hexes(sd::SitesSkin(SiteId::RiverLine, Day + 2.0 * 60.0)) == Hexes(ss::ui::Skin::FromHex(ss::net::Def(SiteId::RiverLine).Palette)),
+				Hexes(sd::SitesSkin(SiteId::RiverLine, 5.0 * SitesDay + 2.0 * 60.0)) == Hexes(ss::ui::Skin::FromHex(ss::net::Def(SiteId::RiverLine).Palette)),
 			"looks: RunItTwice and RiverLine wear their own palettes at 2 AM");
 	}
 	// Pages: Profile is both rivals' (the Player Card, the Member File), never RiverLine's.
