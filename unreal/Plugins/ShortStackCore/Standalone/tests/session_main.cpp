@@ -13,6 +13,7 @@
 #include "ShortStack/Game/LiveAuto.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Stake.h"
@@ -20,6 +21,7 @@
 #include "ShortStack/Game/World.h"
 #include "ShortStack/Game/Fuse.h"
 #include "ShortStack/Game/SitePlay.h"
+#include "ShortStack/Game/WorldFest.h"
 #include "ShortStack/Game/WorldLeague.h"
 #include "ShortStack/UI/Canvas.h"
 #include "ShortStack/UI/RiverLine.h"
@@ -3694,6 +3696,7 @@ struct Career
 	std::map<std::string, int> HoldSince;          // the Guest List: a hold's key and the day it was first seen
 	int HoldsSeen = 0, HoldsCleared = 0, LongestHold = 0;
 	std::set<std::string> ResultsSeen;             // History's rival results already in IncomeU3 (their prizes land on the site, not the bank)
+	std::string FestEnd;                           // Update 4 G1: the career's festival marks and crown tickets at the end (printed)
 };
 
 /** Income as check 1 reads it: poker, the job, hustles, prizes, streaming and the sponsors' lines. */
@@ -4713,6 +4716,19 @@ void Run(Career& C)
 		const ss::rep::Public P = S->Record();
 		C.EventsEnd = P.OnlineEvents;
 		C.Abi100End = P.Abi100;
+		// Update 4 G1 (SPEC v1.7 §2.6.1, §2.15.3, §8.4; fworld_to_lead_4): the festival marks the career earned and their crown tickets
+		// (paid once, keyed festticket:), and the festival tickets in the wallet with their buy-ins: printed by SitesChecks.
+		for (const ss::world::HeroFestMark& M : ss::world::HeroMarks(S->Living()))
+		{
+			const ss::fest::Festival* F = ss::fest::FestivalOf(M.Key);
+			C.FestEnd += (C.FestEnd.empty() ? "" : "; ") + (F ? F->Name : M.Key) + " grade " + std::to_string(static_cast<int>(M.Mark)) + ", " + std::to_string(M.Rank) + " of " +
+				std::to_string(M.Scorers) + (M.Ticket ? ", crown ticket unpaid" : S->Life.Sites.Done.count("festticket:" + M.Key) ? ", crown ticket paid" : "");
+		}
+		for (const std::pair<const std::string, int>& T : S->Life.Tickets)
+		{
+			const ss::net::EventTemplate* Seat = T.second > 0 ? ss::net::ForEvent(T.first).FindTemplate(T.first) : nullptr;
+			C.FestEnd += Seat && ss::fest::FestivalOf(Seat->Series) ? "; ticket " + T.first + " x" + std::to_string(T.second) + " (" + ss::Money(Seat->BuyInCents) + ")" : std::string();
+		}
 	}
 }
 
@@ -5059,6 +5075,65 @@ bool InviteDoor(const ss::net::SiteDef& D, int Events, ss::Chips Abi)
 	return First || Second;
 }
 
+/** Update 4 G1 (SPEC v1.7 §2.10, §8.4; fworld_to_lead_4): the Festival Pass's door, read with the letter: the site's festival Announced,
+ *  in Buildup or Live at that minute, and the tracked events at its need (none for a first edition, fest::kPassEvents after). */
+bool PassDoor(const ss::net::SiteDef& D, int Events, double At)
+{
+	const ss::fest::Festival* F = D.Gate.FestivalEvents >= 0 ? ss::fest::PassFestival(D.Id, At) : nullptr;
+	return F && Events >= ss::fest::PassNeeds(*F, D.Gate);
+}
+
+/** Update 4 G1 (SPEC v1.7 §2.10 item 7, §2.6.1, §2.15.3, §8.4; fworld_to_lead_4): the multi-site career's festival prints, no check:
+ *  each rival festival whose Pass window meets the career (its first day, what it needs, the career's letter), the festival Mains'
+ *  site money (the added money in their pools), the career's marks and crown tickets, and how many weeks the Value Governor's weekly
+ *  Room takes to cover a championship belt's seat (and WRIT's, for comparison) for a micro, a low and a mid-stakes hero. */
+void FestPacingPrints(const Career& C)
+{
+	auto DayOf = [&C](double At) { return static_cast<int>((At - C.Start) / Day); };
+	const int First = static_cast<int>(C.Start / Day), Last = First + C.Days;
+	std::string Windows, Money;
+	for (const ss::fest::Festival* F : ss::fest::Festivals(First, Last + ss::fest::kAnnounceDays))
+	{
+		const ss::net::SiteDef& D = ss::net::Def(F->Site);
+		const double Opens = std::max(static_cast<double>(F->FirstDay - ss::fest::kAnnounceDays) * Day, static_cast<double>(D.LaunchDay) * Day);
+		if (F->Site != ss::net::SiteId::RiverLine && Opens < static_cast<double>(Last) * Day)
+		{
+			double Letter = -1.0;
+			for (size_t I = 0; I < C.Invited.size(); ++I)
+			{
+				Letter = C.Invited[I].first == static_cast<int>(F->Site) ? C.Invited[I].second : Letter;
+			}
+			Windows += (Windows.empty() ? "" : "; ") + F->Name + " on " + D.Name + " from day " + std::to_string(DayOf(Opens)) + " needing " +
+				std::to_string(ss::fest::PassNeeds(*F, D.Gate)) + " paid events (" +
+				(Letter < 0.0 ? std::string("no letter yet") : "the career's letter on day " + std::to_string(DayOf(Letter))) + ")";
+		}
+		const ss::net::EventTemplate* Main = F->FirstDay <= Last ? ss::net::ForEvent(F->MainId).FindTemplate(F->MainId) : nullptr;
+		Money += Main ? (Money.empty() ? "" : ", ") + F->Name + "'s Main " + ss::Money(Main->AddedCents) + " added" : std::string();
+	}
+	std::printf("  pacing multi-site (update 4): the Pass's windows: %s\n", Windows.empty() ? "none" : Windows.c_str());
+	std::printf("  pacing multi-site (update 4): festival pool money (site money in): %s\n", Money.empty() ? "none" : Money.c_str());
+	std::printf("  pacing multi-site (update 4): marks and crown tickets at the end: %s\n", C.FestEnd.empty() ? "none" : C.FestEnd.c_str());
+	std::string Weeks;
+	for (const ss::fest::Brand B : {ss::fest::Brand::Pennant, ss::fest::Brand::Reign, ss::fest::Brand::Writ})
+	{
+		const ss::fest::Festival* F = nullptr;
+		for (const ss::fest::Festival& G : ss::fest::All())
+		{
+			F = !F && G.Which == B && G.Year == 2027 ? &G : F;
+		}
+		const ss::net::EventTemplate* Main = F ? ss::net::ForEvent(F->MainId).FindTemplate(F->MainId) : nullptr;
+		if (!Main)
+		{
+			continue;
+		}
+		const ss::Chips Seat = Main->BuyInCents;
+		auto Cover = [Seat](ss::Chips Room) { return static_cast<int>((Seat + Room - 1) / Room); };
+		Weeks += (Weeks.empty() ? "" : "; ") + F->Name + "'s belt seat " + ss::Money(Seat) + ": micro " + std::to_string(Cover(1200)) + " weeks, low " + std::to_string(Cover(6000)) +
+			", mid " + std::to_string(Cover(30000));
+	}
+	std::printf("  pacing multi-site (update 4): weeks to cover a belt seat on the weekly Room ($12, $60, $300): %s\n", Weeks.empty() ? "none" : Weeks.c_str());
+}
+
 void SitesChecks(const Career& C)
 {
 	const double Act1 = ActIEndOf(C.Ledger);
@@ -5074,14 +5149,17 @@ void SitesChecks(const Career& C)
 		const ss::net::SiteDef& D = ss::net::Def(Site);
 		const int Events = C.InvitedAt[I].first;
 		const ss::Chips Abi = C.InvitedAt[I].second;
+		// Update 4 G1 (SPEC v1.7 §2.10 item 7; fworld_to_lead_4): a letter the volume doors don't explain came through the Pass.
+		const bool Pass = !InviteDoor(D, Events, Abi) && PassDoor(D, Events, C.Invited[I].second);
+		const ss::fest::Festival* PassFest = Pass ? ss::fest::PassFestival(Site, C.Invited[I].second) : nullptr;
 		Letters += (Letters.empty() ? "" : "; ") + D.Name + "'s on day " + std::to_string(DayOf(C.Invited[I].second)) + " (" + std::to_string(Events) + " tracked events, the last hundred's average " +
-			ss::Money(Abi) + ")";
+			ss::Money(Abi) + (PassFest ? ", the Festival Pass for " + PassFest->Name : std::string()) + ")";
 		Early = Early || C.Invited[I].second < Act1;
 		Ignite = Ignite || Site == ss::net::SiteId::Ignite;
 		Rit = Rit || Site == ss::net::SiteId::RunItTwice;
 		RitDay = Site == ss::net::SiteId::RunItTwice ? DayOf(C.Invited[I].second) : RitDay;
-		// (The record is read the moment the letter is seen, a step at most after the gate passed.)
-		Gates = Gates && InviteDoor(D, Events, Abi);
+		// (The record is read the moment the letter is seen, a step at most after the gate passed.) Update 4 G1: the Pass is a door too.
+		Gates = Gates && (InviteDoor(D, Events, Abi) || Pass);
 	}
 	const int Joined = C.JoinedSites;
 	ss::Chips Fees = 0;
@@ -5093,6 +5171,7 @@ void SitesChecks(const Career& C)
 		C.Online, C.BySite[0], C.BySite[1], C.BySite[2], ss::Money(C.BuyInsBySite[0]).c_str(), ss::Money(C.BuyInsBySite[1]).c_str(), ss::Money(C.BuyInsBySite[2]).c_str(), C.Phase2At,
 		Act1 < 1.0e17 ? DayOf(Act1) : -1);
 	std::printf("  pacing multi-site: invitations: %s\n", Letters.empty() ? "none" : Letters.c_str());
+	FestPacingPrints(C);
 	std::printf("  pacing multi-site: %d deposits (%s), %d withdrawals (%s asked back), %s in card fees; %s on the sites at the end; %d rent deadlines with an account, "
 				"%zu of them short in the bank with the sites enough (%d hourly looks, %d without the warning, the earliest it showed %.0f h out); %d with site money moving toward the "
 				"rent%s\n",
@@ -8192,7 +8271,8 @@ void Update2Journey()
 		const net::SiteDef& D = net::Def(Site);
 		Letters += (Letters.empty() ? "" : "; ") + D.Name + "'s on day " + std::to_string(static_cast<int>((C.Invited[I].second - C.Start) / Day)) + " (" +
 			std::to_string(C.InvitedAt[I].first) + " events, the last hundred's average " + ss::Money(C.InvitedAt[I].second) + ")";
-		Gates = Gates && pacing::InviteDoor(D, C.InvitedAt[I].first, C.InvitedAt[I].second); // update 3 §11 Q4: either volume door
+		// update 3 §11 Q4: either volume door; Update 4 G1 (SPEC v1.7 §2.10; fworld_to_lead_4): or the Festival Pass
+		Gates = Gates && (pacing::InviteDoor(D, C.InvitedAt[I].first, C.InvitedAt[I].second) || pacing::PassDoor(D, C.InvitedAt[I].first, C.Invited[I].second));
 		BeforeActI = BeforeActI || C.Invited[I].second < Act1;
 		IgniteAt = Site == net::SiteId::Ignite ? C.Invited[I].second : IgniteAt;
 		RitAt = Site == net::SiteId::RunItTwice ? C.Invited[I].second : RitAt;
@@ -8441,8 +8521,9 @@ void MigrationAll3()
 			Second == First ? "the same from a second load" : ("a second load differs at " + migration2::FirstDifference(First, Second)).c_str(), U3, migration2::Since(F0));
 		Expect(Reads && Second == First, (Tag + ": its session's save reads and writes back byte for byte, and loads a second time identically").c_str());
 		// Update 3's own fixtures (update3_streamer at C-K, update3_siteplay at C2, update3_creator at C3) carry its lines: the
-		// round trip above is their check (SPEC_CREATORS §9.1).
-		Expect(U3 == 0 || Name.rfind("update3_", 0) == 0, (Tag + ": no Update 3 line written back or by its session (S10)").c_str());
+		// round trip above is their check (SPEC_CREATORS §9.1). Update 4's (update4_festival, G1's F-world FW-7: a career written by
+		// today's code, so its Kast channel carries the creator update's month line) are exempt alike (LEAD_CALLS R-28, C-28).
+		Expect(U3 == 0 || Name.rfind("update3_", 0) == 0 || Name.rfind("update4_", 0) == 0, (Tag + ": no Update 3 line written back or by its session (S10)").c_str());
 	}
 	// The no-write case (§7.5; C2): the clause's save, every rival page opened through ss.Laptop.Open's path (RiverLine::DebugOpen)
 	// and drawn, with the Kast Studio's stream preview drawn after each site's pages (offline: going live is a Kast migration of
