@@ -17,11 +17,13 @@
 #include "ShortStack/Evaluator.h"
 #include "ShortStack/Hand.h"
 #include "ShortStack/Structure.h"
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/SiteShow.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/World.h"
+#include "ShortStack/Game/WorldFest.h"
 #include "ShortStack/Tournament.h"
 #include "ShortStack/UI/ChartArt.h"
 #include "ShortStack/UI/SiteArt.h"
@@ -226,12 +228,22 @@ std::string RitEventName(const std::string& Name)
 	return Short;
 }
 
-/** The tags after an event's name: what kind of night it is. */
+/** Update 4 G1 (SPEC v1.7 §2.7.4; F-hubs FH-3b): the festival's Short ("GRIT", "WRIT", "REIGN") for a festival series' id, "" for a
+ *  plain series (or none). */
+std::string RitFestShort(const std::string& SeriesId)
+{
+	const fest::Festival* F = SeriesId.empty() ? nullptr : fest::FestivalOf(SeriesId);
+	const net::SeriesInfo* Sr = F ? net::Site(F->Site).FindSeries(F->SeriesId) : nullptr;
+	return Sr ? Sr->Short : std::string();
+}
+
+/** The tags after an event's name: what kind of night it is. A festival's events read its Short, never "SERIES" (§2.7.4). */
 std::string RitTagOf(const net::EventTemplate& T)
 {
 	if (!T.Series.empty())
 	{
-		return "SERIES";
+		const std::string Fest = RitFestShort(T.Series);
+		return Fest.empty() ? std::string("SERIES") : Fest;
 	}
 	if (T.BuyInCents >= 20000)
 	{
@@ -594,11 +606,122 @@ void RitRail(RitCtx& X, bool Collapsed)
 
 // ------------------------------------------------------------------ the red tape (§3.4 Ticker)
 
+/** Update 4 G1 (SPEC v1.7 §2.7.4, U15; F-hubs FH-3b): RunItTwice's festival on the tape at World: the edition Live today (fest::LiveOn),
+ *  else the one in its Buildup (the countdown; an edition on stage in its Closing or Afterglow comes first, as the hub's routing
+ *  orders them, and its Afterglow item is FH-5c's). Null when none. */
+const fest::Festival* RitTapeFest(double World, fest::Phase& P)
+{
+	const net::Network& Net = net::Site(RitSite);
+	const int Today = net::DayOf(World);
+	if (const fest::Festival* L = fest::LiveOn(RitSite, Today))
+	{
+		P = fest::Phase::Live;
+		return L;
+	}
+	constexpr int TailDays = 14;
+	for (const fest::Festival* F : fest::Festivals(Today - TailDays, Today + fest::kBuildupDays + 1))
+	{
+		if (F->Site != RitSite)
+		{
+			continue;
+		}
+		P = fest::PhaseOf(*F, World, Net.Attached());
+		if (P == fest::Phase::Buildup || P == fest::Phase::Closing || P == fest::Phase::Afterglow)
+		{
+			return F;
+		}
+	}
+	P = fest::Phase::Off;
+	return nullptr;
+}
+
+/** The tape's festival countdown (U15): "{SHORT} · OPENS IN {D}D" in the Buildup; "{SHORT} · DAY {N} OF {M}" while Live, GRIT's
+ *  nightly form "GRIT · NIGHT {N} OF {Nights} · SHOWS AT {Show1} AND {Show2}" when its night's shows are two (today's first two
+ *  distinct starts of its events); "" otherwise. Every figure from the edition, its templates and the clock. */
+std::string RitTapeCountdown(const fest::Festival& F, fest::Phase P, double World)
+{
+	const std::string Short = RitFestShort(F.SeriesId);
+	const int Today = net::DayOf(World);
+	const int Days = F.LastDay - F.FirstDay + 1;
+	if (Short.empty())
+	{
+		return std::string();
+	}
+	if (P == fest::Phase::Buildup)
+	{
+		return Short + " \xC2\xB7 OPENS IN " + std::to_string(std::max(1, F.FirstDay - Today)) + "D";
+	}
+	if (P != fest::Phase::Live)
+	{
+		return std::string();
+	}
+	const int Day = std::min(Days, std::max(1, Today - F.FirstDay + 1));
+	if (F.Which == fest::Brand::Grit)
+	{
+		const net::Network& Net = net::Site(RitSite);
+		const double Midnight = static_cast<double>(Today) * net::MinutesPerDay;
+		std::vector<double> Shows;
+		for (const net::EventInstance& E : Net.Window(Midnight, Midnight + net::MinutesPerDay))
+		{
+			if (Net.TemplateOf(E).Series == F.SeriesId && E.Start >= Midnight && std::find(Shows.begin(), Shows.end(), E.Start) == Shows.end())
+			{
+				Shows.push_back(E.Start);
+			}
+		}
+		std::sort(Shows.begin(), Shows.end());
+		if (Shows.size() >= 2)
+		{
+			return Short + " \xC2\xB7 NIGHT " + std::to_string(Day) + " OF " + std::to_string(Days) + " \xC2\xB7 SHOWS AT " + RitClock(Shows[0]) + " AND " + RitClock(Shows[1]);
+		}
+	}
+	return Short + " \xC2\xB7 DAY " + std::to_string(Day) + " OF " + std::to_string(Days);
+}
+
+/** The tape's race leader (§2.7.4, §2.5.2): "{SHORT} · {NAME} LEADS THE RACE · {Points} PTS" while the edition's race runs and has a
+ *  leader (the world's FestTop; the hero reads YOU); "" otherwise. */
+std::string RitTapeLeader(const fest::Festival& F, const world::World& W)
+{
+	const std::string Short = RitFestShort(F.SeriesId);
+	if (Short.empty() || world::FestRaceKey(W) != F.SeriesId)
+	{
+		return std::string();
+	}
+	const std::vector<std::pair<int, world::FestScore>> Top = world::FestTop(W, 1);
+	if (Top.empty() || Top.front().second.Points <= 0.0)
+	{
+		return std::string();
+	}
+	const world::Npc* N = Top.front().first >= 0 ? W.Get(Top.front().first) : nullptr;
+	const std::string Who = Top.front().first < 0 ? std::string("YOU") : N ? RitUpper(N->Name) : std::string();
+	if (Who.empty())
+	{
+		return std::string();
+	}
+	return Short + " \xC2\xB7 " + Who + (Top.front().first < 0 ? " LEAD THE RACE \xC2\xB7 " : " LEADS THE RACE \xC2\xB7 ") +
+		Grouped(static_cast<int64_t>(std::llround(Top.front().second.Points))) + " PTS";
+}
+
 /** The tape's items: world facts only, rebuilt each world minute (W5: nothing invented, no hashed counts). */
 std::vector<RitTapeItem> RitTapeBuild(RitCtx& X)
 {
 	std::vector<RitTapeItem> Out = X.U.Extra; // the tables' own lines first: the latest wins
 	const net::Network& Net = net::Site(RitSite);
+	// Update 4 G1 (SPEC v1.7 §2.7.4, FH-3b): the festival's countdown (Buildup) or its day (Live), and its race's leader, in white.
+	fest::Phase FestP = fest::Phase::Off;
+	const fest::Festival* Fest = RitTapeFest(X.World, FestP);
+	if (Fest)
+	{
+		const std::string Count = RitTapeCountdown(*Fest, FestP, X.World);
+		if (!Count.empty())
+		{
+			Out.push_back({"fest:count", Count, RitWhite, 0});
+		}
+		const std::string Lead = FestP == fest::Phase::Live ? RitTapeLeader(*Fest, X.S.Living()) : std::string();
+		if (!Lead.empty())
+		{
+			Out.push_back({"fest:lead", Lead, RitInk, 0});
+		}
+	}
 	// G2: the desk bells first (a starred event projected short as its late registration closes), in amber.
 	for (const RitBellView& B : X.P.Bells)
 	{
@@ -697,7 +820,8 @@ std::vector<RitTapeItem> RitTapeBuild(RitCtx& X)
 		}
 		Out.push_back({"big:" + Biggest->Id, Line, RitInk, 0});
 	}
-	// Projected overlays, the biggest two (amber: a money opportunity, never red).
+	// Projected overlays, the biggest two (amber: a money opportunity, never red). Update 4 G1 (SPEC v1.7 §2.7.4, FH-3b): while a
+	// festival is Live its headliners' projected overlays (its guaranteed events) go first.
 	std::vector<std::pair<Chips, std::string>> Shorts;
 	for (const net::EventInstance& E : Recent)
 	{
@@ -708,7 +832,15 @@ std::vector<RitTapeItem> RitTapeBuild(RitCtx& X)
 			Shorts.push_back({V.Cents, "ov:" + E.Id});
 		}
 	}
-	std::sort(Shorts.begin(), Shorts.end(), [](const auto& A, const auto& B) { return A.first > B.first; });
+	const auto Headliner = [&Net, Fest, FestP](const std::string& Key) {
+		net::EventInstance E;
+		return Fest && FestP == fest::Phase::Live && Net.FindInstance(Key.substr(3), E) && Net.TemplateOf(E).Series == Fest->SeriesId && Net.TemplateOf(E).GtdCents > 0;
+	};
+	std::sort(Shorts.begin(), Shorts.end(), [&Headliner](const auto& A, const auto& B) {
+		const bool Ha = Headliner(A.second);
+		const bool Hb = Headliner(B.second);
+		return Ha != Hb ? Ha : A.first > B.first;
+	});
 	for (size_t I = 0; I < Shorts.size() && I < 2; ++I)
 	{
 		net::EventInstance E;
@@ -4259,6 +4391,13 @@ void RitSecondShow(RitCtx& X, const RitSecond& B, float Cx, float Top, double Ag
 }
 } // namespace rlrit_detail
 
+namespace rlnet_detail
+{
+// Update 4 G1 (SPEC v1.7 §2.8.1, F-hubs FH-1c): the festival hub's routing, defined in UI/RiverLineNet.cpp beside SeriesPage.
+Rect NetHubRect(net::SiteId Site);
+const fest::Festival* NetHubEdition(net::SiteId Site, const std::string& SeriesId, double World);
+} // namespace rlnet_detail
+
 // ------------------------------------------------------------------ the frame
 
 void RiverLine::RitFrame(double Now, bool Preview)
@@ -4416,7 +4555,22 @@ void RiverLine::RitFrame(double Now, bool Preview)
 			case Page::League: RitLeaguePage(X); break;
 			case Page::Leaderboards: RitRankingsPage(X); break;
 			case Page::Desk: RitDeskPage(X); break;
-			case Page::Series: RitSeriesPage(X); break;
+			case Page::Series:
+				// Update 4 G1 (SPEC v1.7 §2.8.1, FH-1c): a festival (WRIT, GRIT, REIGN) is its hub in RunItTwice's content rect, one
+				// panel as the programme is; a plain series keeps the programme. FH-3b (§2.7.4): the section slab twice-prints the
+				// festival's name (its Short: "REIGN").
+				if (const fest::Festival* HubFest = rlnet_detail::NetHubEdition(RitSite, SeriesId, World))
+				{
+					const std::string FestName = RitFestShort(HubFest->SeriesId);
+					Name = FestName.empty() ? Name : FestName;
+					RitPanelBegin();
+					FestivalHub(rlnet_detail::NetHubRect(RitSite), *HubFest, Now);
+				}
+				else
+				{
+					RitSeriesPage(X);
+				}
+				break;
 			case Page::News: RitNewsPage(X); break;
 			case Page::Promotions: RitClubPage(X); break;
 			case Page::Cashier: RitCashierPage(X); break;

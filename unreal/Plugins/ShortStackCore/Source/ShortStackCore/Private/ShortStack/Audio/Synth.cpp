@@ -859,6 +859,279 @@ void CueKastShine(Buffer& B, Noise& R, double V)
 	}
 }
 
+// ------------------------------------------------------------------ Update 4: the festivals' four stings and the applause (SPEC v1.7 §2.7.6, §9.3)
+//
+// A festival speaks in its host's sound, as its look wears the host's frame: RiverLine's festivals open on a brass fanfare (the
+// network's broadcast brass), Ignite's on a carnival organ's hit with a cymbal swelling into it (the boardwalk's band organ),
+// RunItTwice's on an inharmonic struck bell (the exchange's bell: deeper, longer and slower to beat than the desk's RitBell).
+// FestChampion is the champion's and the belt's moment, brass climbing a major chord into a held chord that shimmers, and
+// CrowdApplause plays under it (and on the CHAMPION card): a room's applause in bursts of noise over its own murmur, §9.2's
+// committed fallback for a recording (the card room's walla bed, audio::CardRoom, is the Embercrest's and isn't touched). Four
+// stings, not one a festival: the championships play their host's (§2.7.6).
+//
+// The hosts play them through Session::UiSound at its default volume, 0.4 (F-hubs; never while previewing), and render them on
+// the game thread as they do the sites' cues, so the harmonic voices below turn one phasor each and step their level once every
+// 32 samples.
+
+/** The most partials a festival voice carries. */
+const int CueFestMaxParts = 8;
+/** FestRiver's horns: a brass voice's partials falling off gently (the bell's flare keeps the upper ones). */
+const double CueFestHorn[CueFestMaxParts] = {1.0, 0.72, 0.52, 0.38, 0.27, 0.19, 0.13, 0.09};
+/** FestIgnite's band organ: flue pipes at 8', 4', 2 2/3' and 2', a little 1 3/5' and 1 1/3'. */
+const double CueFestPipes[CueFestMaxParts] = {1.0, 0.7, 0.45, 0.5, 0.16, 0.3, 0.0, 0.0};
+/** FestChampion's brass: rounder than the fanfare's horns. */
+const double CueFestBrass[CueFestMaxParts] = {1.0, 0.6, 0.38, 0.24, 0.14, 0.08, 0.0, 0.0};
+/** FestRit's bell: its fundamental, C#5, and its four partials' ratios (§2.7.6: a struck bar's free modes, inharmonic). */
+const double CueFestRitHz = 554.37;
+const double CueFestRitRatio[4] = {1.0, 2.76, 5.40, 8.93};
+
+/**
+ * A harmonic voice, the stings' horns, organ pipes and brass: partials k = 1..Count of Hz (those under 0.45 of the rate), partial
+ * k at Amp[k - 1] times Bright^(k - 1), where Bright follows the voice's own level from Dull (silent) to Full (at its top), so a
+ * horn brightens as it speaks and darkens as it dies (an organ's pipes: Dull = Full = 1). A linear attack, a decay of Tau, cut at
+ * Len after a release (CueFadeN, 3 ms at least); vibrato of Cents either way at VibHz, fading in from VibAt seconds over 0.2 s.
+ * Peak is the fundamental's level at the top. The partials come off one phasor by the recurrence sin((k + 1)w) = 2 cos(w)
+ * sin(kw) - sin((k - 1)w); the level is computed at each 32-sample block's ends and stepped linearly between them, the vibrato's
+ * pitch once every four blocks.
+ */
+void CueFestVoice(Buffer& Out, double At, double Hz, const double* Amp, int Count, double Peak, double Attack, double Tau, double Len, double Dull, double Full,
+	double VibHz = 0.0, double Cents = 0.0, double VibAt = 0.0)
+{
+	if (!(Peak > 0.0) || !(Len > 0.0) || !(Hz > 0.0) || !(Tau > 0.0) || Count <= 0)
+	{
+		return;
+	}
+	Out.Ensure(At + Len);
+	const size_t Start = static_cast<size_t>(At * SynthRate);
+	const size_t N = std::min(static_cast<size_t>(Len * SynthRate), Out.Data.size() - Start);
+	const double Wide = Cents > 0.0 ? std::pow(2.0, Cents / 1200.0) - 1.0 : 0.0;
+	const bool Vib = VibHz > 0.0 && Wide > 0.0;
+	int Parts = 0;
+	while (Parts < Count && Parts < CueFestMaxParts && Hz * (1.0 + Wide) * static_cast<double>(Parts + 1) < 0.45 * SynthRate)
+	{
+		++Parts;
+	}
+	const double AttackN = Attack * SynthRate > 1.0 ? Attack * SynthRate : 1.0;
+	const double FadeN = CueFadeN(Len, 0.003);
+	const double TauN = Tau * SynthRate;
+	const double Count0 = static_cast<double>(N);
+	auto LevelAt = [&](double D) {
+		double L = D < AttackN ? Peak * D / AttackN : Peak * std::exp(-(D - AttackN) / TauN);
+		const double Left = Count0 - D;
+		return Left < FadeN ? L * (Left > 0.0 ? Left / FadeN : 0.0) : L;
+	};
+	float* Dst = Out.Data.data() + Start;
+	double W[CueFestMaxParts] = {};
+	double Re = 1.0, Im = 0.0, StepRe = 1.0, StepIm = 0.0;
+	for (size_t B0 = 0; B0 < N; B0 += 32)
+	{
+		const size_t B1 = std::min(N, B0 + 32);
+		if (B0 == 0 || (Vib && B0 % 128 == 0))
+		{
+			double Fq = Hz;
+			if (Vib)
+			{
+				const double T = static_cast<double>(B0) / SynthRate;
+				const double In = T <= VibAt ? 0.0 : std::min(1.0, (T - VibAt) / 0.2);
+				Fq = Hz * (1.0 + Wide * In * std::sin(2.0 * SynthPi * VibHz * T));
+			}
+			const double W0 = 2.0 * SynthPi * Fq / SynthRate;
+			StepRe = std::cos(W0);
+			StepIm = std::sin(W0);
+		}
+		if (B0 % 256 == 0)
+		{
+			const double Mag = std::sqrt(Re * Re + Im * Im);
+			Re /= Mag;
+			Im /= Mag;
+		}
+		const double L0 = LevelAt(static_cast<double>(B0)), L1 = LevelAt(static_cast<double>(B1));
+		const double Bright = Dull + (Full - Dull) * (L0 / Peak);
+		double Weight = 1.0;
+		for (int K = 0; K < Parts; ++K)
+		{
+			W[K] = Amp[K] * Weight;
+			Weight *= Bright;
+		}
+		const double Step = (L1 - L0) / static_cast<double>(B1 - B0);
+		double Gain = L0;
+		for (size_t I = B0; I < B1; ++I)
+		{
+			const double TwoCos = Re + Re;
+			double Prev = 0.0, Cur = Im, Sum = 0.0;
+			for (int K = 0; K < Parts; ++K)
+			{
+				Sum += W[K] * Cur;
+				const double Next = TwoCos * Cur - Prev;
+				Prev = Cur;
+				Cur = Next;
+			}
+			Dst[I] += static_cast<float>(Sum * Gain);
+			Gain += Step;
+			const double NextRe = Re * StepRe - Im * StepIm;
+			Im = Im * StepRe + Re * StepIm;
+			Re = NextRe;
+		}
+	}
+}
+
+/** FestRiver: RiverLine's festival sting, a three-note brass fanfare: two short calls and the held top note (G4, C5, then E5:
+ *  "ta-ta-taa"), two horns 3 cents apart and speaking a little differently (the section's width; together, so their
+ *  fundamentals never cancel), each note's breath on its front, a trombone an octave under the held note, and the held note's
+ *  vibrato coming in late. 1.2 s. */
+void CueFestRiver(Buffer& B, Noise& R, double V)
+{
+	const double At[3] = {0.0, 0.17, 0.34};
+	const double Hz[3] = {392.0, 523.25, 659.26};
+	const double Len[3] = {0.15, 0.15, 0.86};
+	for (int K = 0; K < 3; ++K)
+	{
+		const bool Held = K == 2;
+		const double Tau = Held ? 1.4 : 0.4;
+		CueFestVoice(B, At[K], Hz[K], CueFestHorn, 8, 0.034 * V, 0.022, Tau, Len[K], 0.3, 0.9, Held ? 5.5 : 0.0, Held ? 10.0 : 0.0, 0.3);
+		CueFestVoice(B, At[K], Hz[K] * 1.0017, CueFestHorn, 8, 0.018 * V, 0.03, Tau, Len[K], 0.3, 0.85, Held ? 5.1 : 0.0, Held ? 10.0 : 0.0, 0.32);
+		CueHiss(B, R, At[K], FilterType::BandPass, 1300.0 + 500.0 * Rand(R), 0.0, 0.0, 0.8, 0.0065 * V, 0.003, 0.012, 0.045);
+	}
+	CueFestVoice(B, At[2], Hz[2] * 0.5, CueFestHorn, 8, 0.022 * V, 0.03, 1.4, Len[2], 0.25, 0.75);
+}
+
+/** FestIgnite: Ignite's festival sting, a carnival organ hit with a cymbal swell: the cymbal swelling in from nothing, its band
+ *  opening, into the hit at 0.16 s, where the band organ strikes E major (E4 under B4 and G#5; E4's 4' pipe sounds E5) with its
+ *  tremulant, the stick catches the cymbal's bell and the bass drum thumps; the cymbal washes out under the chord. 0.9 s. */
+void CueFestIgnite(Buffer& B, Noise& R, double V)
+{
+	const double Hit = 0.16;
+	CueHiss(B, R, 0.0, FilterType::HighPass, 3500.0, 8000.0, Hit, 0.0, 0.022 * V, Hit, 0.22, 0.8);
+	CueHiss(B, R, Hit, FilterType::HighPass, 2500.0, 0.0, 0.0, 0.0, 0.032 * V, 0.0005, 0.015, 0.08);
+	CueOsc(B, Hit, 120.0, 52.0, 0.07, 0.075 * V, 0.002, 0.07, 0.3);
+	const double Chord[3] = {329.63, 493.88, 830.61};
+	const double Level[3] = {0.024, 0.019, 0.016};
+	for (int K = 0; K < 3; ++K)
+	{
+		CueFestVoice(B, Hit, Chord[K], CueFestPipes, 6, Level[K] * V, 0.006, 0.4, 0.9 - Hit, 1.0, 1.0, 6.8, 14.0, 0.0);
+	}
+}
+
+/** FestRit: RunItTwice's festival sting, the exchange's struck bell: an additive inharmonic bell on CueFestRitHz, its partials at
+ *  CueFestRitRatio (1, 2.76, 5.40, 8.93), the higher dying sooner, the lower two each with a quieter twin a little sharp (the
+ *  bell's two sides, beating slowly), and the hammer's knock on its front. 2.0 s. */
+void CueFestRit(Buffer& B, Noise& R, double V)
+{
+	const double Level[4] = {0.05, 0.034, 0.02, 0.0125};
+	const double Tau[4] = {0.75, 0.4, 0.2, 0.1};
+	const double Len[4] = {2.0, 1.6, 1.0, 0.6};
+	for (int K = 0; K < 4; ++K)
+	{
+		const double Hz = CueFestRitHz * CueFestRitRatio[K];
+		CueOsc(B, 0.0, Hz, 0.0, 0.0, Level[K] * V, 0.0015, Tau[K], Len[K]);
+		if (K < 2)
+		{
+			CueOsc(B, 0.0, Hz * 1.0021, 0.0, 0.0, 0.45 * Level[K] * V, 0.0015, 0.9 * Tau[K], Len[K]);
+		}
+	}
+	CueHiss(B, R, 0.0, FilterType::BandPass, 1700.0 + 300.0 * Rand(R), 0.0, 0.0, 1.2, 0.022 * V, 0.0001, 0.002, 0.012);
+	CueOsc(B, 0.0, 180.0, 120.0, 0.02, 0.028 * V, 0.0005, 0.02, 0.08);
+}
+
+/** FestChampion: the champion's and the belt's moments, a rising major arpeggio into a held chord with shimmer: brass up D major
+ *  (D4, F#4, A4, D5, 90 ms apart), landing at 0.36 s on the chord (D3 under F#4, A4 and D5; D3's own partials sound D4, A4 and
+ *  F#5) held to 2.4 s under a slow vibrato, each voice's own (the section's shimmer), glints of the chord three octaves up
+ *  sparkling over it and thinning out by 2 s, and a cymbal's soft wash on the landing. CrowdApplause plays under it. 2.4 s. */
+void CueFestChampion(Buffer& B, Noise& R, double V)
+{
+	const double Up[4] = {293.66, 369.99, 440.0, 587.33};
+	for (int K = 0; K < 4; ++K)
+	{
+		CueFestVoice(B, 0.09 * K, Up[K], CueFestBrass, 6, (0.04 + 0.006 * K) * V, 0.012, 0.25, 0.11, 0.3, 0.85);
+	}
+	const double Land = 0.36;
+	const double Chord[4] = {146.83, 369.99, 440.0, 587.33};
+	const double Level[4] = {0.042, 0.032, 0.027, 0.027};
+	const int Parts[4] = {6, 4, 3, 3};
+	for (int K = 0; K < 4; ++K)
+	{
+		CueFestVoice(B, Land, Chord[K], CueFestBrass, Parts[K], Level[K] * V, 0.035, 1.6, 2.4 - Land, 0.3, 0.8, 4.3 + 0.37 * K, 8.0, 0.25 + 0.05 * K);
+	}
+	const double Glints[4] = {2349.3, 2960.0, 3520.0, 4698.6};
+	double At = Land + 0.02;
+	while (At < 2.0)
+	{
+		const double Thin = 1.0 - (At - Land) / (2.0 - Land);
+		const int Pick = std::min(3, static_cast<int>(Rand(R) * 4.0));
+		CueOsc(B, At, Glints[Pick], 0.0, 0.0, 0.028 * V * Thin * (0.5 + 0.5 * Rand(R)), 0.001, 0.035, 0.09, Wave::Triangle);
+		At += 0.07 + 0.08 * Rand(R);
+	}
+	CueHiss(B, R, Land, FilterType::HighPass, 5000.0, 0.0, 0.0, 0.0, 0.017 * V, 0.002, 0.25, 0.75);
+}
+
+/** CrowdApplause's room: how many pairs of hands, and how long it runs (seconds). */
+const int CueCrowdHands = 48;
+const double CueCrowdLen = 3.0;
+
+/** CrowdApplause: a room's applause in bursts of noise (§9.2's fallback), under FestChampion and on the CHAMPION card: 48 pairs
+ *  of hands breaking out together inside 0.3 s, each at its own pace (3.5 to 6 claps a second), each clap a 4-6 ms burst in one of
+ *  two banks (fuller claps round 1.2 kHz, sharper ones above 1.6 kHz); the room's murmur under them (low voices: noise through a
+ *  vowel band wandering 350 to 650 Hz); the hands dropping out from 1.9 s, all gone by 3 s. */
+void CueCrowdApplause(Buffer& B, Noise& R, double V)
+{
+	const size_t N = static_cast<size_t>(CueCrowdLen * SynthRate);
+	B.Ensure(CueCrowdLen);
+	std::vector<float> Claps[2] = {std::vector<float>(N, 0.0f), std::vector<float>(N, 0.0f)};
+	for (int Hand = 0; Hand < CueCrowdHands; ++Hand)
+	{
+		const double Rate = 3.5 + 2.5 * Rand(R);
+		const double Stop = 1.9 + 1.0 * Rand(R);
+		const double Strength = 0.6 + 0.4 * Rand(R);
+		double At = 0.01 + 0.29 * Rand(R);
+		while (At < Stop)
+		{
+			const double Fade = At > Stop - 0.4 ? (Stop - At) / 0.4 : 1.0;
+			Claps[Hand & 1][static_cast<size_t>(At * SynthRate)] += static_cast<float>(Strength * Fade * (0.7 + 0.3 * Rand(R)));
+			At += (0.88 + 0.24 * Rand(R)) / Rate;
+		}
+	}
+	const FilterType Type[2] = {FilterType::BandPass, FilterType::HighPass};
+	const double Freq[2] = {1200.0, 1600.0};
+	const double Q[2] = {1.6, 0.0};
+	const double Fall[2] = {std::exp(-1.0 / (0.006 * SynthRate)), std::exp(-1.0 / (0.004 * SynthRate))};
+	const double Level[2] = {0.033 * V, 0.027 * V};
+	for (int Bank = 0; Bank < 2; ++Bank)
+	{
+		Biquad F;
+		F.Set(Type[Bank], Freq[Bank], Q[Bank]);
+		const double Norm = CueNoiseNorm(Type[Bank], Freq[Bank], Q[Bank]) * Level[Bank];
+		CueWhite White(R);
+		double Env = 0.0;
+		const std::vector<float>& Hit = Claps[Bank];
+		for (size_t I = 0; I < N; ++I)
+		{
+			Env = Env * Fall[Bank] + static_cast<double>(Hit[I]);
+			B.Data[I] += static_cast<float>(F.Process(White.Next()) * Norm * Env);
+		}
+	}
+	// The murmur: breaking out with the hands, holding, thinning with them.
+	const double Murmur = 0.008 * V * CueNoiseNorm(FilterType::BandPass, 450.0, 1.5);
+	Biquad Voice;
+	CueWhite White(R);
+	double Wander = 0.5, WanderTo = 0.5;
+	for (size_t I = 0; I < N; ++I)
+	{
+		if (I % 64 == 0)
+		{
+			if (I % 4800 == 0)
+			{
+				WanderTo = Rand(R);
+			}
+			Wander += (WanderTo - Wander) * 0.02;
+			const double Fq = 350.0 + 300.0 * Wander;
+			Voice.Set(FilterType::BandPass, Fq, 1.5);
+		}
+		const double T = static_cast<double>(I) / SynthRate;
+		const double Swell = T < 0.3 ? T / 0.3 : T < 1.9 ? 1.0 : std::max(0.0, (CueCrowdLen - T) / (CueCrowdLen - 1.9));
+		B.Data[I] += static_cast<float>(Voice.Process(White.Next()) * Murmur * Swell);
+	}
+}
+
 /** Finish's bus and limiter, tanh(1.728 x) / 1.2, with the quiet samples (most of a cue's tail) on a series that agrees with
  *  tanh to 1e-6 under 0.3, so a 2.3 s cue doesn't spend its render on tanh. */
 float CueLimit(float S)
@@ -872,8 +1145,8 @@ float CueLimit(float S)
 	return static_cast<float>(std::tanh(Y) / 1.2);
 }
 
-/** The ten cues and Kast's four: the volume clamped to 0..1 (a non-number is silence), then the bus and the limiter as every
- *  one-shot, held under CueCeiling, with the trailing silence trimmed. */
+/** The ten cues, Kast's four and the festivals' five: the volume clamped to 0..1 (a non-number is silence), then the bus and the
+ *  limiter as every one-shot, held under CueCeiling, with the trailing silence trimmed. */
 std::vector<float> CueRender(SoundId Id, double Volume, Noise& R)
 {
 	const double V = std::isfinite(Volume) ? (Volume < 0.0 ? 0.0 : Volume > 1.0 ? 1.0 : Volume) : 0.0;
@@ -894,6 +1167,11 @@ std::vector<float> CueRender(SoundId Id, double Volume, Noise& R)
 	case SoundId::KastRise: CueKastRise(B, R, V); break;
 	case SoundId::KastCall: CueKastCall(B, R, V); break;
 	case SoundId::KastShine: CueKastShine(B, R, V); break;
+	case SoundId::FestRiver: CueFestRiver(B, R, V); break;
+	case SoundId::FestIgnite: CueFestIgnite(B, R, V); break;
+	case SoundId::FestRit: CueFestRit(B, R, V); break;
+	case SoundId::FestChampion: CueFestChampion(B, R, V); break;
+	case SoundId::CrowdApplause: CueCrowdApplause(B, R, V); break;
 	default: break;
 	}
 	B.Ensure(0.002);
@@ -989,18 +1267,19 @@ std::vector<float> Render(SoundId Id, float Volume, uint32_t Seed)
 	case SoundId::KastRise:
 	case SoundId::KastCall:
 	case SoundId::KastShine:
-		return CueRender(Id, V, R);
-	// Update 4 (SPEC v1.7 §9.3; Phase A, §6 PA-36): nine cues, silent until their gates write their bodies (F-look the four stings and
-	// CrowdApplause at G1, W-ui NbPencil at G2, B-ui BigBeat, CrowdSwell and CrowdOoh at G3). An empty render: the host plays nothing
-	// (UNightOneAudio::PlayPcm returns on an empty buffer), and nothing selects them before then.
+	// Update 4 G1 (SPEC v1.7 §2.7.6, §9.3; F-look): the festivals' four stings and CrowdApplause, through the same render.
 	case SoundId::FestRiver:
 	case SoundId::FestIgnite:
 	case SoundId::FestRit:
 	case SoundId::FestChampion:
+	case SoundId::CrowdApplause:
+		return CueRender(Id, V, R);
+	// Update 4 (SPEC v1.7 §9.3; Phase A, §6 PA-36): four cues, silent until their gates write their bodies (W-ui NbPencil at G2,
+	// B-ui BigBeat, CrowdSwell and CrowdOoh at G3). An empty render: the host plays nothing (UNightOneAudio::PlayPcm returns on an
+	// empty buffer), and nothing selects them before then.
 	case SoundId::NbPencil:
 	case SoundId::BigBeat:
 	case SoundId::CrowdSwell:
-	case SoundId::CrowdApplause:
 	case SoundId::CrowdOoh:
 		return std::vector<float>();
 	case SoundId::Win:

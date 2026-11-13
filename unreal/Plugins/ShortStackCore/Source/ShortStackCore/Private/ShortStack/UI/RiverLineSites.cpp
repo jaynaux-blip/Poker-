@@ -5,20 +5,29 @@
 //
 // The money moves are core-sites' (Session::Deposit, Withdraw, AnswerInvite; site::Book): the pages here only read the
 // book and call them, and every refusal shows in the session's own words.
+//
+// Update 4 G1 FL-4 (F-look; SPEC v1.7 §2.7.3, §2.7.4, §2.16): the takeover. SitesSkin gains its festival branch after the night window
+// (a site's festival dresses it from FirstDay 00:00 to 06:00 on LastDay + 1, the lookup kept per site and day; ss.Fest.Look's dev look
+// first), SitesTableLook dresses a festival event's table (the felt, REIGN's own black cloth, the card back kBackFestival + the brand;
+// the table's brand kept per event id), and the WELCOME TICKETS list leaves a festival's step tickets to the festival (LEAD_CALLS R-18).
 #include "ShortStack/UI/RiverLine.h"
 #include "../StrictFloat.h"
 #include "../Game/SitesDetail.h"
 #include "RiverLineShared.h"
 
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/World.h"
 #include "ShortStack/Structure.h"
+#include "ShortStack/UI/FestivalArt.h"
 #include "ShortStack/UI/SiteArt.h"
 
 #include <algorithm>
+#include <array>
+#include <climits>
 #include <cmath>
 #include <map>
 
@@ -652,6 +661,20 @@ void SitesNudgeFlame(Canvas& C, float Cx, float Cy, double Now)
 	C.FillPolygon({P(0.0f, 0.04f), P(-0.3f, 0.24f), P(-0.16f, 0.52f), P(0.02f, 0.62f), P(0.12f, 0.44f), P(0.3f, 0.3f), P(0.22f, 0.08f)}, Hex(SitesIgSun));
 	C.SetAlpha(A0);
 }
+
+/** Update 4 G1 FL-4 (LEAD_CALLS R-18, U37): a festival's step ticket ("<series>-s2a", "-s3a": the step's first run's id, §2.13's keys),
+ *  which the festival shows apart from WELCOME TICKETS. */
+bool SitesFestStepTicket(const std::string& Key)
+{
+	const size_t Dash = Key.rfind('-');
+	if (Dash == std::string::npos || Dash + 1 >= Key.size() || Key[Dash + 1] != 's')
+	{
+		return false;
+	}
+	const std::string Step = Key.substr(Dash + 2);
+	const bool Shape = !Step.empty() && Step[0] >= '1' && Step[0] <= '9' && (Step.size() == 1 || (Step.size() == 2 && (Step[1] == 'a' || Step[1] == 'b')));
+	return Shape && fest::FestivalOf(Key.substr(0, Dash)) != nullptr;
+}
 } // namespace rlsites_detail
 
 using namespace rlsites_detail;
@@ -895,7 +918,7 @@ void RiverLine::SitePromotions(double Now)
 		const std::string Prefix = std::string(net::KeyOf(Site)) + ".";
 		for (const auto& Tk : S.Life.Tickets)
 		{
-			if (Tk.second <= 0 || Tk.first.compare(0, Prefix.size(), Prefix) != 0 || Ty > Big.Y + Big.H - 30.0f)
+			if (Tk.second <= 0 || Tk.first.compare(0, Prefix.size(), Prefix) != 0 || Ty > Big.Y + Big.H - 30.0f || SitesFestStepTicket(Tk.first))
 			{
 				continue;
 			}
@@ -1417,10 +1440,70 @@ SiteLook SitesLookFor(const Session& S, net::SiteId Site)
 	return SitesWornLook(S, Site);
 }
 
+/** Update 4 G1 FL-4 (§2.7.4): the festival the table in front's event belongs to (its template's series, fest::FestivalOf), kept per
+ *  event id on this thread; ss.Fest.Look's dev look first (§2.16). Brand::None: a plain event, or no table. */
+fest::Brand SitesTableFest(const Session& S, net::SiteId Site)
+{
+	const fest::Brand Dev = festart::DevLook();
+	if (Dev != fest::Brand::None)
+	{
+		return Dev;
+	}
+	if (!S.T)
+	{
+		return fest::Brand::None;
+	}
+	struct SitesTableFestKept
+	{
+		std::string Id;
+		fest::Brand Which = fest::Brand::None;
+	};
+	thread_local SitesTableFestKept Kept;
+	const std::string& Id = S.T->Spec.Id;
+	if (Id != Kept.Id)
+	{
+		// An instance's id is "<template id>@<start>" (net::Network's Make).
+		const size_t At = Id.rfind('@');
+		const net::EventTemplate* T = At == std::string::npos ? nullptr : net::Site(Site).FindTemplate(Id.substr(0, At));
+		const fest::Festival* F = T && !T->Series.empty() ? fest::FestivalOf(T->Series) : nullptr;
+		Kept.Id = Id;
+		Kept.Which = F ? F->Which : fest::Brand::None;
+	}
+	return Kept.Which;
+}
+
+/** Update 4 G1 FL-4 (§2.7.2, §2.7.4): the worn look at a festival's table: the festival's felt (FeltLight its Felt mixed 0.18 toward
+ *  Accent2; REIGN keeps the club's own black cloth, its rail turns Rose Brass in TblOctagonTable) and its card back kBackFestival + the
+ *  brand; seats, chips and Key stay the worn look's. Built once a (worn look, brand) on this thread, as SitesWornLook keeps its own. */
+const SiteLook& SitesFestTableLook(const SiteLook& Worn, fest::Brand B)
+{
+	thread_local std::map<std::pair<const SiteLook*, int>, SiteLook> Dressed;
+	const std::pair<const SiteLook*, int> Key{&Worn, static_cast<int>(B)};
+	const auto Found = Dressed.find(Key);
+	if (Found != Dressed.end())
+	{
+		return Found->second;
+	}
+	const festart::FestivalLook& F = festart::LookOf(B);
+	SiteLook L = Worn;
+	if (B != fest::Brand::Reign)
+	{
+		L.Felt = F.Felt;
+		L.FeltLight = SitesMixHex(F.Felt, F.Accent2, 0.18f);
+		L.FeltDark = F.FeltDark;
+	}
+	L.CardBack = festart::kBackFestival + static_cast<int>(B);
+	return Dressed.emplace(Key, L).first->second;
+}
+
 const SiteLook& SitesTableLook(const Session& S)
 {
-	// The table in front wears what the player wears on its site (G2): every shared table piece reads this.
-	return SitesWornLook(S, SitesOfTable(S));
+	// The table in front wears what the player wears on its site (G2): every shared table piece reads this. Update 4 G1 FL-4: a
+	// festival event's table wears its festival's felt and back over that (§2.7.4).
+	const net::SiteId Site = SitesOfTable(S);
+	const SiteLook& Worn = SitesWornLook(S, Site);
+	const fest::Brand B = SitesTableFest(S, Site);
+	return B == fest::Brand::None ? Worn : SitesFestTableLook(Worn, B);
 }
 
 bool SitesFlameNudge(const RiverLine* RL, const Session& S, double World)
@@ -1456,12 +1539,50 @@ const SiteLook& SitesClientLook(const RiverLine& RL, const Session& S)
 	return SitesLook(SitesClient(RL, S));
 }
 
+/** Update 4 G1 FL-4 (§2.7.3): the festival dressing Site at WorldMin: its window's from FirstDay 00:00 to 06:00 on LastDay + 1 (the Main's
+ *  night; a fixed rule, so the skin stays a pure function of the clock). fest::LiveOn is asked once a site and world day on this thread
+ *  (today's and yesterday's), so the branch costs a compare a frame. */
+const fest::Festival* SitesFestOn(net::SiteId Site, double WorldMin)
+{
+	struct SitesFestDay
+	{
+		long long Day = LLONG_MIN;
+		const fest::Festival* Today = nullptr;
+		const fest::Festival* Eve = nullptr; // a festival whose LastDay was yesterday
+	};
+	thread_local std::array<SitesFestDay, static_cast<size_t>(net::SiteId::Count)> Kept;
+	const long long DayLen = static_cast<long long>(net::MinutesPerDay);
+	const long long Minute = static_cast<long long>(std::floor(WorldMin));
+	const long long Day = Minute >= 0 ? Minute / DayLen : -((-Minute + DayLen - 1) / DayLen);
+	const size_t I = static_cast<size_t>(Site);
+	if (I >= Kept.size())
+	{
+		return nullptr;
+	}
+	SitesFestDay& K = Kept[I];
+	if (K.Day != Day)
+	{
+		K.Day = Day;
+		K.Today = fest::LiveOn(Site, static_cast<int>(Day));
+		const fest::Festival* Yesterday = fest::LiveOn(Site, static_cast<int>(Day - 1));
+		K.Eve = Yesterday && Yesterday->LastDay == Day - 1 ? Yesterday : nullptr;
+	}
+	if (K.Today)
+	{
+		return K.Today;
+	}
+	return Minute - Day * DayLen < 6 * 60 ? K.Eve : nullptr;
+}
+
 Skin SitesSkin(net::SiteId Site, double WorldMin)
 {
 	// G1 (§1.11, §2.3): a site with a night palette (Ignite's Afterburner Hours) wears it inside its window of the day (world
 	// minutes, NightFromMin to NightToMin; a window may cross midnight), so Draw, the stream preview and the tiles choose it
 	// in this one place. Every other site, and every other hour, wears its day palette.
-	const net::SiteDef& D = net::Def(SitesRegistered(Site) ? Site : net::SiteId::RiverLine);
+	// Update 4 G1 FL-4 (§2.7.3): after the night window (Afterburner Hours win), a site's festival dresses its day palette in the
+	// festival's six tokens (SitesFestOn's window); ss.Fest.Look's dev look comes ahead of the calendar (§2.16).
+	const net::SiteId On = SitesRegistered(Site) ? Site : net::SiteId::RiverLine;
+	const net::SiteDef& D = net::Def(On);
 	const bool Night = std::any_of(D.NightPalette.begin(), D.NightPalette.end(), [](uint32_t V) { return V != 0; });
 	if (Night && D.NightFromMin != D.NightToMin)
 	{
@@ -1472,6 +1593,15 @@ Skin SitesSkin(net::SiteId Site, double WorldMin)
 		{
 			return Skin::FromHex(D.NightPalette);
 		}
+	}
+	const fest::Brand Dev = festart::DevLook();
+	if (Dev != fest::Brand::None)
+	{
+		return festart::Dressed(Skin::FromHex(D.Palette), festart::LookOf(Dev));
+	}
+	if (const fest::Festival* F = SitesFestOn(On, WorldMin))
+	{
+		return festart::Dressed(Skin::FromHex(D.Palette), festart::LookOf(F->Which));
 	}
 	return Skin::FromHex(D.Palette);
 }

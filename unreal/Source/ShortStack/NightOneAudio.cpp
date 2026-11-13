@@ -37,13 +37,16 @@ void Queue(USoundWaveProcedural* Wave, const float* Samples, int32 Count, float 
  * its synthesized body; a gate's art owner fills one in the same change as its ledger row (F-look the bell and the applause at G1,
  * W-ui the pencil at G2, B-ui the crowd's swell and ooh at G3). A path whose asset isn't there (a fresh clone) falls back to the
  * synthesized body, as an empty one does.
+ * G1 FL-9 (F-look): the bell and the applause, the OpenGameArt CC0 recordings fetched for G1 (PWL's bell_ding4 trimmed to 2.0 s,
+ * eXpl0it3r's church-hall applause trimmed to 3 s; LEAD_CALLS: no Freesound sign-in; ledger rows in E:/ShortStack/durable/
+ * ASSET_LICENSES.md), imported by the lead under /Game/ThirdParty/Audio/ and named after their sources (PLAN_G1's PC-3).
  */
 const TCHAR* SoftCuePath(ss::SoundId Id)
 {
 	switch (Id)
 	{
-	case ss::SoundId::FestRit:
-	case ss::SoundId::CrowdApplause:
+	case ss::SoundId::FestRit: return TEXT("/Game/ThirdParty/Audio/FestRit_oga_PWL.FestRit_oga_PWL");
+	case ss::SoundId::CrowdApplause: return TEXT("/Game/ThirdParty/Audio/CrowdApplause_oga_eXpl0it3r.CrowdApplause_oga_eXpl0it3r");
 	case ss::SoundId::NbPencil:
 	case ss::SoundId::CrowdSwell:
 	case ss::SoundId::CrowdOoh:
