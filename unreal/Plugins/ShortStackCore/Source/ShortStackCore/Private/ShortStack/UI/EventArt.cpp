@@ -2,9 +2,27 @@
 // tiles and crests are built from layers the way a badge is: a shadow, a bevelled rim of metal, a field in the
 // series' colours, an engraved line, the motif with its own shadow, a ribbon, and the ornaments that say what an
 // event means (rays, laurel and crown for a Main Event, a bracelet, a ring, a diamond, twinkling glints).
+//
+// Update 4 G1 (SPEC v1.7 §2.7.2, §2.7.4; F-look FL-2): the festivals' crests. SlotOf strips a rival's site key ("ignite.feign26" is
+// "feign"), so a festival series finds its look (festart::LookFor), and FrameFor, SeriesGlyph and the rim read it first: the six
+// frames (Arch, Tower, Octagon, Proscenium, Pavilion, Keyhole), the six motifs (Mirror, PushButton, Seal, TwinStars, Pennant,
+// Sceptre), the five festival rims (Chrome, Brass, GoldLeaf, CandyStripe, Neon) and RCOP's silver wave band. A festival crest of 30
+// units or less is its frame's silhouette and its motif (the low-detail path), and the look's key joins its cache key. RiverLine's
+// other three looks keep today's frame, motif, rim and enamel above 30 units, and every plain series' crest is drawn as before.
+// G1 F-look FL-3 (§2.7.5, §2.8.7): festart's FestTrophy, FestBelt and FestPin (UH/FestivalArt.h) have their bodies here, beside the
+// pens: the eight new trophies, Ring Rush's ring and the Championship Online's bracelet (today's art), the two title objects, the ten
+// belts and the pins, each one cached fragment. Nothing calls them outside tests until F-hubs' case, moments and pin wall.
+// G1 F-look FL-7 (§2.7.2's motion column, §2.7.7): the crest's own motions through SeriesCrest's Time (seconds since the hub opened, or
+// since what set the motion off): Ring Rush's ring spins once, PENNANT's dome bulbs chase once, REIGN's motif turns a quarter and back
+// like a key, WRIT's seal presses in. Each is an excursion that starts and ends at rest and runs live only while 0 < Time < its length;
+// at rest (Time <= 0, or past its run) a crest is drawn exactly as before, from its cached layers, so a still is any settled Time. Event
+// emblems never move. The Championship Online's Clasp: a glint over the cached bracelet while FestTrophy's Time runs (the champion's
+// moment). Nothing calls them with a running Time before F-hubs' hub and moments.
 #include "ShortStack/UI/EventArt.h"
 
+#include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Sites.h"
+#include "ShortStack/UI/FestivalArt.h"
 #include "ShortStack/UI/Ui.h"
 
 #include <algorithm>
@@ -1478,6 +1496,127 @@ void GSprout(const Pen& P, const Tone& T)
 	PolyV(P, Blade(0.3f, -0.62f, 0.32f, 0.15f, 0.62f), Lin(P, 0.6f, -0.9f, 0.0f, -0.4f, T.Body, T.Deep));
 }
 
+// Update 4 (SPEC v1.7 §2.7.2, §2.7.4; G1 F-look FL-2): the festivals' six motifs. Shapes only: no letters, numbers or marks.
+
+/** A glyph's own colour, or its tone's on the shadow pass (Shadowed: every colour black, so a fixed colour mustn't show there). */
+Color FestLit(const Tone& T, const Color& Own)
+{
+	return T.Glint.R + T.Glint.G + T.Glint.B > 0.0f ? Own : T.Body;
+}
+
+/** FEIGN's funhouse mirror: a hand mirror, its glass warped by a wavy reflection. */
+void GMirror(const Pen& P, const Tone& T)
+{
+	Poly(P, {{-0.12f, 0.3f}, {0.12f, 0.3f}, {0.09f, 0.82f}, {-0.09f, 0.82f}}, Lin(P, -0.12f, 0.0f, 0.12f, 0.0f, T.Body, T.Deep));
+	Disc(P, 0.0f, 0.86f, 0.11f, Lin(P, 0.0f, 0.75f, 0.0f, 0.97f, T.Body, T.Deep));
+	Box(P, -0.2f, 0.25f, 0.4f, 0.11f, 0.05f, T.Deep);
+	Oval(P, 0.0f, -0.3f, 0.62f, 0.66f, Lin(P, -0.62f, -0.96f, 0.62f, 0.36f, T.Body, T.Deep));
+	Oval(P, 0.0f, -0.3f, 0.48f, 0.52f, Lin(P, 0.0f, -0.82f, 0.0f, 0.22f, Lift(T.Gem, 0.45f), Sink(T.Gem, 0.2f)));
+	std::vector<Vec2> Warp;
+	for (int I = 0; I <= 12; ++I)
+	{
+		const float V = -0.7f + 0.8f * Fl(I) / 12.0f;
+		Warp.push_back({-0.14f + 0.08f * std::sin(V * 6.0f), V});
+	}
+	StrokeV(P, Warp, Fade(T.Glint, 0.6f), 0.06f);
+	Glint(P, 0.24f, -0.58f, 0.15f, T.Glint);
+}
+
+/** PUSH's big red button: a bezel on its base, the red cap standing proud of it. */
+void GPushButton(const Pen& P, const Tone& T)
+{
+	const Color Cap = FestLit(T, Hex(0xe8323c));
+	Oval(P, 0.0f, 0.56f, 0.9f, 0.32f, T.Deep);
+	Box(P, -0.9f, 0.3f, 1.8f, 0.26f, 0.0f, Lin(P, -0.9f, 0.0f, 0.9f, 0.0f, T.Body, T.Deep));
+	Oval(P, 0.0f, 0.3f, 0.9f, 0.32f, Lin(P, 0.0f, -0.02f, 0.0f, 0.62f, Lift(T.Body, 0.25f), T.Deep));
+	Oval(P, 0.0f, 0.3f, 0.68f, 0.23f, T.Core);
+	Oval(P, 0.0f, 0.24f, 0.56f, 0.2f, Sink(Cap, 0.45f));
+	Box(P, -0.56f, -0.24f, 1.12f, 0.48f, 0.0f, Lin(P, -0.56f, 0.0f, 0.56f, 0.0f, Cap, Sink(Cap, 0.4f)));
+	Oval(P, 0.0f, -0.24f, 0.56f, 0.21f, Lin(P, 0.0f, -0.45f, 0.0f, -0.03f, Lift(Cap, 0.4f), Cap));
+	Oval(P, -0.2f, -0.29f, 0.2f, 0.065f, Fade(T.Glint, 0.8f));
+}
+
+/** WRIT's seal: a wax disc with a pressed face and two ribbon tails, a spade pressed into it. */
+void GSeal(const Pen& P, const Tone& T)
+{
+	for (int Side = -1; Side <= 1; Side += 2)
+	{
+		const float Sd = Fl(Side);
+		Poly(P, {{Sd * 0.06f, 0.34f}, {Sd * 0.3f, 0.26f}, {Sd * 0.58f, 0.9f}, {Sd * 0.43f, 0.82f}, {Sd * 0.32f, 0.97f}}, Lin(P, 0.0f, 0.3f, 0.0f, 0.97f, T.Deep, Sink(T.Deep, 0.3f)));
+	}
+	std::vector<Vec2> Wax;
+	for (int I = 0; I < 48; ++I)
+	{
+		const float A = TwoPiF * Fl(I) / 48.0f;
+		const float R = 0.7f + 0.045f * std::sin(A * 8.0f) + 0.02f * std::sin(A * 3.0f + 0.6f);
+		Wax.push_back({R * std::cos(A), -0.1f + R * std::sin(A)});
+	}
+	PolyV(P, Wax, Lin(P, -0.6f, -0.8f, 0.6f, 0.6f, T.Body, T.Deep));
+	Disc(P, 0.0f, -0.1f, 0.5f, Lin(P, 0.0f, -0.6f, 0.0f, 0.4f, T.Deep, T.Body));
+	Hoop(P, 0.0f, -0.1f, 0.5f, 0.5f, Fade(T.Core, 0.5f), 0.04f);
+	Spade(P, 0.0f, -0.12f, 0.3f, Lin(P, 0.0f, -0.45f, 0.0f, 0.2f, T.Body, T.Deep));
+	Oval(P, -0.3f, -0.5f, 0.14f, 0.06f, Fade(T.Glint, 0.5f));
+}
+
+/** GRIT's twin stars: a big star and its smaller twin behind it. */
+void GTwinStars(const Pen& P, const Tone& T)
+{
+	PolyV(P, StarPts(0.38f, -0.34f, 0.5f, 0.21f, 5, 0.18f), Lin(P, 0.0f, -0.84f, 0.0f, 0.16f, T.Deep, Sink(T.Deep, 0.3f)));
+	const Vec2 Mid{-0.14f, 0.12f};
+	const std::vector<Vec2> Front = StarPts(Mid.X, Mid.Y, 0.78f, 0.33f, 5, -0.12f);
+	for (size_t I = 0; I < Front.size(); ++I)
+	{
+		PolyV(P, {Mid, Front[I], Front[(I + 1) % Front.size()]}, I % 2 == 0 ? T.Body : T.Deep);
+	}
+	Glint(P, 0.62f, -0.72f, 0.14f, T.Gem);
+	Glint(P, -0.66f, 0.66f, 0.1f, T.Glint);
+}
+
+/** PENNANT's pennant: a felt pennant on a staff with a ball finial, its hoist band and stitched edge. */
+void GPennant(const Pen& P, const Tone& T)
+{
+	Box(P, -0.7f, -0.82f, 0.1f, 1.76f, 0.04f, Lin(P, -0.7f, 0.0f, -0.6f, 0.0f, T.Body, T.Deep));
+	Disc(P, -0.65f, -0.88f, 0.11f, Lin(P, -0.65f, -0.99f, -0.65f, -0.77f, T.Body, T.Deep));
+	std::vector<Vec2> Flag;
+	const int N = 10;
+	for (int I = 0; I <= N; ++I) // the top edge, out to the tip
+	{
+		const float Tt = Fl(I) / Fl(N);
+		Flag.push_back({-0.6f + 1.52f * Tt, -0.8f + 0.36f * Tt + 0.05f * std::sin(Tt * TwoPiF)});
+	}
+	for (int I = N - 1; I >= 0; --I) // and back along the bottom edge
+	{
+		const float Tt = Fl(I) / Fl(N);
+		Flag.push_back({-0.6f + 1.52f * Tt, 0.04f - 0.48f * Tt + 0.05f * std::sin(Tt * TwoPiF)});
+	}
+	PolyV(P, Flag, Lin(P, -0.6f, -0.8f, 0.92f, -0.2f, Lift(T.Gem, 0.15f), Sink(T.Gem, 0.35f)));
+	Poly(P, {{-0.6f, -0.8f}, {-0.42f, -0.76f}, {-0.42f, -0.02f}, {-0.6f, 0.04f}}, Sink(T.Gem, 0.45f));
+	if (P.S >= 14.0f)
+	{
+		// The stitching, pulled in toward the pennant's middle (left off where it would blur into dots).
+		std::vector<Vec2> Stitch;
+		for (const Vec2& Q : Flag)
+		{
+			Stitch.push_back({-0.09f + (Q.X + 0.09f) * 0.8f, -0.4f + (Q.Y + 0.4f) * 0.8f});
+		}
+		Stitch.push_back(Stitch.front());
+		P.Cv->StrokeDashed(Place(P, Stitch), Fade(T.Glint, 0.7f), 0.03f * P.S, 0.08f * P.S, 0.06f * P.S);
+	}
+}
+
+/** REIGN's sceptre: a dark shaft between metal collars, a spade finial on top, a small orb at its foot. */
+void GSceptre(const Pen& P, const Tone& T)
+{
+	Box(P, -0.075f, -0.34f, 0.15f, 1.18f, 0.06f, Lin(P, -0.075f, 0.0f, 0.075f, 0.0f, Lift(T.Core, 0.2f), T.Core));
+	Stroke(P, {{-0.03f, -0.3f}, {-0.03f, 0.78f}}, Fade(T.Glint, 0.35f), 0.025f);
+	Box(P, -0.15f, -0.42f, 0.3f, 0.1f, 0.04f, Lin(P, -0.15f, 0.0f, 0.15f, 0.0f, T.Body, T.Deep));
+	Box(P, -0.12f, 0.18f, 0.24f, 0.08f, 0.04f, Lin(P, -0.12f, 0.0f, 0.12f, 0.0f, T.Body, T.Deep));
+	Disc(P, 0.0f, 0.9f, 0.1f, Lin(P, 0.0f, 0.8f, 0.0f, 1.0f, T.Body, T.Deep));
+	Spade(P, 0.0f, -0.66f, 0.31f, Lin(P, 0.0f, -1.0f, 0.0f, -0.4f, T.Body, T.Deep));
+	Disc(P, 0.0f, -0.37f, 0.045f, T.Gem);
+	Glint(P, -0.14f, -0.84f, 0.1f, T.Glint);
+}
+
 void Draw(const Pen& P, Glyph G, const Tone& T)
 {
 	switch (G)
@@ -1553,13 +1692,13 @@ void Draw(const Pen& P, Glyph G, const Tone& T)
 	case Glyph::Trophy: GTrophy(P, T); break;
 	case Glyph::Spade: GSpade(P, T); break;
 	case Glyph::Sprout: GSprout(P, T); break;
-	// Update 4 (§2.7.4; Phase A, §6 PA-44): the festivals' six, drawn as Star until F-look's bodies (G1).
-	case Glyph::Mirror:
-	case Glyph::PushButton:
-	case Glyph::Seal:
-	case Glyph::TwinStars:
-	case Glyph::Pennant:
-	case Glyph::Sceptre: GStar(P, T); break;
+	// Update 4 (§2.7.4; Phase A's appends, G1 F-look FL-2's bodies): the festivals' six.
+	case Glyph::Mirror: GMirror(P, T); break;
+	case Glyph::PushButton: GPushButton(P, T); break;
+	case Glyph::Seal: GSeal(P, T); break;
+	case Glyph::TwinStars: GTwinStars(P, T); break;
+	case Glyph::Pennant: GPennant(P, T); break;
+	case Glyph::Sceptre: GSceptre(P, T); break;
 	case Glyph::Count: break;
 	}
 }
@@ -1617,8 +1756,8 @@ enum class Frame : int
 	Snowcut,  // winter
 	Scallop,  // spring
 	Ornament, // the holidays
-	// Update 4 (SPEC v1.7 §2.7.4; Phase A, §6 PA-44): the festivals' frames, outlined as the medallion until F-look's bodies (G1); FrameOf
-	// returns none of them before (festart::LookFor's frame is read first from G1).
+	// Update 4 (SPEC v1.7 §2.7.4; Phase A's appends, G1 F-look FL-2's outlines): the festivals' frames. FrameOf returns none of them:
+	// a festival's frame comes from its look (FrameFor).
 	Arch,       // FEIGN
 	Tower,      // PUSH
 	Octagon,    // WRIT
@@ -1626,16 +1765,25 @@ enum class Frame : int
 	Pavilion,   // PENNANT (v1.6)
 	Keyhole,    // REIGN (v1.6)
 };
+// festart::FestivalLook::Frame holds these by value (UI/FestivalArt.cpp's festart_detail::FestFrame*, G1 FL-1): keep the two in step.
+static_assert(static_cast<int>(Frame::Shield) == 0 && static_cast<int>(Frame::Sunburst) == 2 && static_cast<int>(Frame::Medallion) == 3,
+	"FestivalLook::Frame: RiverLine's looks keep these frames by value");
+static_assert(static_cast<int>(Frame::Arch) == 8 && static_cast<int>(Frame::Tower) == 9 && static_cast<int>(Frame::Octagon) == 10 &&
+		static_cast<int>(Frame::Proscenium) == 11 && static_cast<int>(Frame::Pavilion) == 12 && static_cast<int>(Frame::Keyhole) == 13,
+	"FestivalLook::Frame: the festivals' six frames by value");
 
-/** "win27" -> "win". */
+/** "win27" -> "win"; a rival's "ignite.feign26" -> "feign" (update 4 §2.7.4: the site's key goes first, so a rival's series no
+ *  longer collapses to its site's name and a festival finds its look; no plain rival series' slot is a known one). */
 std::string SlotOf(const std::string& SeriesId)
 {
-	size_t N = 0;
+	const size_t Dot = SeriesId.find('.');
+	const size_t From = Dot == std::string::npos ? 0 : Dot + 1;
+	size_t N = From;
 	while (N < SeriesId.size() && std::isalpha(static_cast<unsigned char>(SeriesId[N])))
 	{
 		++N;
 	}
-	return SeriesId.substr(0, N);
+	return SeriesId.substr(From, N - From);
 }
 
 Frame FrameOf(const std::string& Slot)
@@ -1649,6 +1797,16 @@ Frame FrameOf(const std::string& Slot)
 		: Slot == "spr"	  ? Frame::Scallop
 		: Slot == "hol"	  ? Frame::Ornament
 						  : Frame::Medallion;
+}
+
+/** The frame a series wears: its festival look's first (§2.7.4), else its slot's. */
+Frame FrameFor(const std::string& Slot, const festart::FestivalLook* FestivalLk)
+{
+	if (FestivalLk != nullptr && FestivalLk->Which != fest::Brand::None && FestivalLk->Frame >= 0 && FestivalLk->Frame <= static_cast<int>(Frame::Keyhole))
+	{
+		return static_cast<Frame>(FestivalLk->Frame);
+	}
+	return FrameOf(Slot);
 }
 
 std::vector<Vec2> Bezier(Vec2 A, Vec2 C, Vec2 B, int N)
@@ -1714,13 +1872,75 @@ std::vector<Vec2> FramePts(Frame F, float K)
 		break;
 	case Frame::Sunburst:
 	case Frame::Medallion:
-	case Frame::Arch: // Update 4's six (§6 PA-44): the medallion's outline until G1
-	case Frame::Tower:
-	case Frame::Octagon:
-	case Frame::Proscenium:
-	case Frame::Pavilion:
-	case Frame::Keyhole:
 		P = ArcPts(0.0f, 0.0f, 0.92f, 0.92f, 0.0f, TwoPiF - TwoPiF / 72.0f, 71);
+		break;
+	// Update 4 (§2.7.2, §2.7.4; G1 F-look FL-2): the festivals' six, each star-shaped about the centre so the rim's insets nest.
+	case Frame::Arch:
+		// FEIGN's funhouse arch: jambs on a stepped foot under a round head (the bulbs go round the head).
+		P = {{-0.86f, 0.96f}, {0.86f, 0.96f}, {0.86f, 0.82f}, {0.78f, 0.76f}};
+		for (const Vec2& Q : ArcPts(0.0f, -0.16f, 0.78f, 0.86f, 0.0f, -PiF, 28))
+		{
+			P.push_back(Q);
+		}
+		P.push_back({-0.78f, 0.76f});
+		P.push_back({-0.86f, 0.82f});
+		break;
+	case Frame::Tower:
+		// PUSH's bulb tower: a plinth, a tapering shaft, a cornice and a domed lantern on top.
+		P = {{-0.84f, 0.96f}, {0.84f, 0.96f}, {0.84f, 0.78f}, {0.6f, 0.72f}, {0.52f, -0.42f}, {0.68f, -0.48f}, {0.68f, -0.6f}};
+		for (const Vec2& Q : ArcPts(0.0f, -0.64f, 0.4f, 0.4f, 0.0f, -PiF, 16))
+		{
+			P.push_back(Q);
+		}
+		P.push_back({-0.68f, -0.6f});
+		P.push_back({-0.68f, -0.48f});
+		P.push_back({-0.52f, -0.42f});
+		P.push_back({-0.6f, 0.72f});
+		P.push_back({-0.84f, 0.78f});
+		break;
+	case Frame::Octagon:
+		// WRIT's octagon, flat on top.
+		for (int I = 0; I < 8; ++I)
+		{
+			const float A = -HalfPiF + PiF / 8.0f + TwoPiF * Fl(I) / 8.0f;
+			P.push_back({std::cos(A), std::sin(A)});
+		}
+		break;
+	case Frame::Proscenium:
+		// GRIT's proscenium: the stage's opening between two columns under a shallow pediment, the stage's lip at the foot.
+		P = {{-0.94f, 0.94f}, {0.94f, 0.94f}, {0.94f, 0.8f}, {0.84f, 0.76f}, {0.84f, -0.56f}, {0.96f, -0.62f}, {0.96f, -0.74f}};
+		for (const Vec2& Q : Bezier({0.96f, -0.74f}, {0.0f, -1.22f}, {-0.96f, -0.74f}, 14))
+		{
+			P.push_back(Q);
+		}
+		P.push_back({-0.96f, -0.62f});
+		P.push_back({-0.84f, -0.56f});
+		P.push_back({-0.84f, 0.76f});
+		P.push_back({-0.94f, 0.8f});
+		break;
+	case Frame::Pavilion:
+		// PENNANT's boardwalk pavilion: a dome on its eaves over two posts, a finial at its crown (the bulbs go round the dome).
+		P = {{-0.8f, 0.96f}, {0.8f, 0.96f}, {0.8f, -0.06f}, {0.96f, -0.14f}, {0.96f, -0.24f}};
+		for (const Vec2& Q : ArcPts(0.0f, -0.3f, 0.78f, 0.6f, 0.0f, -HalfPiF + 0.1f, 12))
+		{
+			P.push_back(Q);
+		}
+		P.push_back({0.035f, -0.93f});
+		P.push_back({0.0f, -1.04f});
+		P.push_back({-0.035f, -0.93f});
+		for (const Vec2& Q : ArcPts(0.0f, -0.3f, 0.78f, 0.6f, -HalfPiF - 0.1f, -PiF, 12))
+		{
+			P.push_back(Q);
+		}
+		P.push_back({-0.96f, -0.24f});
+		P.push_back({-0.96f, -0.14f});
+		P.push_back({-0.8f, -0.06f});
+		break;
+	case Frame::Keyhole:
+		// REIGN's members' door: a keyhole, its round head over a skirt that flares to the sill.
+		P = ArcPts(0.0f, -0.34f, 0.64f, 0.64f, 0.896f, -PiF - 0.896f, 40);
+		P.push_back({-0.7f, 0.96f});
+		P.push_back({0.7f, 0.96f});
 		break;
 	}
 	return Scaled(P, K);
@@ -1729,7 +1949,17 @@ std::vector<Vec2> FramePts(Frame F, float K)
 /** How far guilloche rings can reach inside the frame's field. */
 float InnerReach(Frame F)
 {
-	return F == Frame::Rhombus ? 0.5f : F == Frame::Shield ? 0.66f : 0.7f;
+	// Update 4's six: the narrow ones (the tower's shaft, the keyhole's waist) keep the rings inside their fields.
+	switch (F)
+	{
+	case Frame::Rhombus:
+	case Frame::Tower:
+	case Frame::Keyhole: return 0.5f;
+	case Frame::Shield:
+	case Frame::Proscenium: return 0.66f;
+	case Frame::Pavilion: return 0.6f;
+	default: return 0.7f;
+	}
 }
 
 /** A ribbon across the crest at height V with Text on it (the text is skipped when it would be too small to read). */
@@ -1861,6 +2091,48 @@ void Rays(const Pen& P, const Metal& M, double Time, float Reach)
 	Glow(P, 0.0f, 0.0f, 1.5f * Reach, Fade(M.Mid, 0.5f));
 }
 
+// Update 4 (§2.7.2's motion column, §2.7.7; G1 F-look FL-7): a festival crest's own motion, a closed form of SeriesCrest's Time.
+enum class FestCrestMove : uint8_t
+{
+	None,
+	RingTurn,  // Ring Rush: the hanging ring spins once on hub open
+	DomeChase, // PENNANT (PavilionChase): the dome's bulbs chase once on hub open and once per finished event
+	KeyTurn,   // REIGN: the key turns once on hub open (the motif turns a quarter and back in its keyhole)
+	SealPress, // WRIT: the seal presses down on Main day (F-hubs passes a running Time on Main day only)
+};
+
+FestCrestMove FestCrestMoveOf(fest::Brand B)
+{
+	switch (B)
+	{
+	case fest::Brand::RingRush: return FestCrestMove::RingTurn;
+	case fest::Brand::Pennant: return FestCrestMove::DomeChase;
+	case fest::Brand::Reign: return FestCrestMove::KeyTurn;
+	case fest::Brand::Writ: return FestCrestMove::SealPress;
+	default: return FestCrestMove::None;
+	}
+}
+
+/** How long a brand's crest motion runs (seconds of Time); 0: its crest doesn't move. */
+double FestCrestSeconds(fest::Brand B)
+{
+	switch (FestCrestMoveOf(B))
+	{
+	case FestCrestMove::RingTurn: return 1.2;
+	case FestCrestMove::DomeChase: return 1.1;
+	case FestCrestMove::KeyTurn: return 1.0;
+	case FestCrestMove::SealPress: return 0.7;
+	default: return 0.0;
+	}
+}
+
+/** Where a brand's crest motion is at Time (0..1); 0, at rest, before it starts and once it has run (an excursion: its ends are rest). */
+float FestCrestPhaseOf(fest::Brand B, double Time)
+{
+	const double D = FestCrestSeconds(B);
+	return D > 0.0 && Time > 0.0 && Time < D ? static_cast<float>(Time / D) : 0.0f;
+}
+
 struct CrestLook
 {
 	Frame Shape = Frame::Medallion;
@@ -1876,14 +2148,311 @@ struct CrestLook
 	bool Bracelet = false;
 	bool Ring = false;
 	bool HighRoller = false;
+	// Update 4 (§2.7.4; G1 F-look FL-2): a festival's dress (FestDress); all zero for a plain series, whose crest keeps today's key.
+	uint64_t LookKey = 0;                                         // the look's Key, mixed into the cache key (§2.7.1)
+	festart::Rim RimKind = festart::Rim::ByStakes;                // ByStakes: Rim (AlloyFor) as today
+	uint32_t Kit = 0, Accent = 0, Accent2 = 0, Gold = 0, Felt = 0; // the look's art colours (0xRRGGBB)
+	bool Wave = false;                                            // RCOP's silver wave band
+	// G1 F-look FL-7: the series crest's motion (SeriesCrest sets its brand; event emblems keep None) and, while it runs, its phase.
+	fest::Brand FestWhich = fest::Brand::None;
+	float FestPhase = 0.0f;
 };
 
-// The field's enamel. The gold flagships get their own (RCOP's royal purple, the Championship's royal blue, Ring
+// The field's enamel. Update 4 (§2.7.4): a festival's look carries no enamel token, so a festival crest keeps these too (RiverLine's
+// festivals change only by RCOP's wave band; a rival festival's field is its series' colours, its Accent and Accent2).
+// The gold flagships get their own (RCOP's royal purple, the Championship's royal blue, Ring
 // Rush's garnet) so the gold of their motif stands out; the rest wear the series' colours.
 void Enamel(CrestLook& L, const std::string& Slot, uint32_t A, uint32_t B)
 {
 	L.Field = Slot == "rcop" ? Hex(0x5b2bc4) : Slot == "tco" ? Hex(0x2147a8) : Slot == "ring" ? Hex(0xa3173e) : Hex(A);
 	L.Field2 = Slot == "tco" ? Hex(0x0a1747) : Slot == "ring" ? Hex(0x3d0618) : Hex(B);
+}
+
+// ------------------------------------------------------------------ Update 4: the festivals' dress (§2.7.2, §2.7.4; G1 F-look FL-2)
+
+/** At 30 units or less a festival crest is its frame's silhouette and its motif ("drop detail, don't shrink"). */
+const float FestLowDetailMax = 30.0f;
+
+bool FestLowDetail(const CrestLook& L, float Size)
+{
+	return L.LookKey != 0 && Size <= FestLowDetailMax;
+}
+
+/** Dresses a crest in its series' festival look (FrameFor and SeriesGlyph give its frame and motif): the rim, the art colours, RCOP's
+ *  wave band and the look's key. A plain series (no look) is left as it is. */
+void FestDress(CrestLook& L, const festart::FestivalLook* FestivalLk)
+{
+	if (FestivalLk == nullptr || FestivalLk->Which == fest::Brand::None)
+	{
+		return;
+	}
+	L.LookKey = FestivalLk->Key;
+	L.RimKind = FestivalLk->RimKind;
+	L.Kit = FestivalLk->Kit;
+	L.Accent = FestivalLk->Accent;
+	L.Accent2 = FestivalLk->Accent2;
+	L.Gold = FestivalLk->Gold;
+	L.Felt = FestivalLk->Felt;
+	L.Wave = FestivalLk->Which == fest::Brand::Rcop; // §2.7.2: "Shield + laurel + crown (existing) + a silver wave band"
+}
+
+/** The rim's metal: the stakes' for ByStakes (today's), else the festival's own (§2.7.2's rim column; no RiverLine palette hex). */
+Metal FestRimMetal(const CrestLook& L)
+{
+	switch (L.RimKind)
+	{
+	case festart::Rim::ByStakes: break;
+	case festart::Rim::Chrome: return {Hex(0xffffff), Hex(0xc6ced9), Hex(0x323a46)};
+	case festart::Rim::Brass: return {Hex(0xfff0c4), Hex(0xd8a84c), Hex(0x5c3d0f)};
+	case festart::Rim::GoldLeaf: return {Hex(0xfff6d8), Hex(L.Kit != 0 ? L.Kit : 0xd9b25fu), Hex(0x6a4b12)};
+	case festart::Rim::CandyStripe: return {Hex(0xffffff), Hex(0xffe3f1), Hex(0xa23a74)};
+	case festart::Rim::Neon: return {Hex(0xeafff2), Hex(0x7d8b99), Hex(0x1e2731)};
+	}
+	return MetalOf(L.Rim);
+}
+
+/** A closed outline resampled to Count points spaced evenly along its length. */
+std::vector<Vec2> FestEven(const std::vector<Vec2>& Outline, int Count)
+{
+	const size_t N = Outline.size();
+	std::vector<float> Run{0.0f};
+	for (size_t I = 0; I < N; ++I)
+	{
+		const Vec2& A = Outline[I];
+		const Vec2& B = Outline[(I + 1) % N];
+		Run.push_back(Run.back() + std::hypot(B.X - A.X, B.Y - A.Y));
+	}
+	std::vector<Vec2> Out;
+	size_t Seg = 0;
+	for (int K = 0; K < Count; ++K)
+	{
+		const float Along = Run.back() * Fl(K) / Fl(Count);
+		while (Seg + 1 < N && Run[Seg + 1] < Along)
+		{
+			++Seg;
+		}
+		const Vec2& A = Outline[Seg];
+		const Vec2& B = Outline[(Seg + 1) % N];
+		const float Len = Run[Seg + 1] - Run[Seg];
+		const float Tt = Len > 0.0f ? (Along - Run[Seg]) / Len : 0.0f;
+		Out.push_back({A.X + (B.X - A.X) * Tt, A.Y + (B.Y - A.Y) * Tt});
+	}
+	return Out;
+}
+
+/** The narrowest half-width of a closed outline at height V (its crossings' smallest |x|), so a layer drawn across stays inside. */
+float FestHalfWidth(const std::vector<Vec2>& Outline, float V)
+{
+	float Best = 1e9f;
+	const size_t N = Outline.size();
+	for (size_t I = 0; I < N; ++I)
+	{
+		const Vec2& A = Outline[I];
+		const Vec2& B = Outline[(I + 1) % N];
+		if ((A.Y - V) * (B.Y - V) <= 0.0f && A.Y != B.Y)
+		{
+			Best = std::min(Best, std::fabs(A.X + (B.X - A.X) * (V - A.Y) / (B.Y - A.Y)));
+		}
+	}
+	return Best < 1e9f ? Best : 0.0f;
+}
+
+/** CandyStripe (FEIGN): slanted stripes in the Accent round the rim's band. */
+void FestCandyStripe(const Pen& P, Frame F, const Color& Stripe)
+{
+	const std::vector<Vec2> Outer = FestEven(FramePts(F, 1.0f), 72);
+	const size_t N = Outer.size();
+	for (size_t K = 0; K < N; K += 6)
+	{
+		std::vector<Vec2> Band;
+		for (size_t J = 0; J <= 3; ++J)
+		{
+			Band.push_back(Outer[(K + J) % N]);
+		}
+		for (size_t J = 4; J >= 1; --J)
+		{
+			const Vec2& Q = Outer[(K + J) % N];
+			Band.push_back({Q.X * 0.875f, Q.Y * 0.875f});
+		}
+		PolyV(P, Band, Stripe);
+	}
+}
+
+/** Neon (PENNANT): a lit tube in the Accent along the rim's outer edge. */
+void FestNeon(const Pen& P, Frame F, const Color& Tube)
+{
+	const std::vector<Vec2> Lit = FramePts(F, 0.985f);
+	StrokeV(P, Lit, Fade(Tube, 0.3f), 0.1f, true);
+	StrokeV(P, Lit, Tube, 0.04f, true);
+	StrokeV(P, Lit, Fade(Lift(Tube, 0.7f), 0.9f), 0.014f, true);
+}
+
+/** Where a frame's bulbs sit, on the rim's band: round the Arch's head and up its jambs, up the Tower's shaft and at its cap, round the
+ *  Pavilion's dome. None on the other frames. */
+std::vector<Vec2> FestBulbSpots(Frame F)
+{
+	std::vector<Vec2> Out;
+	if (F == Frame::Arch)
+	{
+		for (int K = 0; K < 13; ++K)
+		{
+			const float A = -PiF * (Fl(K) + 0.5f) / 13.0f;
+			Out.push_back({0.94f * 0.78f * std::cos(A), 0.94f * (-0.16f + 0.86f * std::sin(A))});
+		}
+		for (int K = 0; K < 3; ++K)
+		{
+			const float Y = 0.94f * (0.08f + 0.24f * Fl(K));
+			Out.push_back({0.94f * 0.78f, Y});
+			Out.push_back({-0.94f * 0.78f, Y});
+		}
+	}
+	else if (F == Frame::Tower)
+	{
+		for (int K = 0; K < 6; ++K)
+		{
+			const float Tt = 0.06f + 0.88f * Fl(K) / 5.0f;
+			const float X = 0.93f * (0.6f - 0.08f * Tt);
+			const float Y = 0.93f * (0.72f - 1.14f * Tt);
+			Out.push_back({X, Y});
+			Out.push_back({-X, Y});
+		}
+		for (int K = 0; K < 5; ++K)
+		{
+			const float A = -PiF * (Fl(K) + 0.5f) / 5.0f;
+			Out.push_back({0.935f * 0.4f * std::cos(A), 0.935f * (-0.64f + 0.4f * std::sin(A))});
+		}
+	}
+	else if (F == Frame::Pavilion)
+	{
+		for (int K = 0; K < 11; ++K)
+		{
+			const float A = -PiF * (Fl(K) + 0.5f) / 11.0f;
+			Out.push_back({0.935f * 0.78f * std::cos(A), 0.935f * (-0.3f + 0.6f * std::sin(A))});
+		}
+	}
+	return Out;
+}
+
+/** The bulbs (Arch, Tower, Pavilion): lamps in the look's Gold, lit from the middle. Chase (G1 FL-7, PENNANT's PavilionChase, 0..1 while it
+ *  runs): a light running round the bulbs one by one, a halo on each as it passes. */
+void FestBulbs(const Pen& P, Frame F, const Color& Lamp, float Chase = 0.0f)
+{
+	for (const Vec2& Q : FestBulbSpots(F))
+	{
+		const Vec2 Spot = P.P(Q.X, Q.Y);
+		Disc(P, Q.X, Q.Y, 0.046f, Paint::Radial(Spot, 0.0f, Spot, 0.046f * P.S, Lift(Lamp, 0.6f), 0.55f, Lamp, Sink(Lamp, 0.45f)));
+	}
+	if (Chase > 0.0f)
+	{
+		const std::vector<Vec2> Spots = FestBulbSpots(F);
+		const float Head = Chase * (Fl(static_cast<double>(Spots.size())) + 2.0f) - 1.0f;
+		for (size_t K = 0; K < Spots.size(); ++K)
+		{
+			const float On = 1.0f - std::fabs(Fl(static_cast<double>(K)) - Head) / 1.5f;
+			if (On > 0.0f)
+			{
+				Disc(P, Spots[K].X, Spots[K].Y, 0.095f, Fade(Lift(Lamp, 0.85f), 0.45f * On));
+				Disc(P, Spots[K].X, Spots[K].Y, 0.05f, Fade(Lift(Lamp, 0.85f), On));
+			}
+		}
+	}
+}
+
+/** RCOP's silver wave band (§2.7.2: a crest layer, not a glyph): a wavy band across the field behind the motif, inside the field. */
+void FestWaveBand(const Pen& P, Frame F, const Color& Silver, bool Rich)
+{
+	const std::vector<Vec2> Field = FramePts(F, 0.85f);
+	const float Vc = 0.12f;
+	const float Half = 0.085f;
+	const float Amp = 0.04f;
+	const float Reach = std::min(FestHalfWidth(Field, Vc - Half - Amp), FestHalfWidth(Field, Vc + Half + Amp)) - 0.015f;
+	const int N = Rich ? 24 : 12;
+	std::vector<Vec2> Top;
+	std::vector<Vec2> Middle;
+	std::vector<Vec2> Bottom;
+	for (int I = 0; I <= N; ++I)
+	{
+		const float X = -Reach + 2.0f * Reach * Fl(I) / Fl(N);
+		const float W = Amp * std::sin(X * 7.5f);
+		Top.push_back({X, Vc - Half + W});
+		Middle.push_back({X, Vc + W});
+		Bottom.push_back({X, Vc + Half + W});
+	}
+	std::vector<Vec2> Band = Top;
+	for (auto It = Bottom.rbegin(); It != Bottom.rend(); ++It)
+	{
+		Band.push_back(*It);
+	}
+	PolyV(P, Band, Lin(P, 0.0f, Vc - Half - Amp, 0.0f, Vc + Half + Amp, Lift(Silver, 0.45f), Sink(Silver, 0.2f)));
+	StrokeV(P, Middle, Silver, 0.022f);
+	if (Rich)
+	{
+		StrokeV(P, Top, Fade(Sink(Silver, 0.5f), 0.9f), 0.018f);
+		StrokeV(P, Bottom, Fade(Sink(Silver, 0.5f), 0.9f), 0.018f);
+	}
+}
+
+/** GRIT's curtains, drawn parted (the Curtains motion's settled frame, §2.7.7), under a valance across the opening. */
+void FestCurtains(const Pen& P, const Color& Cloth, const Color& Trim)
+{
+	for (int Side = -1; Side <= 1; Side += 2)
+	{
+		const float Sd = Fl(Side);
+		std::vector<Vec2> Drape = {{Sd * 0.7f, -0.46f}, {Sd * 0.7f, 0.64f}};
+		for (const Vec2& Q : Bezier({Sd * 0.7f, 0.64f}, {Sd * 0.46f, 0.1f}, {Sd * 0.3f, -0.46f}, 10))
+		{
+			Drape.push_back(Q);
+		}
+		PolyV(P, Drape, Lin(P, Sd * 0.7f, 0.0f, Sd * 0.32f, 0.0f, Sink(Cloth, 0.3f), Lift(Cloth, 0.12f)));
+		Stroke(P, {{Sd * 0.6f, -0.44f}, {Sd * 0.62f, 0.4f}}, Fade(Sink(Cloth, 0.5f), 0.7f), 0.03f);
+		Stroke(P, {{Sd * 0.48f, -0.44f}, {Sd * 0.55f, 0.12f}}, Fade(Sink(Cloth, 0.5f), 0.7f), 0.03f);
+	}
+	Box(P, -0.71f, -0.5f, 1.42f, 0.12f, 0.02f, Lin(P, 0.0f, -0.5f, 0.0f, -0.38f, Lift(Trim, 0.25f), Sink(Trim, 0.25f)));
+}
+
+/** The festival layers over the field and the rim, behind the motif (Rich adds the finer work). */
+void FestCrestDress(const Pen& P, const CrestLook& L, bool Rich)
+{
+	if (L.Wave)
+	{
+		FestWaveBand(P, L.Shape, Hex(L.Accent2), Rich);
+	}
+	if (Rich && L.Shape == Frame::Proscenium)
+	{
+		FestCurtains(P, Lift(Hex(L.Felt), 0.18f), Hex(L.Kit != 0 ? L.Kit : L.Gold));
+	}
+	if (Rich && L.Shape == Frame::Octagon && L.Kit != 0)
+	{
+		// WRIT's rivets, one at each corner, in the look's Seal Silver.
+		for (int K = 0; K < 8; ++K)
+		{
+			const float A = -HalfPiF + PiF / 8.0f + TwoPiF * Fl(K) / 8.0f;
+			Disc(P, 0.9375f * std::cos(A), 0.9375f * std::sin(A), 0.032f, Lin(P, -0.03f, -0.03f, 0.03f, 0.03f, Lift(Hex(L.Kit), 0.5f), Sink(Hex(L.Kit), 0.35f)));
+		}
+	}
+	if (L.RimKind == festart::Rim::Neon)
+	{
+		FestNeon(P, L.Shape, Hex(L.Accent));
+	}
+	if (Rich)
+	{
+		FestBulbs(P, L.Shape, Hex(L.Gold), FestCrestMoveOf(L.FestWhich) == FestCrestMove::DomeChase ? L.FestPhase : 0.0f);
+	}
+}
+
+/** The low-detail crest (§2.7.4, 30 units or less): the frame's silhouette in its metal and the motif, filling the box. */
+void FestCrestLow(Canvas& C, const CrestLook& L, float Cx, float Cy, float Size)
+{
+	const Pen P{&C, Cx, Cy, Size * 0.43f};
+	const Metal M = FestRimMetal(L);
+	const float Light = 0.3f * L.Field.R + 0.59f * L.Field.G + 0.11f * L.Field.B;
+	const float Deep = Light > 0.55f ? 0.55f : 0.08f;
+	const Color Field = Sink(L.Field, Deep);
+	const Color Field2 = Sink(L.Field2, std::max(0.48f, Deep + 0.2f));
+	PolyV(P, FramePts(L.Shape, 1.0f), Lin(P, -1.0f, -1.0f, 1.0f, 1.0f, M.Hi, M.Lo));
+	PolyV(P, FramePts(L.Shape, 0.84f), Lin(P, -0.6f, -0.85f, 0.6f, 0.85f, Field, Field2));
+	const Tone Emboss{M.Hi, M.Mid, Sink(M.Lo, 0.55f), Lift(L.Field, 0.1f), Hex(0xffffff)};
+	Draw(P.At(0.0f, 0.0f, 0.6f), L.Motif, Emboss);
 }
 
 // A crest's layers, back to front: the ones that move (the rays, the sun's points, the glints) are drawn every frame,
@@ -1918,6 +2487,13 @@ uint64_t CrestKey(const CrestLook& L, float Size)
 	H = Fnv(H, Ints, sizeof(Ints));
 	H = Fnv(H, Flags, sizeof(Flags));
 	H = Fnv(H, Floats, sizeof(Floats));
+	if (L.LookKey != 0)
+	{
+		// Update 4 (§2.7.1): a festival crest's fragment is its look's too (a plain series' key is today's).
+		const uint32_t Fest[7] = {static_cast<uint32_t>(L.RimKind), L.Wave ? 1u : 0u, L.Kit, L.Accent, L.Accent2, L.Gold, L.Felt};
+		H = Fnv(H, &L.LookKey, sizeof(L.LookKey));
+		H = Fnv(H, Fest, sizeof(Fest));
+	}
 	// The paint reads pal::Gold (a gold rim's metal), so the fragment is the skin's too (update 2 §1.8).
 	const uint64_t SkinKey = Skin::Current().Key();
 	H = Fnv(H, &SkinKey, sizeof(SkinKey));
@@ -1926,12 +2502,70 @@ uint64_t CrestKey(const CrestLook& L, float Size)
 
 void CrestLayers(Canvas& C, const CrestLook& L, float Cx, float Cy, float Size, double Time, int Which);
 
+/** Ring Rush's RingTurn (G1 FL-7): the hanging ring spins once about its upright (its width the turn's cosine), eased in and out. */
+void FestRingTurn(const Pen& P, const Metal& M, const Color& Stone, float Phase)
+{
+	const float E = Phase * Phase * (3.0f - 2.0f * Phase);
+	const float Turn = std::cos(TwoPiF * E);
+	const float Sx = Turn >= 0.0f ? std::max(Turn, 0.05f) : std::min(Turn, -0.05f);
+	Canvas& C = *P.Cv;
+	C.Save();
+	C.Translate(P.X, 0.0f);
+	C.Scale(Sx, 1.0f);
+	C.Translate(-P.X, 0.0f);
+	HangingRing(P, M, Stone);
+	C.Restore();
+}
+
+/** REIGN's KeyTurn (the motif turns a quarter and back in its keyhole) and WRIT's seal press (the seal pressed in and let go, its shadow
+ *  tucked under it, a Signal Red ring spreading from the impression); G1 FL-7, drawn only while the motion runs. */
+void FestCrestMotif(const Pen& P, const CrestLook& L, FestCrestMove Move, float Mv, float Mk, const Tone& Emboss)
+{
+	const float Bump = std::sin(PiF * L.FestPhase);
+	Canvas& C = *P.Cv;
+	if (Move == FestCrestMove::KeyTurn)
+	{
+		const Vec2 O = P.P(0.0f, Mv);
+		C.Save();
+		C.Translate(O.X, O.Y);
+		C.Rotate(HalfPiF * Bump);
+		C.Translate(-O.X, -O.Y);
+		Draw(P.At(0.02f, Mv + 0.05f, Mk), L.Motif, Shadowed(0.45f));
+		Draw(P.At(0.0f, Mv, Mk), L.Motif, Emboss);
+		C.Restore();
+		return;
+	}
+	const float K = Mk * (1.0f - 0.14f * Bump);
+	const float Up = 1.0f - 0.8f * Bump;
+	Draw(P.At(0.02f * Up, Mv + 0.05f * Up, K), L.Motif, Shadowed(0.45f));
+	Draw(P.At(0.0f, Mv, K), L.Motif, Emboss);
+	const float Spread = 0.3f + 0.45f * L.FestPhase;
+	Hoop(P, 0.0f, Mv, Spread, Spread, Fade(Hex(L.Accent), 0.55f * (1.0f - L.FestPhase)), 0.03f);
+}
+
 void Crest(Canvas& C, const CrestLook& L, float Cx, float Cy, float Size, double Time)
 {
+	const float Moving = FestCrestPhaseOf(L.FestWhich, Time);
+	if (Moving > 0.0f && !FestLowDetail(L, Size))
+	{
+		// G1 FL-7 (§2.7.7): a festival crest's motion runs live, every layer drawn straight on; at rest it is the cached crest below.
+		CrestLook Live = L;
+		Live.FestPhase = Moving;
+		for (const int Layer : {CrestShadow, CrestRays, CrestBehind, CrestSun, CrestBadge, CrestGlints})
+		{
+			CrestLayers(C, Live, Cx, Cy, Size, Time, Layer);
+		}
+		return;
+	}
 	const uint64_t Key = CrestKey(L, Size);
 	const auto Still = [&](int Layer) {
 		C.Cached(Key * 131 + static_cast<uint64_t>(Layer), Cx, Cy, [&](Canvas& At) { CrestLayers(At, L, 0.0f, 0.0f, Size, 0.0, Layer); });
 	};
+	if (FestLowDetail(L, Size))
+	{
+		Still(CrestBadge); // §2.7.4: a festival crest this small is one cached layer, its silhouette and motif
+		return;
+	}
 	Still(CrestShadow);
 	CrestLayers(C, L, Cx, Cy, Size, Time, CrestRays);
 	Still(CrestBehind);
@@ -1942,10 +2576,18 @@ void Crest(Canvas& C, const CrestLook& L, float Cx, float Cy, float Size, double
 
 void CrestLayers(Canvas& C, const CrestLook& L, float Cx, float Cy, float Size, double Time, int Which)
 {
+	if (FestLowDetail(L, Size))
+	{
+		if (Which & CrestBadge)
+		{
+			FestCrestLow(C, L, Cx, Cy, Size);
+		}
+		return;
+	}
 	// Small crests (a schedule row, a chip) drop the banner and the finer work, and fill more of their box.
 	const bool Rich = Size >= 44.0f;
 	const Pen P{&C, Cx, Cy + Size * (L.Ring ? 0.07f : L.Main || L.HighRoller || L.Crown ? 0.04f : 0.0f), Size * (Rich ? 0.3f : 0.36f)};
-	const Metal M = MetalOf(L.Rim);
+	const Metal M = FestRimMetal(L);
 	// A light field (gold, cream) would swallow an embossed motif of the same metal: those sink to a deep enamel.
 	const float Light = 0.3f * L.Field.R + 0.59f * L.Field.G + 0.11f * L.Field.B;
 	const float Deep = Light > 0.55f ? 0.55f : 0.08f;
@@ -2016,6 +2658,10 @@ void CrestLayers(Canvas& C, const CrestLook& L, float Cx, float Cy, float Size, 
 	// The badge: a bevelled rim of metal around a field in the series' colours.
 	PolyV(P, FramePts(L.Shape, 1.0f), Lin(P, -1.0f, -1.0f, 1.0f, 1.0f, M.Mid, M.Lo));
 	PolyV(P, Scaled(FramePts(L.Shape, 0.955f), 1.0f, -0.012f, -0.018f), Lin(P, -0.9f, -0.9f, 0.6f, 0.8f, M.Hi, M.Mid));
+	if (L.RimKind == festart::Rim::CandyStripe)
+	{
+		FestCandyStripe(P, L.Shape, Hex(L.Accent));
+	}
 	PolyV(P, FramePts(L.Shape, 0.875f), Sink(M.Lo, 0.35f));
 	PolyV(P, FramePts(L.Shape, 0.85f), Lin(P, -0.6f, -0.85f, 0.6f, 0.85f, Field, Field2));
 	if (Rich)
@@ -2027,7 +2673,7 @@ void CrestLayers(Canvas& C, const CrestLook& L, float Cx, float Cy, float Size, 
 			Hoop(P, 0.0f, 0.0f, R, R, Fade(Lift(L.Field, 0.4f), 0.07f), 0.012f);
 		}
 		Glow(P, 0.0f, -0.18f, 0.72f, Fade(Lift(L.Field, 0.35f), 0.6f));
-		StrokeV(P, FramePts(L.Shape, 0.79f), Fade(M.Hi, 0.5f), 0.018f, true);
+		StrokeV(P, FramePts(L.Shape, 0.79f), L.Kit != 0 ? Fade(Hex(L.Kit), 0.85f) : Fade(M.Hi, 0.5f), 0.018f, true); // a look's Kit inlay
 		if (L.Shape == Frame::Medallion)
 		{
 			for (int K = 0; K < 36; ++K)
@@ -2043,14 +2689,26 @@ void CrestLayers(Canvas& C, const CrestLook& L, float Cx, float Cy, float Size, 
 		}
 	}
 	StrokeV(P, FramePts(L.Shape, 1.0f), Fade(Sink(M.Lo, 0.5f), 0.8f), 0.02f, true);
+	if (L.LookKey != 0)
+	{
+		FestCrestDress(P, L, Rich); // Update 4 (§2.7.2, §2.7.4): the wave band, curtains, rivets, neon and bulbs
+	}
 
 	// The motif, embossed in the metal, with its own shadow.
 	const bool Banner = Rich && !L.Banner.empty();
 	const float Mv = Banner ? -0.1f : 0.0f;
 	const float Mk = Banner ? 0.46f : 0.56f;
 	const Tone Emboss{M.Hi, M.Mid, Sink(M.Lo, 0.55f), Stone, Hex(0xffffff)};
-	Draw(P.At(0.02f, Mv + 0.05f, Mk), L.Motif, Shadowed(0.45f));
-	Draw(P.At(0.0f, Mv, Mk), L.Motif, Emboss);
+	const FestCrestMove Move = L.FestPhase > 0.0f ? FestCrestMoveOf(L.FestWhich) : FestCrestMove::None;
+	if (Move == FestCrestMove::KeyTurn || Move == FestCrestMove::SealPress)
+	{
+		FestCrestMotif(P, L, Move, Mv, Mk, Emboss); // G1 FL-7: REIGN's key, WRIT's seal
+	}
+	else
+	{
+		Draw(P.At(0.02f, Mv + 0.05f, Mk), L.Motif, Shadowed(0.45f));
+		Draw(P.At(0.0f, Mv, Mk), L.Motif, Emboss);
+	}
 
 	// In front: the bracelet, the banner, the crown, the ring, the diamond, the format's seal, the glints.
 	if (L.Bracelet)
@@ -2067,7 +2725,11 @@ void CrestLayers(Canvas& C, const CrestLook& L, float Cx, float Cy, float Size, 
 		Draw(P.At(0.02f, -1.02f, 0.4f), Glyph::Crown, Shadowed(0.4f));
 		Draw(P.At(0.0f, -1.06f, 0.4f), Glyph::Crown, Regal);
 	}
-	if (L.Ring)
+	if (L.Ring && L.FestPhase > 0.0f && FestCrestMoveOf(L.FestWhich) == FestCrestMove::RingTurn)
+	{
+		FestRingTurn(P, M, Hex(0xff4d6d), L.FestPhase); // G1 FL-7: Ring Rush's ring spins once
+	}
+	else if (L.Ring)
 	{
 		HangingRing(P, M, Hex(0xff4d6d));
 	}
@@ -2343,8 +3005,9 @@ void Pave(const Pen& P, float U, float V, float R, const Color& Tint)
 	Disc(P, U - R * 0.3f, V - R * 0.3f, R * 0.35f, Fade(Hex(0xffffff), 0.95f));
 }
 
-/** A bracelet seen from above and in front: the band's far side, its links, the plaque with its spade. */
-void BraceletArt(const Pen& P, const TrophyLook& L, double Time)
+/** A bracelet seen from above and in front: the band's far side, its links, the plaque with its spade. Glints: its twinkle (the
+ *  Championship Online's festival trophy is cached without it). */
+void BraceletArt(const Pen& P, const TrophyLook& L, double Time, bool Glints = true)
 {
 	const Metal& M = L.Band;
 	const float Cy = -0.12f;
@@ -2445,11 +3108,15 @@ void BraceletArt(const Pen& P, const TrophyLook& L, double Time)
 			Pave(P, (K % 2 == 0 ? -1.0f : 1.0f) * (Iw * 0.5f - 0.06f), Pv + (K < 2 ? -1.0f : 1.0f) * (Ih * 0.5f - 0.06f), 0.03f, L.Stone);
 		}
 	}
-	Sparkles(P, Time, L.Main ? 5 : 3, 0.92f);
+	if (Glints)
+	{
+		Sparkles(P, Time, L.Main ? 5 : 3, 0.92f);
+	}
 }
 
-/** A ring: the band, its shoulders, the head with a halo, and the stone. */
-void RingArt(const Pen& P, const TrophyLook& L, double Time)
+/** A ring: the band, its shoulders, the head with a halo, and the stone. Glints: its twinkle (Ring Rush's festival trophy is
+ *  cached without it). */
+void RingArt(const Pen& P, const TrophyLook& L, double Time, bool Glints = true)
 {
 	const Metal& M = L.Band;
 	const float Bv = 0.3f;  // the band's center
@@ -2501,7 +3168,870 @@ void RingArt(const Pen& P, const TrophyLook& L, double Time)
 		Disc(P, Fl(Side) * 0.62f * K, Sv - 0.3f * K, 0.03f, M.Hi);
 		Disc(P, Fl(Side) * 0.25f * K, Sv - 0.55f * K, 0.025f, M.Hi);
 	}
-	Sparkles(P, Time, L.Main ? 5 : 3, 0.9f);
+	if (Glints)
+	{
+		Sparkles(P, Time, L.Main ? 5 : 3, 0.9f);
+	}
+}
+
+// ------------------------------------------------------------------ Update 4: the festivals' trophies, belts and pins (G1 F-look FL-3)
+//
+// §2.7.5, §2.8.7, §2.6.4. Each piece is drawn once into the Shared cache (Canvas::Cached) and copied in after: a trophy, a title
+// object, a belt and a pin are one fragment each, keyed by brand, size, detail and the skin (FestTrophyKey, FestBeltKey, FestPinKey;
+// tests/u4_ui_look.cpp's FestTrophyCached asks Canvas::IsCached for them), so a second draw adds only the copy and nothing in them
+// moves. A trophy stands in a box Size high: a festival trophy fills FestTrophyFit of it, a championship's (fest::IsChampionship:
+// RCOP, PENNANT, REIGN) 1.15 times that at every size, so it outranks its site's other festival trophies. Lod (30 units or less)
+// draws the silhouette only. Shapes only: no letters or numbers but The Seal's monogram, which §2.7.5 asks for.
+
+/** A festival trophy's height in its box (Size); a championship's trophy is FestChampionLift times it (§2.6.4, §2.7.5). */
+const float FestTrophyFit = 0.78f;
+const float FestChampionLift = 1.15f;
+/** The RCOP Cup engraves at most this many editions: the first, as the roll lists them (newest first). */
+const size_t FestCupLines = 12;
+/** The Cup's engraving: a pale silver no other part of the art wears (FestTrophyCached finds the lines by it). */
+const uint32_t FestCupEngraving = 0xd8def0;
+/** Where today's ring and bracelet (RingArt, BraceletArt, in their own unit space) sit in a trophy's box: their measured extents
+ *  (the vertices at alpha 0.25 or more, without the twinkle) mapped onto the box's, so they stand as tall as every festival trophy. */
+const float FestRingK = 1.1056f;
+const float FestRingDv = -0.1498f;
+const float FestBraceletK = 1.3387f;
+const float FestBraceletDv = -0.1780f;
+
+Metal FestChrome()
+{
+	return {Hex(0xffffff), Hex(0xc6ced9), Hex(0x323a46)};
+}
+
+Metal FestGoldMetal()
+{
+	return {Hex(0xfff4c6), Hex(0xe8b64a), Hex(0x7a4e0e)};
+}
+
+Metal FestBrassMetal()
+{
+	return {Hex(0xfff0c4), Hex(0xd8a84c), Hex(0x5c3d0f)};
+}
+
+Metal FestSilverMetal()
+{
+	return {Hex(0xffffff), Hex(0xc9d3e6), Hex(0x515e70)};
+}
+
+Metal FestRoseBrass()
+{
+	return {Hex(0xfff0ea), Hex(0xe8b4a0), Hex(0x7a4636)};
+}
+
+/** A turned metal part lit from the left. */
+Paint FestAcross(const Pen& P, float U0, float U1, const Metal& M)
+{
+	return Lin(P, U0, 0.0f, U1, 0.0f, M.Hi, M.Lo);
+}
+
+/** An onyx block from V0 to the floor (1), HalfW either side; its top edge trimmed in Trim (RunItTwice's chrome). */
+void FestOnyxBlock(const Pen& P, float V0, float HalfW, const Metal& Trim, bool Lod)
+{
+	Box(P, -HalfW, V0, HalfW * 2.0f, 1.0f - V0, 0.03f, Lin(P, -HalfW, V0, HalfW, 1.0f, Hex(0x34343e), Hex(0x060608)));
+	if (Lod)
+	{
+		return;
+	}
+	Box(P, -HalfW, V0, HalfW * 2.0f, 0.07f, 0.03f, FestAcross(P, -HalfW, HalfW, Trim));
+	Stroke(P, {{-HalfW + 0.06f, V0 + 0.16f}, {-HalfW + 0.06f, 0.93f}}, Fade(Hex(0xffffff), 0.14f), 0.02f);
+}
+
+/** The RCOP Cup's bowl: its half-width at T (0 the lip, 1 its foot). */
+float FestCupHalf(float T)
+{
+	return 0.11f + 0.49f * std::sqrt(std::max(0.0f, 1.0f - T * T));
+}
+
+/** The RCOP Cup: a tall violet-and-silver cup on a deep-water plinth, one line engraved per edition at the height of its Main's
+ *  field (the biggest field so far, or 10,000, under the lip). */
+void FestCupRcop(const Pen& P, const std::vector<int>& Fields, bool Lod)
+{
+	const Metal S = FestSilverMetal();
+	const Color Violet = Hex(0xa78bfa);
+	const Color Royal = Hex(0x5b2bc4);
+	const Color Water = Hex(0x1c1550);
+	Box(P, -0.48f, 0.78f, 0.96f, 0.22f, 0.03f, Lin(P, 0.0f, 0.78f, 0.0f, 1.0f, Lift(Water, 0.18f), Sink(Water, 0.4f)));
+	Box(P, -0.54f, 0.72f, 1.08f, 0.08f, 0.03f, FestAcross(P, -0.54f, 0.54f, S));
+	Poly(P, {{-0.3f, 0.73f}, {0.3f, 0.73f}, {0.1f, 0.58f}, {-0.1f, 0.58f}}, FestAcross(P, -0.3f, 0.3f, S));
+	Box(P, -0.07f, 0.3f, 0.14f, 0.3f, 0.02f, FestAcross(P, -0.07f, 0.07f, S));
+	Oval(P, 0.0f, 0.46f, 0.14f, 0.07f, FestAcross(P, -0.14f, 0.14f, S));
+	if (!Lod)
+	{
+		// The handles: silver loops either side of the bowl.
+		for (int Side = -1; Side <= 1; Side += 2)
+		{
+			const float Sd = Fl(Side);
+			std::vector<Vec2> Loop{{Sd * 0.5f, -0.7f}};
+			for (const Vec2& Q : Bezier({Sd * 0.5f, -0.7f}, {Sd * 0.98f, -0.64f}, {Sd * 0.32f, -0.12f}, 10))
+			{
+				Loop.push_back(Q);
+			}
+			StrokeV(P, Loop, S.Lo, 0.08f);
+			StrokeV(P, Loop, S.Mid, 0.05f);
+		}
+	}
+	std::vector<Vec2> Bowl;
+	const int N = 12;
+	for (int I = 0; I <= N; ++I)
+	{
+		const float T = Fl(I) / Fl(N);
+		Bowl.push_back({FestCupHalf(T), -0.9f + 1.24f * T});
+	}
+	for (int I = N; I >= 0; --I)
+	{
+		const float T = Fl(I) / Fl(N);
+		Bowl.push_back({-FestCupHalf(T), -0.9f + 1.24f * T});
+	}
+	PolyV(P, Bowl, Lin(P, -0.6f, -0.9f, 0.6f, 0.3f, Lift(Violet, 0.2f), Sink(Royal, 0.3f)));
+	if (!Lod)
+	{
+		Poly(P, {{-0.44f, -0.84f}, {-0.33f, -0.84f}, {-0.2f, 0.04f}, {-0.25f, 0.04f}}, Fade(Hex(0xffffff), 0.16f));
+		Box(P, -0.17f, 0.24f, 0.34f, 0.07f, 0.02f, FestAcross(P, -0.17f, 0.17f, S));
+		// One engraved line per edition, higher for a bigger Main field.
+		int Most = 10000;
+		for (size_t K = 0; K < Fields.size() && K < FestCupLines; ++K)
+		{
+			Most = std::max(Most, Fields[K]);
+		}
+		for (size_t K = 0; K < Fields.size() && K < FestCupLines; ++K)
+		{
+			const float Share = std::min(1.0f, std::max(0.0f, Fl(Fields[K]) / Fl(Most)));
+			const float V = 0.18f - 0.96f * Share;
+			const float W = FestCupHalf((V + 0.9f) / 1.24f) * 0.8f;
+			StrokeV(P, ArcPts(0.0f, V - 0.05f, W, 0.05f, 0.2f, PiF - 0.2f, 8), Hex(FestCupEngraving), 0.03f);
+		}
+	}
+	Oval(P, 0.0f, -0.9f, 0.62f, 0.1f, FestAcross(P, -0.62f, 0.62f, S));
+	Oval(P, 0.0f, -0.9f, 0.53f, 0.065f, Lin(P, 0.0f, -0.97f, 0.0f, -0.83f, Sink(Water, 0.3f), Royal));
+}
+
+/** The Funhouse Mirror: a gold hand mirror on a pink lacquer stand, its glass warped in the house's pink, lemon and mint (the
+ *  champion's avatar is no input here, so the reflection is the house's colours). */
+void FestMirrorFeign(const Pen& P, bool Lod)
+{
+	const Metal G = FestGoldMetal();
+	const Color Pink = Hex(0xff4fa3);
+	const Color Mint = Hex(0x5ff2c9);
+	const Color Lemon = Hex(0xffe45c);
+	Box(P, -0.42f, 0.8f, 0.84f, 0.2f, 0.04f, Lin(P, 0.0f, 0.8f, 0.0f, 1.0f, Lift(Pink, 0.1f), Sink(Pink, 0.45f)));
+	if (!Lod)
+	{
+		Box(P, -0.42f, 0.8f, 0.84f, 0.05f, 0.02f, Lin(P, -0.42f, 0.0f, 0.42f, 0.0f, Lift(Mint, 0.3f), Sink(Mint, 0.3f)));
+	}
+	Poly(P, {{-0.1f, 0.12f}, {0.1f, 0.12f}, {0.07f, 0.74f}, {-0.07f, 0.74f}}, FestAcross(P, -0.1f, 0.1f, G));
+	Disc(P, 0.0f, 0.74f, 0.1f, FestAcross(P, -0.1f, 0.1f, G));
+	Oval(P, 0.0f, -0.42f, 0.56f, 0.58f, Lin(P, -0.56f, -1.0f, 0.56f, 0.16f, G.Hi, G.Lo));
+	if (!Lod)
+	{
+		for (int K = 0; K < 12; ++K)
+		{
+			const float A = TwoPiF * Fl(K) / 12.0f;
+			Disc(P, 0.5f * std::cos(A), -0.42f + 0.52f * std::sin(A), 0.035f, Fade(G.Hi, 0.9f));
+		}
+	}
+	Oval(P, 0.0f, -0.42f, 0.44f, 0.46f, Lin(P, 0.0f, -0.88f, 0.0f, 0.04f, Lift(Mint, 0.35f), Sink(Pink, 0.2f)));
+	if (Lod)
+	{
+		return;
+	}
+	const Color Bands[3] = {Pink, Lemon, Mint};
+	for (int K = 0; K < 3; ++K)
+	{
+		std::vector<Vec2> Wave;
+		for (int I = 0; I <= 10; ++I)
+		{
+			const float U = -0.34f + 0.68f * Fl(I) / 10.0f;
+			Wave.push_back({U, -0.64f + 0.2f * Fl(K) + 0.05f * std::sin(U * 7.0f + Fl(K) * 1.3f)});
+		}
+		StrokeV(P, Wave, Fade(Bands[K], 0.8f), 0.08f);
+	}
+	Glint(P, -0.22f, -0.68f, 0.12f, Fade(Hex(0xffffff), 0.9f));
+}
+
+/** The Big Red Button: a chrome-ringed arcade push-button, its red cap standing proud, on a pink-and-mint pedestal. */
+void FestButtonPush(const Pen& P, bool Lod)
+{
+	const Metal Cr = FestChrome();
+	const Color Pink = Hex(0xff4fa3);
+	const Color Mint = Hex(0x5ff2c9);
+	const Color Red = Hex(0xe8323c);
+	Box(P, -0.58f, 0.86f, 1.16f, 0.14f, 0.03f, Lin(P, -0.58f, 0.0f, 0.58f, 0.0f, Lift(Mint, 0.2f), Sink(Mint, 0.4f)));
+	Box(P, -0.48f, -0.3f, 0.96f, 1.17f, 0.0f, Lin(P, -0.48f, 0.0f, 0.48f, 0.0f, Lift(Pink, 0.2f), Sink(Pink, 0.4f)));
+	if (!Lod)
+	{
+		Box(P, -0.48f, 0.12f, 0.96f, 0.12f, 0.0f, Lin(P, -0.48f, 0.0f, 0.48f, 0.0f, Lift(Mint, 0.15f), Sink(Mint, 0.4f)));
+	}
+	Oval(P, 0.0f, -0.3f, 0.48f, 0.12f, Lin(P, -0.48f, 0.0f, 0.48f, 0.0f, Lift(Pink, 0.35f), Pink));
+	Oval(P, 0.0f, -0.36f, 0.42f, 0.12f, FestAcross(P, -0.42f, 0.42f, Cr));
+	if (!Lod)
+	{
+		Oval(P, 0.0f, -0.37f, 0.34f, 0.085f, Hex(0x14080c));
+	}
+	const Paint Side = Lin(P, -0.3f, 0.0f, 0.3f, 0.0f, Lift(Red, 0.15f), Sink(Red, 0.45f));
+	Oval(P, 0.0f, -0.38f, 0.3f, 0.075f, Side);
+	Box(P, -0.3f, -0.8f, 0.6f, 0.42f, 0.0f, Side);
+	Oval(P, 0.0f, -0.8f, 0.3f, 0.2f, Lin(P, 0.0f, -1.0f, 0.0f, -0.6f, Lift(Red, 0.35f), Red));
+	if (!Lod)
+	{
+		Oval(P, -0.1f, -0.86f, 0.12f, 0.05f, Fade(Hex(0xffffff), 0.7f));
+	}
+}
+
+/** The Seal's monogram (§2.7.5: "a red RIT monogram on its face"): R, I and T sharing one stem, as strokes in a box 2K across. */
+void FestMonogram(const Pen& P, float U, float V, float K, const Color& Ink)
+{
+	const float W = 0.16f * K;
+	Stroke(P, {{U - 0.9f * K, V - 0.8f * K}, {U + 0.9f * K, V - 0.8f * K}}, Ink, W);
+	Stroke(P, {{U + 0.25f * K, V - 0.8f * K}, {U + 0.25f * K, V + 0.85f * K}}, Ink, W);
+	Stroke(P, {{U, V + 0.85f * K}, {U + 0.5f * K, V + 0.85f * K}}, Ink, W);
+	Stroke(P, {{U - 0.6f * K, V - 0.8f * K}, {U - 0.6f * K, V + 0.85f * K}}, Ink, W);
+	Stroke(P, {{U - 0.6f * K, V - 0.8f * K}, {U - 0.1f * K, V - 0.78f * K}, {U + 0.05f * K, V - 0.52f * K}, {U - 0.1f * K, V - 0.24f * K}, {U - 0.6f * K, V - 0.2f * K}}, Ink, W);
+	Stroke(P, {{U - 0.36f * K, V - 0.2f * K}, {U + 0.1f * K, V + 0.85f * K}}, Ink, W);
+}
+
+/** The Seal: a chrome wax-seal stamp standing on an onyx block, the block's chrome face plate carrying the red monogram (left off
+ *  where it would blur). */
+void FestSealWrit(const Pen& P, bool Lod)
+{
+	const Metal Cr = FestChrome();
+	FestOnyxBlock(P, 0.34f, 0.56f, Cr, Lod);
+	PolyV(P, Scaled(FramePts(Frame::Octagon, 1.0f), 0.2f, 0.0f, 0.7f), FestAcross(P, -0.2f, 0.2f, Cr));
+	if (!Lod)
+	{
+		Disc(P, 0.0f, 0.7f, 0.15f, Lin(P, 0.0f, 0.55f, 0.0f, 0.85f, Hex(0xf4f6fa), Hex(0xb8c0cc)));
+		if (P.S >= 30.0f)
+		{
+			FestMonogram(P, 0.0f, 0.7f, 0.1f, Hex(0xd2141a));
+		}
+		else
+		{
+			Disc(P, 0.0f, 0.7f, 0.06f, Hex(0xd2141a));
+		}
+	}
+	Oval(P, 0.0f, 0.33f, 0.3f, 0.06f, Sink(Cr.Lo, 0.2f));
+	Box(P, -0.3f, 0.2f, 0.6f, 0.13f, 0.02f, FestAcross(P, -0.3f, 0.3f, Cr));
+	Poly(P, {{-0.24f, 0.21f}, {0.24f, 0.21f}, {0.08f, -0.24f}, {-0.08f, -0.24f}}, FestAcross(P, -0.24f, 0.24f, Cr));
+	Oval(P, 0.0f, -0.26f, 0.15f, 0.05f, FestAcross(P, -0.15f, 0.15f, Cr));
+	Oval(P, 0.0f, -0.5f, 0.15f, 0.24f, FestAcross(P, -0.15f, 0.15f, Cr));
+	Disc(P, 0.0f, -0.86f, 0.14f, FestAcross(P, -0.14f, 0.14f, Cr));
+	if (!Lod)
+	{
+		Oval(P, -0.05f, -0.58f, 0.04f, 0.12f, Fade(Hex(0xffffff), 0.6f));
+	}
+}
+
+/** The Grindstone: a chrome grinding wheel with a red-lacquer rim on an onyx trestle. */
+void FestGrindstoneGrit(const Pen& P, bool Lod)
+{
+	const Metal Cr = FestChrome();
+	const Color Red = Hex(0xd2141a);
+	const Color OnyxHi = Hex(0x34343e);
+	const Color OnyxLo = Hex(0x060608);
+	for (int Side = -1; Side <= 1; Side += 2)
+	{
+		const float Sd = Fl(Side);
+		Poly(P, {{Sd * 0.04f, -0.42f}, {Sd * 0.16f, -0.42f}, {Sd * 0.7f, 0.92f}, {Sd * 0.52f, 0.92f}}, Lin(P, Sd * 0.1f, 0.0f, Sd * 0.7f, 0.0f, OnyxHi, OnyxLo));
+	}
+	Box(P, -0.76f, 0.9f, 1.52f, 0.1f, 0.03f, Lin(P, 0.0f, 0.9f, 0.0f, 1.0f, OnyxHi, OnyxLo));
+	if (!Lod)
+	{
+		Box(P, -0.44f, 0.5f, 0.88f, 0.08f, 0.02f, Lin(P, 0.0f, 0.5f, 0.0f, 0.58f, OnyxHi, OnyxLo));
+	}
+	Disc(P, 0.0f, -0.38f, 0.62f, Lin(P, -0.62f, -1.0f, 0.62f, 0.24f, Lift(Red, 0.25f), Sink(Red, 0.5f)));
+	Disc(P, 0.0f, -0.38f, 0.52f, Lin(P, -0.52f, -0.9f, 0.52f, 0.14f, Cr.Hi, Cr.Lo));
+	if (!Lod)
+	{
+		Hoop(P, 0.0f, -0.38f, 0.41f, 0.41f, Fade(Cr.Lo, 0.35f), 0.02f);
+		Hoop(P, 0.0f, -0.38f, 0.29f, 0.29f, Fade(Cr.Lo, 0.3f), 0.02f);
+		Arc(P, 0.0f, -0.38f, 0.47f, PiF * 1.08f, PiF * 1.42f, Fade(Hex(0xffffff), 0.55f), 0.035f);
+	}
+	Disc(P, 0.0f, -0.38f, 0.11f, Lin(P, 0.0f, -0.49f, 0.0f, -0.27f, OnyxHi, OnyxLo));
+	if (!Lod)
+	{
+		Disc(P, 0.0f, -0.38f, 0.05f, FestAcross(P, -0.05f, 0.05f, Cr));
+	}
+}
+
+/** The Gold Pennant: a gold-felt pennant on a brass staff with a spade finial, standing in a pier-plank base (no bulbs). The
+ *  champion's handle is stitched in coral and Outfield Green as rows of stitches (no name reaches the art, and no letters). */
+void FestPennantGold(const Pen& P, bool Lod)
+{
+	const Metal Br = FestBrassMetal();
+	const Color Wood = Hex(0x8a5c35);
+	Box(P, -0.6f, 0.7f, 1.2f, 0.3f, 0.02f, Lin(P, 0.0f, 0.7f, 0.0f, 1.0f, Lift(Wood, 0.12f), Sink(Wood, 0.35f)));
+	if (!Lod)
+	{
+		for (int K = 1; K < 3; ++K)
+		{
+			Stroke(P, {{-0.6f, 0.7f + 0.1f * Fl(K)}, {0.6f, 0.7f + 0.1f * Fl(K)}}, Sink(Wood, 0.6f), 0.02f);
+		}
+		for (int K = 0; K < 3; ++K)
+		{
+			Disc(P, -0.5f, 0.75f + 0.1f * Fl(K), 0.02f, Hex(0x2b1a0e));
+			Disc(P, 0.5f, 0.75f + 0.1f * Fl(K), 0.02f, Hex(0x2b1a0e));
+		}
+	}
+	Box(P, -0.46f, -0.74f, 0.08f, 1.46f, 0.03f, FestAcross(P, -0.46f, -0.38f, Br));
+	Box(P, -0.49f, 0.6f, 0.14f, 0.1f, 0.02f, FestAcross(P, -0.49f, -0.35f, Br));
+	Spade(P, -0.42f, -0.857f, 0.13f, FestAcross(P, -0.56f, -0.28f, Br));
+	std::vector<Vec2> Flag;
+	const int N = 10;
+	for (int I = 0; I <= N; ++I)
+	{
+		const float T = Fl(I) / Fl(N);
+		Flag.push_back({-0.38f + 1.1f * T, -0.72f + 0.31f * T + 0.03f * std::sin(T * TwoPiF)});
+	}
+	for (int I = N - 1; I >= 0; --I)
+	{
+		const float T = Fl(I) / Fl(N);
+		Flag.push_back({-0.38f + 1.1f * T, -0.04f - 0.35f * T + 0.03f * std::sin(T * TwoPiF)});
+	}
+	PolyV(P, Flag, Lin(P, -0.38f, -0.72f, 0.72f, -0.1f, Hex(0xffefb8), Hex(0xb98f2e)));
+	Poly(P, {{-0.38f, -0.72f}, {-0.26f, -0.69f}, {-0.26f, -0.07f}, {-0.38f, -0.04f}}, Hex(0xa67c22));
+	if (!Lod)
+	{
+		P.Cv->StrokeDashed(Place(P, {{-0.16f, -0.47f}, {0.48f, -0.43f}}), Hex(0xff6b57), 0.035f * P.S, 0.06f * P.S, 0.04f * P.S);
+		P.Cv->StrokeDashed(Place(P, {{-0.16f, -0.34f}, {0.4f, -0.36f}}), Hex(0x21d958), 0.035f * P.S, 0.06f * P.S, 0.04f * P.S);
+	}
+}
+
+/** The Sceptre: a chrome sceptre, its onyx shaft between a chrome ferrule and a red-lacquer collar under the chrome spade finial,
+ *  standing on an onyx block (no pink, mint, light tube or laurel). */
+void FestSceptreReign(const Pen& P, bool Lod)
+{
+	const Metal Cr = FestChrome();
+	const Color Red = Hex(0xd2141a);
+	FestOnyxBlock(P, 0.74f, 0.42f, Cr, Lod);
+	if (!Lod)
+	{
+		Box(P, -0.16f, 0.66f, 0.32f, 0.09f, 0.02f, FestAcross(P, -0.16f, 0.16f, Cr));
+	}
+	Box(P, -0.06f, -0.52f, 0.12f, 1.2f, 0.04f, Lin(P, -0.06f, 0.0f, 0.06f, 0.0f, Hex(0x3a3a46), Hex(0x050507)));
+	if (!Lod)
+	{
+		Stroke(P, {{-0.025f, -0.46f}, {-0.025f, 0.6f}}, Fade(Hex(0xffffff), 0.3f), 0.018f);
+	}
+	Spade(P, 0.0f, -0.725f, 0.25f, Lin(P, -0.25f, -1.0f, 0.25f, -0.5f, Cr.Hi, Cr.Lo));
+	Box(P, -0.09f, 0.54f, 0.18f, 0.12f, 0.03f, FestAcross(P, -0.09f, 0.09f, Cr));
+	Box(P, -0.11f, -0.58f, 0.22f, 0.12f, 0.03f, Lin(P, -0.11f, 0.0f, 0.11f, 0.0f, Lift(Red, 0.25f), Sink(Red, 0.45f)));
+	Box(P, -0.13f, -0.64f, 0.26f, 0.07f, 0.03f, FestAcross(P, -0.13f, 0.13f, Cr));
+	if (!Lod)
+	{
+		Glint(P, -0.1f, -0.84f, 0.08f, Fade(Hex(0xffffff), 0.85f));
+	}
+}
+
+/** The Slam Plate: a sunburst salver on an easel foot over a clay sill. */
+void FestPlateSlam(const Pen& P, bool Lod)
+{
+	const Metal G{Hex(0xfff3c4), Hex(0xffd45c), Hex(0x8a5a10)};
+	const Color Orange = Hex(0xff8a3d);
+	const Color Clay = Hex(0x5a2a14);
+	for (int Side = -1; Side <= 1; Side += 2)
+	{
+		const float Sd = Fl(Side);
+		Poly(P, {{Sd * 0.2f, 0.4f}, {Sd * 0.3f, 0.4f}, {Sd * 0.5f, 0.92f}, {Sd * 0.4f, 0.92f}}, FestAcross(P, Sd * 0.2f, Sd * 0.5f, G));
+	}
+	Box(P, -0.56f, 0.9f, 1.12f, 0.1f, 0.03f, Lin(P, 0.0f, 0.9f, 0.0f, 1.0f, Lift(Clay, 0.2f), Sink(Clay, 0.3f)));
+	Disc(P, 0.0f, -0.18f, 0.82f, Lin(P, -0.82f, -1.0f, 0.82f, 0.64f, G.Hi, G.Lo));
+	Disc(P, 0.0f, -0.18f, 0.7f, Lin(P, 0.0f, -0.88f, 0.0f, 0.52f, Lift(Orange, 0.25f), Sink(Orange, 0.35f)));
+	if (!Lod)
+	{
+		const std::vector<Vec2> Rays = StarPts(0.0f, -0.18f, 0.66f, 0.24f, 16, 0.0f);
+		for (size_t I = 0; I < Rays.size(); I += 2)
+		{
+			PolyV(P, {{0.0f, -0.18f}, Rays[I], Rays[(I + 1) % Rays.size()]}, Fade(G.Hi, 0.55f));
+		}
+		Hoop(P, 0.0f, -0.18f, 0.76f, 0.76f, Fade(G.Lo, 0.6f), 0.025f);
+	}
+	Disc(P, 0.0f, -0.18f, 0.2f, Lin(P, 0.0f, -0.38f, 0.0f, 0.02f, G.Hi, G.Mid));
+	if (!Lod)
+	{
+		Hoop(P, 0.0f, -0.18f, 0.25f, 0.25f, Hex(0x3cc8ff), 0.04f);
+	}
+}
+
+/** Ring Rush's and the Championship Online's festival trophies are today's ring and bracelet (§2.7.5: "the existing ring and
+ *  bracelet"), drawn into the cache without their twinkle and placed so their measured height fills the box as every festival
+ *  trophy's does. An event's, not a Main Event's: the Main's pavé, crown and double halo take them to 2.3k-2.8k vertices at 54, over
+ *  §2.7.5's 1.8k (the hero's own Main ring and bracelet stay in the trophy case as eventart::Trophy draws them). */
+world::Award FestAwardOf(fest::Brand B)
+{
+	world::Award A;
+	A.Online = true;
+	A.Main = false;
+	A.Ring = B == fest::Brand::RingRush;
+	A.Series = A.Ring ? "ring27" : "tco27";
+	return A;
+}
+
+void FestRingRush(const Pen& P, bool Lod)
+{
+	const TrophyLook L = LookOf(FestAwardOf(fest::Brand::RingRush));
+	if (!Lod)
+	{
+		RingArt(P.At(0.0f, FestRingDv, FestRingK), L, 0.0, false);
+		return;
+	}
+	// The silhouette: the band, the head and the garnet.
+	Hoop(P, 0.0f, 0.42f, 0.5f, 0.5f, L.Band.Mid, 0.16f);
+	Poly(P, {{-0.26f, -0.12f}, {0.26f, -0.12f}, {0.14f, -0.4f}, {-0.14f, -0.4f}}, FestAcross(P, -0.26f, 0.26f, L.Band));
+	Disc(P, 0.0f, -0.62f, 0.38f, Lin(P, 0.0f, -1.0f, 0.0f, -0.24f, Lift(L.Stone, 0.3f), Sink(L.Stone, 0.3f)));
+}
+
+void FestBraceletTco(const Pen& P, bool Lod)
+{
+	const TrophyLook L = LookOf(FestAwardOf(fest::Brand::Tco));
+	if (!Lod)
+	{
+		BraceletArt(P.At(0.0f, FestBraceletDv, FestBraceletK), L, 0.0, false);
+		return;
+	}
+	// The silhouette: the band and the royal-blue plaque.
+	Hoop(P, 0.0f, -0.35f, 0.88f, 0.55f, L.Band.Mid, 0.18f);
+	Box(P, -0.46f, 0.3f, 0.92f, 0.7f, 0.12f, FestAcross(P, -0.46f, 0.46f, L.Band));
+	Box(P, -0.36f, 0.4f, 0.72f, 0.5f, 0.08f, Lin(P, 0.0f, 0.4f, 0.0f, 0.9f, L.Plate, L.Plate2));
+}
+
+/** The Pennant Ribbon (PENNANT's title object, 2D only): a small gold pennant on a coral ribbon, the ribbon looped at the top with its
+ *  two tails falling to swallowtail ends. */
+void FestRibbonPennant(const Pen& P, bool Lod)
+{
+	const Metal G = FestGoldMetal();
+	const Color Coral = Hex(0xff6b57);
+	const Paint Cloth = Lin(P, -0.5f, 0.0f, 0.5f, 0.0f, Lift(Coral, 0.2f), Sink(Coral, 0.35f));
+	Poly(P, {{-0.06f, -0.3f}, {0.1f, -0.22f}, {-0.3f, 1.0f}, {-0.4f, 0.86f}, {-0.52f, 0.96f}}, Cloth);
+	Poly(P, {{0.06f, -0.3f}, {-0.1f, -0.22f}, {0.3f, 1.0f}, {0.4f, 0.86f}, {0.52f, 0.96f}}, Cloth);
+	Hoop(P, 0.0f, -0.64f, 0.26f, 0.3f, Coral, 0.12f);
+	if (!Lod)
+	{
+		Arc(P, 0.0f, -0.64f, 0.27f, PiF * 1.1f, PiF * 1.45f, Fade(Hex(0xffffff), 0.45f), 0.035f);
+	}
+	// The pennant, flying from its hoist over the ribbon's knot, stitched round its edge.
+	std::vector<Vec2> Flag{{-0.34f, -0.5f}, {0.6f, -0.22f}, {-0.34f, 0.06f}};
+	PolyV(P, Flag, Lin(P, -0.34f, -0.5f, 0.6f, 0.06f, Hex(0xffefb8), Hex(0xb98f2e)));
+	Box(P, -0.4f, -0.54f, 0.1f, 0.64f, 0.03f, FestAcross(P, -0.4f, -0.3f, G));
+	if (!Lod)
+	{
+		StrokeV(P, {{-0.24f, -0.38f}, {0.42f, -0.22f}, {-0.24f, -0.06f}}, Fade(Coral, 0.9f), 0.025f);
+	}
+}
+
+
+/** The Spade Finial (REIGN's title object, 2D only): a rose-brass spade finial on a short chain. */
+void FestFinialReign(const Pen& P, bool Lod)
+{
+	const Metal Rb = FestRoseBrass();
+	Hoop(P, 0.0f, -0.91f, 0.07f, 0.07f, Rb.Mid, 0.035f);
+	if (!Lod)
+	{
+		for (int K = 0; K < 4; ++K)
+		{
+			const float V = -0.77f + 0.13f * Fl(K);
+			if (K % 2 == 0)
+			{
+				Hoop(P, 0.0f, V, 0.05f, 0.075f, Rb.Mid, 0.03f);
+			}
+			else
+			{
+				Box(P, -0.016f, V - 0.075f, 0.032f, 0.15f, 0.016f, FestAcross(P, -0.016f, 0.016f, Rb));
+			}
+		}
+	}
+	else
+	{
+		Box(P, -0.02f, -0.86f, 0.04f, 0.58f, 0.02f, Rb.Mid);
+	}
+	Box(P, -0.12f, -0.32f, 0.24f, 0.1f, 0.03f, FestAcross(P, -0.12f, 0.12f, Rb));
+	Box(P, -0.05f, -0.24f, 0.1f, 0.14f, 0.02f, FestAcross(P, -0.05f, 0.05f, Rb));
+	Spade(P, 0.0f, 0.467f, 0.561f, Lin(P, -0.5f, -0.2f, 0.5f, 1.0f, Rb.Hi, Rb.Lo));
+	if (!Lod)
+	{
+		Glint(P, -0.2f, 0.0f, 0.1f, Fade(Hex(0xffffff), 0.8f));
+	}
+}
+
+/** One trophy (Tier 0) or title object (Tier 1) around the origin, in a box Size high (FestTrophy caches it). */
+void FestTrophyArt(Canvas& C, fest::Brand B, float Size, bool Lod, const std::vector<int>& Fields, int Tier)
+{
+	const float Fit = FestTrophyFit * (Tier == 0 && fest::IsChampionship(B) ? FestChampionLift : 1.0f);
+	const Pen P{&C, 0.0f, 0.0f, Size * 0.5f * Fit};
+	if (Tier == 1)
+	{
+		if (B == fest::Brand::Pennant)
+		{
+			FestRibbonPennant(P, Lod);
+		}
+		else if (B == fest::Brand::Reign)
+		{
+			FestFinialReign(P, Lod);
+		}
+		return;
+	}
+	switch (B)
+	{
+	case fest::Brand::Rcop: FestCupRcop(P, Fields, Lod); break;
+	case fest::Brand::RingRush: FestRingRush(P, Lod); break;
+	case fest::Brand::Tco: FestBraceletTco(P, Lod); break;
+	case fest::Brand::Slam: FestPlateSlam(P, Lod); break;
+	case fest::Brand::Feign: FestMirrorFeign(P, Lod); break;
+	case fest::Brand::Push: FestButtonPush(P, Lod); break;
+	case fest::Brand::Writ: FestSealWrit(P, Lod); break;
+	case fest::Brand::Grit: FestGrindstoneGrit(P, Lod); break;
+	case fest::Brand::Pennant: FestPennantGold(P, Lod); break;
+	case fest::Brand::Reign: FestSceptreReign(P, Lod); break;
+	default: break;
+	}
+}
+
+/** How long a trophy's motion runs (seconds of FestTrophy's Time): The Championship Online's Clasp (§2.7.2: at the champion's moment);
+ *  0 for every other trophy and title object (G1 FL-7). */
+double FestClaspSeconds(fest::Brand B, int Tier)
+{
+	return B == fest::Brand::Tco && Tier == 0 ? 0.9 : 0.0;
+}
+
+/** Where the Clasp is at Time (0..1); 0 at rest (before it starts, once it has run, and on the silhouette). */
+float FestClaspPhase(fest::Brand B, int Tier, bool Lod, double Time)
+{
+	const double D = FestClaspSeconds(B, Tier);
+	return !Lod && D > 0.0 && Time > 0.0 && Time < D ? static_cast<float>(Time / D) : 0.0f;
+}
+
+/** The Clasp (G1 FL-7): the bracelet's clasp, at the band's right-hand end, clicks shut: a platinum glow and a glint that pop and fade
+ *  over the cached bracelet. */
+void FestClaspGlint(Canvas& C, float Cx, float Cy, float Size, float Phase)
+{
+	const Pen P = Pen{&C, Cx, Cy, Size * 0.5f * FestTrophyFit}.At(0.0f, FestBraceletDv, FestBraceletK);
+	const float Pop = std::sin(PiF * Phase);
+	Glow(P, 0.88f, -0.12f, 0.36f * Pop + 0.02f, Fade(Hex(0xcfd6e3), 0.7f * Pop));
+	Glint(P, 0.88f, -0.12f, 0.06f + 0.2f * Pop, Fade(Hex(0xffffff), Pop));
+}
+
+/** A belt's dress (§2.7.5's belt column): the strap's two tones and pattern, the buckle's metal, plate, field and motif. */
+struct FestBeltLook
+{
+	Color Strap;
+	Color Strap2;
+	Metal Buckle;
+	Frame Plate = Frame::Medallion;
+	Glyph Motif = Glyph::Star;
+	Color Field;
+	int Pattern = 0;   // 0 stitched leather, 1 candy stripes, 2 brass studs, 3 velvet, 4 baseball stitching, 5 a white stripe
+	bool Key = false;  // REIGN: a rose-brass key on the plate in place of a motif
+	bool Rays = false; // Summer Slam: a sunburst behind the plate
+};
+
+FestBeltLook FestBeltOf(fest::Brand B)
+{
+	FestBeltLook K;
+	K.Buckle = FestGoldMetal();
+	switch (B)
+	{
+	case fest::Brand::Rcop: // violet strap, silver shield buckle
+		K = {Hex(0x8e6cf0), Hex(0x3a1f8a), FestSilverMetal(), Frame::Shield, Glyph::Trophy, Hex(0x5b2bc4), 0, false, false};
+		break;
+	case fest::Brand::Feign: // candy-striped strap, arch buckle
+		K = {Hex(0xffe3f1), Hex(0xf2b8d6), FestGoldMetal(), Frame::Arch, Glyph::Mirror, Hex(0x3d1752), 1, false, false};
+		break;
+	case fest::Brand::Push: // a Midnight Pier strap, brass studs, a red push-button buckle
+		K = {Hex(0x2e2866), Hex(0x110f2a), FestBrassMetal(), Frame::Medallion, Glyph::PushButton, Hex(0x110f2a), 2, false, false};
+		break;
+	case fest::Brand::Writ: // black leather, chrome octagon buckle with the seal
+		K = {Hex(0x2a2a30), Hex(0x0e0e12), FestChrome(), Frame::Octagon, Glyph::Seal, Hex(0x15151a), 0, false, false};
+		break;
+	case fest::Brand::Grit: // crimson velvet, gold proscenium buckle
+		K = {Hex(0x8a1a2a), Hex(0x4a0b12), {Hex(0xfff6d8), Hex(0xd9b25f), Hex(0x6a4b12)}, Frame::Proscenium, Glyph::TwinStars, Hex(0x24060a), 3, false, false};
+		break;
+	case fest::Brand::Pennant: // felt-pennant strap with baseball stitching, gold pennant buckle
+		K = {Hex(0x2fe068), Hex(0x0f7a32), FestGoldMetal(), Frame::Medallion, Glyph::Pennant, Hex(0x0d3b45), 4, false, false};
+		break;
+	case fest::Brand::Reign: // black leather, a chrome keyhole buckle with a rose-brass key
+		K = {Hex(0x2a2a30), Hex(0x0e0e12), FestChrome(), Frame::Keyhole, Glyph::Sceptre, Hex(0x111114), 0, true, false};
+		break;
+	case fest::Brand::Slam: // orange and white strap, sunburst buckle
+		K = {Hex(0xff9a52), Hex(0xd9631c), {Hex(0xfff3c4), Hex(0xffd45c), Hex(0x8a5a10)}, Frame::Sunburst, Glyph::Sun, Hex(0x5a2a14), 5, false, true};
+		break;
+	case fest::Brand::RingRush: // garnet strap, gold medallion buckle
+		K = {Hex(0xa3173e), Hex(0x3d0618), FestGoldMetal(), Frame::Medallion, Glyph::Ring, Hex(0x6e0f2a), 0, false, false};
+		break;
+	case fest::Brand::Tco: // royal blue strap, platinum medallion buckle
+		K = {Hex(0x2147a8), Hex(0x0a1747), MetalOf(Alloy::Platinum), Frame::Medallion, Glyph::Bracelet, Hex(0x2147a8), 0, false, false};
+		break;
+	default: break;
+	}
+	return K;
+}
+
+/** REIGN's key on its keyhole buckle: the bow, the shank and the bit, in rose brass. */
+void FestKey(const Pen& P)
+{
+	const Metal Rb = FestRoseBrass();
+	Hoop(P, 0.0f, -0.17f, 0.09f, 0.09f, Rb.Mid, 0.05f);
+	Box(P, -0.025f, -0.08f, 0.05f, 0.34f, 0.02f, FestAcross(P, -0.025f, 0.025f, Rb));
+	Box(P, 0.02f, 0.16f, 0.09f, 0.05f, 0.01f, Rb.Mid);
+	Box(P, 0.02f, 0.06f, 0.07f, 0.04f, 0.01f, Rb.Mid);
+}
+
+/** One belt around the origin, Size across (FestBelt caches it). */
+void FestBeltArt(Canvas& C, fest::Brand B, float Size, bool Lod)
+{
+	const FestBeltLook K = FestBeltOf(B);
+	const Pen P{&C, 0.0f, 0.0f, Size * 0.5f};
+	if (!Lod)
+	{
+		Oval(P, 0.0f, 0.44f, 0.96f, 0.07f, Rgba(0, 0, 0, 0.22f));
+	}
+	Box(P, -1.0f, -0.2f, 2.0f, 0.4f, 0.09f, Lin(P, 0.0f, -0.2f, 0.0f, 0.2f, K.Strap, K.Strap2));
+	if (!Lod)
+	{
+		switch (K.Pattern)
+		{
+		case 1: // candy stripes
+			for (int I = 0; I < 11; ++I)
+			{
+				const float U = -0.86f + 0.16f * Fl(I);
+				Poly(P, {{U, -0.2f}, {U + 0.07f, -0.2f}, {U - 0.05f, 0.2f}, {U - 0.12f, 0.2f}}, Hex(0xff4fa3));
+			}
+			break;
+		case 2: // brass studs
+			for (int I = 0; I < 4; ++I)
+			{
+				const float U = I < 2 ? -0.94f + 0.18f * Fl(I) : 0.76f + 0.18f * Fl(I - 2);
+				for (int Row = -1; Row <= 1; Row += 2)
+				{
+					Disc(P, U, 0.1f * Fl(Row), 0.04f, Lin(P, U - 0.04f, -0.04f, U + 0.04f, 0.04f, K.Buckle.Hi, K.Buckle.Lo));
+				}
+			}
+			break;
+		case 3: // velvet's sheen and gold edges
+			Box(P, -0.96f, -0.13f, 1.92f, 0.08f, 0.04f, Fade(Lift(K.Strap, 0.45f), 0.35f));
+			Stroke(P, {{-0.94f, -0.17f}, {0.94f, -0.17f}}, Fade(K.Buckle.Mid, 0.8f), 0.02f);
+			Stroke(P, {{-0.94f, 0.17f}, {0.94f, 0.17f}}, Fade(K.Buckle.Mid, 0.8f), 0.02f);
+			break;
+		case 4: // baseball stitching, coral, along both edges
+			for (int I = 0; I < 14; ++I)
+			{
+				const float U = -0.9f + 0.138f * Fl(I);
+				Stroke(P, {{U - 0.03f, -0.17f}, {U, -0.12f}, {U + 0.03f, -0.17f}}, Hex(0xff6b57), 0.022f);
+				Stroke(P, {{U - 0.03f, 0.17f}, {U, 0.12f}, {U + 0.03f, 0.17f}}, Hex(0xff6b57), 0.022f);
+			}
+			break;
+		case 5: // a white stripe down the orange
+			Box(P, -0.98f, -0.05f, 1.96f, 0.1f, 0.0f, Fade(Hex(0xffffff), 0.92f));
+			break;
+		default: // stitched leather
+			for (int Row = -1; Row <= 1; Row += 2)
+			{
+				P.Cv->StrokeDashed(Place(P, {{-0.92f, 0.14f * Fl(Row)}, {0.92f, 0.14f * Fl(Row)}}), Fade(Lift(K.Strap, 0.55f), 0.7f), 0.02f * P.S, 0.08f * P.S, 0.05f * P.S);
+			}
+			break;
+		}
+		for (int Side = -1; Side <= 1; Side += 2)
+		{
+			const float U = 0.62f * Fl(Side);
+			Box(P, U - 0.11f, -0.16f, 0.22f, 0.32f, 0.05f, Lin(P, U - 0.11f, -0.16f, U + 0.11f, 0.16f, K.Buckle.Hi, K.Buckle.Lo));
+			Disc(P, U, 0.0f, 0.05f, Lift(K.Field, 0.2f));
+		}
+		if (K.Rays)
+		{
+			PolyV(P, StarPts(0.0f, 0.0f, 0.62f, 0.46f, 16, 0.0f), FestAcross(P, -0.62f, 0.62f, K.Buckle));
+		}
+	}
+	PolyV(P, FramePts(K.Plate, 0.5f), Lin(P, -0.5f, -0.5f, 0.5f, 0.5f, K.Buckle.Hi, K.Buckle.Lo));
+	PolyV(P, FramePts(K.Plate, 0.4f), Lin(P, 0.0f, -0.4f, 0.0f, 0.4f, Lift(K.Field, 0.15f), Sink(K.Field, 0.35f)));
+	if (Lod)
+	{
+		return;
+	}
+	if (K.Key)
+	{
+		FestKey(P);
+	}
+	else
+	{
+		const Tone Emboss{K.Buckle.Hi, K.Buckle.Mid, Sink(K.Buckle.Lo, 0.5f), Lift(K.Field, 0.3f), Hex(0xffffff)};
+		Draw(P.At(0.0f, 0.0f, 0.26f), K.Motif, Emboss);
+	}
+}
+
+/** A look's glyph as a pin carries it at 18 units (§2.8.7): its silhouette in a few shapes, in the glyph's own tones. The full
+ *  glyphs are 90-540 vertices at that size (the bracelet's links the most); a pin is 0.4k at most (ten slots in §2.8.7's 4k). */
+void FestPinMotif(const Pen& P, Glyph G, const Tone& T)
+{
+	switch (G)
+	{
+	case Glyph::Trophy: // the cup, its stem and base
+		Poly(P, {{-0.6f, -0.78f}, {0.6f, -0.78f}, {0.46f, -0.24f}, {0.14f, 0.0f}, {-0.14f, 0.0f}, {-0.46f, -0.24f}}, Lin(P, -0.6f, -0.78f, 0.6f, 0.0f, Lift(T.Gem, 0.45f), Sink(T.Gem, 0.15f)));
+		Box(P, -0.08f, 0.0f, 0.16f, 0.4f, 0.0f, T.Gem);
+		Box(P, -0.48f, 0.4f, 0.96f, 0.36f, 0.06f, Lin(P, 0.0f, 0.4f, 0.0f, 0.76f, T.Body, T.Deep));
+		break;
+	case Glyph::Ring: // the band and its stone
+		Hoop(P, 0.0f, 0.22f, 0.56f, 0.56f, T.Body, 0.18f);
+		Poly(P, {{0.0f, -0.98f}, {0.34f, -0.66f}, {0.0f, -0.3f}, {-0.34f, -0.66f}}, Lin(P, -0.34f, -0.98f, 0.34f, -0.3f, Lift(T.Gem, 0.5f), Sink(T.Gem, 0.3f)));
+		break;
+	case Glyph::Bracelet: // a bangle at an angle, a gem at the front
+		Oval(P, 0.0f, 0.0f, 0.92f, 0.56f, Lin(P, 0.0f, -0.56f, 0.0f, 0.56f, Sink(T.Body, 0.25f), T.Body));
+		Oval(P, 0.0f, -0.06f, 0.66f, 0.32f, T.Core);
+		Disc(P, 0.0f, 0.46f, 0.16f, T.Gem);
+		break;
+	case Glyph::Sun: // the disc and its points
+		PolyV(P, StarPts(0.0f, 0.0f, 0.95f, 0.6f, 8, 0.0f), T.Gem);
+		Disc(P, 0.0f, 0.0f, 0.5f, Lin(P, 0.0f, -0.5f, 0.0f, 0.5f, T.Body, T.Deep));
+		break;
+	case Glyph::Mirror: // the hand mirror and its glass
+		Box(P, -0.1f, 0.24f, 0.2f, 0.7f, 0.08f, T.Deep);
+		Oval(P, 0.0f, -0.3f, 0.62f, 0.66f, T.Body);
+		Oval(P, 0.0f, -0.3f, 0.46f, 0.5f, Lin(P, 0.0f, -0.8f, 0.0f, 0.2f, Lift(T.Gem, 0.45f), Sink(T.Gem, 0.2f)));
+		break;
+	case Glyph::PushButton: // the bezel and the red cap
+	{
+		const Color Cap = FestLit(T, Hex(0xe8323c));
+		Oval(P, 0.0f, 0.42f, 0.9f, 0.34f, T.Deep);
+		Box(P, -0.56f, -0.3f, 1.12f, 0.6f, 0.0f, Lin(P, -0.56f, 0.0f, 0.56f, 0.0f, Cap, Sink(Cap, 0.4f)));
+		Oval(P, 0.0f, -0.3f, 0.56f, 0.22f, Lift(Cap, 0.35f));
+		break;
+	}
+	case Glyph::Pennant: // the staff and the felt
+		Box(P, -0.72f, -0.9f, 0.12f, 1.8f, 0.04f, T.Body);
+		Poly(P, {{-0.6f, -0.82f}, {0.92f, -0.44f}, {-0.6f, 0.04f}}, Lin(P, -0.6f, -0.8f, 0.92f, -0.2f, Lift(T.Gem, 0.15f), Sink(T.Gem, 0.35f)));
+		break;
+	case Glyph::Seal: // the wax disc and its pressed spade
+		Disc(P, 0.0f, -0.08f, 0.76f, Lin(P, -0.6f, -0.8f, 0.6f, 0.6f, T.Body, T.Deep));
+		Spade(P, 0.0f, -0.1f, 0.36f, Sink(T.Deep, 0.35f));
+		break;
+	case Glyph::TwinStars: // the big star and its twin
+		PolyV(P, StarPts(0.38f, -0.34f, 0.5f, 0.21f, 5, 0.18f), T.Deep);
+		PolyV(P, StarPts(-0.14f, 0.12f, 0.8f, 0.34f, 5, -0.12f), T.Body);
+		break;
+	case Glyph::Sceptre: // the shaft, its collar and the spade finial
+		Box(P, -0.08f, -0.36f, 0.16f, 1.24f, 0.06f, T.Core);
+		Box(P, -0.16f, -0.44f, 0.32f, 0.12f, 0.04f, T.Body);
+		Spade(P, 0.0f, -0.68f, 0.3f, T.Body);
+		break;
+	default:
+		Draw(P, G, T);
+		break;
+	}
+}
+
+/** A pin's mark at its lower right (§2.8.7): an outline medal (TOP 25%), a bronze medal (TOP 10%), a tag (FINALIST), a podium
+ *  (PODIUM: no rank reaches the pin, so the podium stands for the numeral) and a mini belt (the title). */
+void FestPinMedal(const Pen& P, world::FestMark Mark, const festart::FestivalLook& L)
+{
+	const float U = 0.6f;
+	const float V = 0.6f;
+	switch (Mark)
+	{
+	case world::FestMark::Top25:
+		Disc(P, U, V, 0.28f, Hex(0xe6ebf2));
+		Disc(P, U, V, 0.19f, Hex(0x1b2230));
+		break;
+	case world::FestMark::Top10:
+	{
+		const Metal Bz = MetalOf(Alloy::Bronze);
+		Disc(P, U, V, 0.28f, Lin(P, U - 0.28f, V - 0.28f, U + 0.28f, V + 0.28f, Bz.Hi, Bz.Lo));
+		Disc(P, U, V, 0.17f, Lin(P, U - 0.17f, V - 0.17f, U + 0.17f, V + 0.17f, Bz.Mid, Sink(Bz.Lo, 0.2f)));
+		break;
+	}
+	case world::FestMark::Finalist:
+	{
+		const Metal Br = FestBrassMetal();
+		Box(P, 0.24f, 0.46f, 0.7f, 0.3f, 0.06f, Lin(P, 0.24f, 0.46f, 0.94f, 0.76f, Br.Hi, Br.Lo));
+		Box(P, 0.29f, 0.51f, 0.6f, 0.2f, 0.04f, Fade(Br.Lo, 0.45f));
+		Disc(P, 0.34f, 0.61f, 0.035f, Hex(0x1a1206));
+		break;
+	}
+	case world::FestMark::Podium:
+	{
+		const Metal G = FestGoldMetal();
+		Box(P, 0.5f, 0.38f, 0.2f, 0.5f, 0.02f, FestAcross(P, 0.5f, 0.7f, G));
+		Box(P, 0.29f, 0.54f, 0.21f, 0.34f, 0.02f, FestAcross(P, 0.29f, 0.5f, G));
+		Box(P, 0.7f, 0.62f, 0.21f, 0.26f, 0.02f, FestAcross(P, 0.7f, 0.91f, G));
+		break;
+	}
+	case world::FestMark::Title:
+		Box(P, 0.22f, 0.52f, 0.76f, 0.2f, 0.06f, Lin(P, 0.0f, 0.52f, 0.0f, 0.72f, Lift(Hex(L.Felt), 0.25f), Hex(L.FeltDark)));
+		Disc(P, 0.6f, 0.62f, 0.16f, FestAcross(P, 0.44f, 0.76f, FestGoldMetal()));
+		break;
+	default: break;
+	}
+}
+
+/** One pin around the origin, Size across (FestPin caches it): the enamel disc in the look's Accent, a gold (3), silver (2) or
+ *  outline (1) rim, the look's glyph at 0.45 of the size (18 on the pin wall's 40), the mark's medal; Grade 0 the empty socket. */
+void FestPinArt(Canvas& C, fest::Brand B, int Grade, world::FestMark Mark, float Size)
+{
+	const festart::FestivalLook& L = festart::LookOf(B);
+	const Pen P{&C, 0.0f, 0.0f, Size * 0.5f};
+	const Color Enamel = Hex(L.Accent);
+	if (Grade <= 0)
+	{
+		Disc(P, 0.0f, 0.0f, 0.8f, Fade(Enamel, 0.3f));
+		Disc(P, 0.0f, 0.0f, 0.72f, Rgba(0, 0, 0, 0.45f));
+		return;
+	}
+	// The rim: gold or silver metal, or (played) an outline in the look's Accent2 round a dulled enamel.
+	const Metal M = Grade >= 3 ? FestGoldMetal() : FestSilverMetal();
+	Disc(P, 0.0f, 0.0f, 0.86f, Grade >= 2 ? Lin(P, -0.86f, -0.86f, 0.86f, 0.86f, M.Hi, M.Lo) : Paint(Hex(L.Accent2)));
+	const float R = Grade >= 2 ? 0.72f : 0.8f;
+	const Color E = Grade >= 2 ? Enamel : Sink(Enamel, 0.5f);
+	Disc(P, 0.0f, 0.0f, R, Lin(P, 0.0f, -R, 0.0f, R, Lift(E, 0.15f), Sink(E, 0.35f)));
+	const Tone Face{Hex(0xf8fafc), Hex(0xc7d2e4), Hex(0x0b1220), Hex(L.Gold), Hex(0xffffff)};
+	FestPinMotif(P.At(0.0f, 0.0f, 0.45f), L.Glyph, Face);
+
+	if (Grade >= 3)
+	{
+		Glint(P, -0.42f, -0.48f, 0.14f, Fade(Hex(0xffffff), 0.9f));
+	}
+	FestPinMedal(P, Mark, L);
+}
+
+/** A festival art fragment's cache key: its kind, brand, the ints that change it, its size, the look's key and the skin's (the
+ *  ring and bracelet read pal::Gold). External linkage: tests/u4_ui_look.cpp's FestTrophyCached asks Canvas::IsCached for them. */
+uint64_t FestArtKey(const char* Kind, fest::Brand B, const std::vector<int>& Ints, float Size)
+{
+	uint64_t H = 0xcbf29ce484222325ull;
+	H = Fnv(H, Kind, std::strlen(Kind));
+	const int Which = static_cast<int>(B);
+	H = Fnv(H, &Which, sizeof(Which));
+	if (!Ints.empty())
+	{
+		H = Fnv(H, Ints.data(), Ints.size() * sizeof(int));
+	}
+	H = Fnv(H, &Size, sizeof(Size));
+	const uint64_t LookKey = festart::LookOf(B).Key;
+	H = Fnv(H, &LookKey, sizeof(LookKey));
+	const uint64_t SkinKey = Skin::Current().Key();
+	return Fnv(H, &SkinKey, sizeof(SkinKey));
+}
+
+uint64_t FestTrophyKey(fest::Brand B, float Size, bool Lod, const std::vector<int>& Fields, int Tier)
+{
+	std::vector<int> Ints{Lod ? 1 : 0, Tier};
+	if (B == fest::Brand::Rcop && Tier == 0 && !Lod)
+	{
+		// Only the Cup's engraved editions change it.
+		for (size_t K = 0; K < Fields.size() && K < FestCupLines; ++K)
+		{
+			Ints.push_back(Fields[K]);
+		}
+	}
+	return FestArtKey("festtrophy1", B, Ints, Size);
+}
+
+uint64_t FestBeltKey(fest::Brand B, float Size, bool Lod)
+{
+	return FestArtKey("festbelt1", B, {Lod ? 1 : 0}, Size);
+}
+
+uint64_t FestPinKey(fest::Brand B, int Grade, world::FestMark Mark, float Size)
+{
+	return FestArtKey("festpin1", B, {std::max(0, std::min(3, Grade)), static_cast<int>(Mark)}, Size);
 }
 } // namespace eventart_detail
 
@@ -2509,6 +4039,11 @@ using namespace eventart_detail;
 
 Glyph SeriesGlyph(const net::SeriesInfo& S)
 {
+	// Update 4 (§2.7.4): a festival's own motif first (RiverLine's four looks keep the ones below: Trophy, Bracelet, Ring, Sun).
+	if (const festart::FestivalLook* GlyphLook = festart::LookFor(S))
+	{
+		return GlyphLook->Glyph;
+	}
 	const std::string Slot = SlotOf(S.Id);
 	if (Slot == "rcop")
 	{
@@ -2572,8 +4107,9 @@ void Emblem(Canvas& C, const net::EventTemplate& T, float Cx, float Cy, float Si
 	{
 		// The series on its own site (update 2 §5.8: a rival's series id carries its key).
 		const net::SeriesInfo* Sr = net::ForEvent(T.Series).FindSeries(T.Series);
+		const festart::FestivalLook* EventLook = Sr ? festart::LookFor(*Sr) : nullptr;
 		CrestLook L;
-		L.Shape = FrameOf(SlotOf(T.Series));
+		L.Shape = FrameFor(SlotOf(T.Series), EventLook);
 		L.Rim = T.Main ? Alloy::Gold : AlloyFor(T.BuyInCents);
 		if (Sr)
 		{
@@ -2594,6 +4130,7 @@ void Emblem(Canvas& C, const net::EventTemplate& T, float Cx, float Cy, float Si
 			: T.Bracelet ? "BRACELET"
 			: T.Ring ? "RING EVENT"
 					 : "EVENT #" + std::to_string(T.EventNo);
+		FestDress(L, EventLook);
 		Crest(C, L, Cx, Cy, Size, Time);
 		return;
 	}
@@ -2618,8 +4155,9 @@ void Emblem(Canvas& C, const net::EventTemplate& T, float Cx, float Cy, float Si
 void SeriesCrest(Canvas& C, const net::SeriesInfo& S, float Cx, float Cy, float Size, double Time)
 {
 	const std::string Slot = SlotOf(S.Id);
+	const festart::FestivalLook* SeriesLook = festart::LookFor(S);
 	CrestLook L;
-	L.Shape = FrameOf(Slot);
+	L.Shape = FrameFor(Slot, SeriesLook);
 	L.Rim = Slot == "hrs" ? Alloy::Platinum : Slot == "rcop" || Slot == "tco" || Slot == "slam" || Slot == "ring" ? Alloy::Gold : Alloy::Silver;
 	Enamel(L, Slot, S.Color, S.Color2);
 	L.Motif = SeriesGlyph(S);
@@ -2633,6 +4171,8 @@ void SeriesCrest(Canvas& C, const net::SeriesInfo& S, float Cx, float Cy, float 
 	const std::string Last = Sp == std::string::npos ? std::string() : S.Name.substr(Sp + 1);
 	const bool Year = Last.size() == 4 && std::isdigit(static_cast<unsigned char>(Last[0])) != 0;
 	L.Banner = Year ? Last : S.Short;
+	FestDress(L, SeriesLook);
+	L.FestWhich = SeriesLook != nullptr ? SeriesLook->Which : fest::Brand::None; // G1 FL-7: the series crest's motion (§2.7.7)
 	Crest(C, L, Cx, Cy, Size, Time);
 }
 void Trophy(Canvas& C, const world::Award& A, float Cx, float Cy, float Size, double Time)
@@ -2710,5 +4250,46 @@ void Champion(AvatarSpec& Pic, const std::vector<world::Award>& Awards)
 	Pic.Plate = LastBracelet ? TrophyStone(*LastBracelet) : 0x2a2a35;
 }
 } // namespace eventart
+
+// Update 4 (SPEC v1.7 §2.7.5, §2.8.7; G1 F-look FL-3): the festivals' trophies, belts and pins, declared in UH/FestivalArt.h and drawn
+// here beside eventart_detail's pens. Each is one cached fragment (a second draw adds only the copy); Time moves nothing but The
+// Championship Online's Clasp (G1 FL-7), a glint drawn over the fragment while it runs.
+namespace festart
+{
+void FestTrophy(Canvas& C, fest::Brand B, float Cx, float Cy, float Size, double Time, bool Lod, const std::vector<int>& Fields, int Tier)
+{
+	// A brand with no trophy at this tier draws nothing (Tier 1: only PENNANT's and REIGN's title objects; RCOP has none, §2.8.5).
+	if (B <= fest::Brand::None || B >= fest::Brand::Count || Size <= 0.0f || fest::TrophyName(B, Tier)[0] == '\0')
+	{
+		return;
+	}
+	C.Cached(eventart::eventart_detail::FestTrophyKey(B, Size, Lod, Fields, Tier), Cx, Cy,
+		[&](Canvas& At) { eventart::eventart_detail::FestTrophyArt(At, B, Size, Lod, Fields, Tier); });
+	const float Clasp = eventart::eventart_detail::FestClaspPhase(B, Tier, Lod, Time);
+	if (Clasp > 0.0f)
+	{
+		eventart::eventart_detail::FestClaspGlint(C, Cx, Cy, Size, Clasp);
+	}
+}
+
+void FestBelt(Canvas& C, fest::Brand B, float Cx, float Cy, float Size, double /*Time*/, bool Lod)
+{
+	if (B <= fest::Brand::None || B >= fest::Brand::Count || Size <= 0.0f)
+	{
+		return;
+	}
+	C.Cached(eventart::eventart_detail::FestBeltKey(B, Size, Lod), Cx, Cy, [&](Canvas& At) { eventart::eventart_detail::FestBeltArt(At, B, Size, Lod); });
+}
+
+void FestPin(Canvas& C, fest::Brand B, int Grade, world::FestMark Mark, float Cx, float Cy, float Size)
+{
+	if (B <= fest::Brand::None || B >= fest::Brand::Count || Size <= 0.0f)
+	{
+		return;
+	}
+	C.Cached(eventart::eventart_detail::FestPinKey(B, Grade, Mark, Size), Cx, Cy,
+		[&](Canvas& At) { eventart::eventart_detail::FestPinArt(At, B, Grade, Mark, Size); });
+}
+} // namespace festart
 } // namespace ui
 } // namespace ss

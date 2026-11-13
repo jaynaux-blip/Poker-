@@ -2,12 +2,18 @@
 // pal::, none a RiverLine hex), the hour's tones, the boardwalk band (a cached static skyline and a live layer), the
 // Ferris wheel, cabinets, the flame, stickers, tickets, bulbs, the Fuel Gauge and the fuse. Pure drawing: nothing here reads
 // the session, decides an outcome or keeps state; every "random" placement is a keyed hash (never rand()).
+// Update 4 G1 FL-5 (F-look; SPEC v1.7 §2.7.4, §2.7.7, §2.11 U32): the festival's attraction on the boardwalk while it is Live
+// (IgniteBand's Fest, FestDay and FestDays, filled by F-hubs): FEIGN's funhouse arch in the Prize Counter's place, PUSH's bulb tower
+// with the Big Red Button at its foot and the rising puck, PENNANT's domed pavilion over the bandstand with its felt pennants; their
+// bulbs chase on the beat from the Boardwalk pool, and the arch's and the pavilion's foot sign reads U32's "STEP INSIDE · THE HUB"
+// (FestArtInventory's). With no attraction (Fest None, or outside the festival's days) the band is today's, call for call.
 #include "IgniteArt.h"
 #include "../StrictFloat.h"
 
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/UI/EventArt.h"
+#include "ShortStack/UI/FestivalArt.h"
 #include "ShortStack/UI/SiteMotion.h"
 
 #include <algorithm>
@@ -18,6 +24,15 @@ namespace ss
 {
 namespace ui
 {
+namespace festart
+{
+namespace festart_detail
+{
+// UI/FestivalArt.cpp's (G1 FL-5): U32's foot sign, the one literal FestArtInventory lists and the arch and the pavilion paint.
+const char* FestHubSign();
+} // namespace festart_detail
+} // namespace festart
+
 namespace igniteart
 {
 namespace
@@ -657,11 +672,348 @@ void IgniteStringLights(Canvas& C, float X0, float Y0, float X1, float Y1, uint3
 		C.FillCircle(Bx, By, 1.8f, Cc);
 	}
 }
+
+// ------------------------------------------------------------------ Update 4: the festival's attraction (SPEC v1.7 §2.7.4; G1 FL-5)
+
+/** The festival attraction standing on the boardwalk: FEIGN's arch, PUSH's tower or PENNANT's pavilion, only while the festival is
+ *  Live (its day 1 to its last; F-hubs fills Fest, FestDay and FestDays, PLAN_G1 item 2). None for every other band: today's band. */
+fest::Brand IgniteAttrShown(const IgniteBand& B)
+{
+	const bool Ignite = B.Fest == fest::Brand::Feign || B.Fest == fest::Brand::Push || B.Fest == fest::Brand::Pennant;
+	return Ignite && B.FestDay >= 1 && (B.FestDays <= 0 || B.FestDay <= B.FestDays) ? B.Fest : fest::Brand::None;
+}
+
+// FEIGN's arch stands where the Prize Counter booth stands (the booth's rect {1244, 104, 320, 194}): legs at x 1270 and 1558 from the
+// deck up to y 252, a half circle of radius 144 over them (its crown at y 108) with the candy stripe riding that line, the doorway 110
+// in radius inside it, the Mirror and the foot sign (the mockup's arch, durable/update4/mockups/_gen/s01_feign_ignite.py).
+constexpr float IgniteAttrArchCx = 1414.0f;
+constexpr float IgniteAttrArchR = 144.0f;
+constexpr float IgniteAttrArchSpring = 252.0f;
+constexpr float IgniteAttrDoorR = 110.0f;
+constexpr float IgniteAttrDoorSpring = 272.0f;
+constexpr Rect IgniteAttrArchSign{1318.0f, 276.0f, 192.0f, 22.0f};
+// PUSH's tower between the Spark Wheel and the Fuse Booth (the gap from x 916 to 956: the wheel's cars reach 915): a 32-wide column
+// from y 106 down to the Big Red Button at its foot, the star finial at 82 (no bell, no mallet), the puck's track up its middle.
+constexpr float IgniteAttrTowerCx = 934.0f;
+constexpr float IgniteAttrPuckTop = 122.0f;
+constexpr float IgniteAttrPuckFoot = 258.0f;
+// PENNANT's pavilion over the bandstand (the bandstand's rect {184, 104, 444, 196}): a pointed bell dome from x 200 to 612 (its point
+// at (406, 82)), the frieze {168, 136, 476, 24} that F-hubs letters "PENNANT TONIGHT · #{No}", columns at x 197 and 615, the screen
+// {212, 182, 388, 92}, the stage and the foot sign (the mockup's pavilion, durable/update4/mockups/_gen/ignite_lobby.py).
+constexpr Rect IgniteAttrPavilionSign{318.0f, 277.0f, 176.0f, 22.0f};
+
+/** A point on the arch's line of radius R springing at SpringY: T 0 at its left spring, 1 at its right, over the crown. */
+Vec2 IgniteAttrArchAt(float R, float SpringY, float T)
+{
+	const float A = Pi + Pi * T;
+	return {IgniteAttrArchCx + R * std::cos(A), SpringY + R * std::sin(A)};
+}
+
+/** An arch outline of radius R: up from the deck (FootY) on its left, over the half circle in Steps, down to the deck on its right. */
+std::vector<Vec2> IgniteAttrArchPts(float R, float SpringY, float FootY, int Steps)
+{
+	std::vector<Vec2> P;
+	P.push_back({IgniteAttrArchCx - R, FootY});
+	for (int I = 0; I <= Steps; ++I)
+	{
+		P.push_back(IgniteAttrArchAt(R, SpringY, static_cast<float>(I) / static_cast<float>(Steps)));
+	}
+	P.push_back({IgniteAttrArchCx + R, FootY});
+	return P;
+}
+
+/** A point on the pavilion dome's two cubic halves: T 0 at its left foot (200, 136), 1 at its point (406, 82), 2 at its right foot. */
+Vec2 IgniteAttrDomeAt(float T)
+{
+	const auto Bez = [](float P0, float P1, float P2, float P3, float U) {
+		const float V = 1.0f - U;
+		return V * V * V * P0 + 3.0f * V * V * U * P1 + 3.0f * V * U * U * P2 + U * U * U * P3;
+	};
+	if (T <= 1.0f)
+	{
+		return {Bez(200.0f, 186.0f, 326.0f, 406.0f, T), Bez(136.0f, 110.0f, 104.0f, 82.0f, T)};
+	}
+	const float U = T - 1.0f;
+	return {Bez(406.0f, 486.0f, 626.0f, 612.0f, U), Bez(82.0f, 104.0f, 110.0f, 136.0f, U)};
+}
+
+/** How many steps the attraction's chase makes: the arch's 30 bulbs, the tower's 9 rows (two bulbs a row), the dome's 27. Each a
+ *  multiple of three, so the chase (every third lit, a step a beat) is three rows the Boardwalk pool keeps. */
+int IgniteAttrChaseSteps(fest::Brand Shown)
+{
+	return Shown == fest::Brand::Feign ? 30 : Shown == fest::Brand::Push ? 9 : Shown == fest::Brand::Pennant ? 27 : 0;
+}
+
+/** The attraction's bulbs and the chase step each answers to: the arch's up its left leg, over the crown (26) and down its right leg; the
+ *  tower's in two columns, a row a step, climbing from the foot; the dome's from its left foot over its point. */
+void IgniteAttrBulbSpots(fest::Brand Shown, std::vector<Vec2>& Spots, std::vector<int>& Steps)
+{
+	if (Shown == fest::Brand::Feign)
+	{
+		const float Xl = IgniteAttrArchCx - IgniteAttrArchR;
+		const float Xr = IgniteAttrArchCx + IgniteAttrArchR;
+		Spots = {{Xl, 296.0f}, {Xl, 274.0f}};
+		for (int I = 0; I <= 25; ++I)
+		{
+			Spots.push_back(IgniteAttrArchAt(IgniteAttrArchR, IgniteAttrArchSpring, static_cast<float>(I) / 25.0f));
+		}
+		Spots.push_back({Xr, 274.0f});
+		Spots.push_back({Xr, 296.0f});
+		for (int I = 0; I < 30; ++I)
+		{
+			Steps.push_back(I);
+		}
+	}
+	else if (Shown == fest::Brand::Push)
+	{
+		for (int Row = 0; Row < 9; ++Row)
+		{
+			const float Y = 256.0f - 17.0f * static_cast<float>(Row);
+			Spots.push_back({IgniteAttrTowerCx - 10.0f, Y});
+			Spots.push_back({IgniteAttrTowerCx + 10.0f, Y});
+			Steps.push_back(Row);
+			Steps.push_back(Row);
+		}
+	}
+	else if (Shown == fest::Brand::Pennant)
+	{
+		for (int I = 0; I < 27; ++I)
+		{
+			const Vec2 P = IgniteAttrDomeAt(2.0f * (static_cast<float>(I) + 0.5f) / 27.0f);
+			Spots.push_back({P.X, P.Y - 2.5f});
+			Steps.push_back(I);
+		}
+	}
+}
+
+/** Which of the attraction's chase steps the beat has lit at Now (bit I: step I), as the bandstand's own row does (motion::Chase). */
+uint64_t IgniteAttrLit(fest::Brand Shown, double Now, double Bpm)
+{
+	const int N = IgniteAttrChaseSteps(Shown);
+	uint64_t Lit = 0;
+	for (int I = 0; I < N; ++I)
+	{
+		Lit |= motion::Chase(Now, I, N, Bpm) > 0.3 ? 1ull << I : 0ull;
+	}
+	return Lit;
+}
+
+/** The attraction's bulbs with the steps in Lit lit, in the look's Gold (a dim pearl of it when off). */
+void IgniteAttrBulbs(Canvas& C, fest::Brand Shown, uint64_t Lit)
+{
+	const festart::FestivalLook& L = festart::LookOf(Shown);
+	std::vector<Vec2> Spots;
+	std::vector<int> Steps;
+	IgniteAttrBulbSpots(Shown, Spots, Steps);
+	const float R = Shown == fest::Brand::Feign ? 3.0f : Shown == fest::Brand::Pennant ? 2.5f : 2.4f;
+	const Color Off = Mix(Hex(L.Gold), Hex(L.FeltDark), 0.6f);
+	for (size_t I = 0; I < Spots.size(); ++I)
+	{
+		IgniteBulb(C, Spots[I].X, Spots[I].Y, R, Hex(L.Gold), Off, (Lit >> Steps[I]) & 1ull ? 1.0f : 0.0f);
+	}
+}
+
+/** U32's foot sign, "STEP INSIDE · THE HUB" (FestArtInventory's entry; a click on the attraction opens the hub, F-hubs' hotspot). */
+void IgniteAttrHubSign(Canvas& C, const Rect& R, const Color& Ground, uint32_t Ink)
+{
+	C.FillRoundRect(R, R.H / 2.0f, Ground);
+	C.StrokeRoundRect(R, R.H / 2.0f, Hex(Ink), 1.5f);
+	C.Text(festart::festart_detail::FestHubSign(), R.X + R.W / 2.0f, R.Y + 15.0f, IgniteTx(11.5f, 900, Hex(Ink), Align::Center, Baseline::Alphabetic, R.W - 16.0f));
+}
+
+/** FEIGN's funhouse arch: its glow, the arch in Grape Taffy, the candy stripe (Funhouse Pink dashes on Mirror Mint), the doorway's hall
+ *  of warped mirrors, the Mirror and the foot sign. Its bulbs are live (IgniteAttrBulbs). */
+void IgniteAttrArch(Canvas& C, const festart::FestivalLook& L)
+{
+	C.GlowRoundRect({1238.0f, 96.0f, 352.0f, 228.0f}, 114.0f, IgniteHexA(L.Accent, 0.12f), 34.0f);
+	const std::vector<Vec2> Body = IgniteAttrArchPts(IgniteAttrArchR, IgniteAttrArchSpring, 300.0f, 36);
+	C.FillPolygon(Body, Paint::Linear({0.0f, 108.0f}, {0.0f, 300.0f}, Hex(L.Felt), Hex(L.FeltDark)));
+	C.StrokePolyline(Body, false, Hex(L.Accent2), 18.0f);
+	C.StrokeDashed(Body, Hex(L.Accent), 18.0f, 16.0f, 16.0f);
+	C.StrokePolyline(Body, false, Rgba(255, 255, 255, 0.35f), 1.2f);
+	C.FillPolygon(IgniteAttrArchPts(IgniteAttrDoorR, IgniteAttrDoorSpring, 300.0f, 28), Paint::Linear({0.0f, 162.0f}, {0.0f, 300.0f}, Hex(0x160a24), Hex(L.Bg2)));
+	for (int K = 0; K < 5; ++K)
+	{
+		const float X = IgniteAttrArchCx - IgniteAttrDoorR + 18.0f + static_cast<float>(K) * (2.0f * IgniteAttrDoorR - 36.0f) / 4.0f;
+		const float Dx = X - IgniteAttrArchCx;
+		const float Y0 = IgniteAttrDoorSpring - std::sqrt(IgniteAttrDoorR * IgniteAttrDoorR - Dx * Dx) + 10.0f;
+		std::vector<Vec2> Wave;
+		for (float Y = Y0; Y <= 296.0f; Y += 6.0f)
+		{
+			Wave.push_back({X + 5.0f * std::sin((Y - Y0) * Pi / 22.0f), Y});
+		}
+		C.StrokePolyline(Wave, false, IgniteHexA(L.Accent2, 0.22f), 2.0f);
+	}
+	// The Mirror (FEIGN's motif, the mockup's glyph_mirror at 72): Lemon Drop's frame and handle, a Mirror Mint glass, three glints.
+	const float Mx = IgniteAttrArchCx;
+	const float My = 240.0f;
+	const float Mk = 1.8f;
+	C.FillRoundRect({Mx - 2.5f * Mk, My + 6.0f * Mk, 5.0f * Mk, 13.0f * Mk}, 2.0f * Mk, Hex(L.Gold));
+	C.FillEllipse(Mx, My - 3.0f * Mk, 11.5f * Mk, 14.0f * Mk, Hex(L.Gold));
+	C.FillEllipse(Mx, My - 3.0f * Mk, 9.0f * Mk, 11.5f * Mk, Hex(L.Accent2));
+	for (int I = 0; I < 3; ++I)
+	{
+		const float Y = My - 9.0f * Mk + static_cast<float>(I) * 6.0f * Mk;
+		std::vector<Vec2> Glint;
+		for (int J = 0; J <= 8; ++J)
+		{
+			const float T = static_cast<float>(J) / 8.0f;
+			Glint.push_back({Mx - 6.0f * Mk + 12.0f * Mk * T, Y - 1.5f * Mk * std::sin(T * 2.0f * Pi)});
+		}
+		C.StrokePolyline(Glint, false, Rgba(255, 255, 255, 0.7f), 1.4f * Mk, true);
+	}
+	IgniteAttrHubSign(C, IgniteAttrArchSign, Hex(0x170a26), L.Accent2);
+}
+
+/** PUSH's bulb tower: the star finial and brass cap, the Midnight Pier column with brass edges, the puck's track and its scale, and
+ *  the Big Red Button on its pedestal at the foot (no mallet, no bell). Its bulbs and the puck are live. */
+void IgniteAttrTower(Canvas& C, const festart::FestivalLook& L)
+{
+	const float X = IgniteAttrTowerCx;
+	C.GlowRoundRect({X - 30.0f, 92.0f, 60.0f, 200.0f}, 30.0f, IgniteHexA(L.Accent2, 0.1f), 22.0f);
+	C.FillPolygon(IgniteStar(X, 82.0f, 6.5f, 2.8f, 5), Hex(L.Gold));
+	C.FillPolygon({{X - 18.0f, 100.0f}, {X + 18.0f, 100.0f}, {X, 88.0f}}, Hex(L.Accent));
+	C.FillRoundRect({X - 20.0f, 98.0f, 40.0f, 8.0f}, 3.0f, Hex(L.Accent));
+	C.FillRect({X - 16.0f, 106.0f, 32.0f, 168.0f}, Paint::Linear({0.0f, 106.0f}, {0.0f, 274.0f}, Hex(L.Felt), Hex(L.FeltDark)));
+	C.FillRect({X - 16.0f, 106.0f, 2.5f, 168.0f}, Hex(L.Accent));
+	C.FillRect({X + 13.5f, 106.0f, 2.5f, 168.0f}, Hex(L.Accent));
+	C.FillRoundRect({X - 4.0f, IgniteAttrPuckTop - 8.0f, 8.0f, IgniteAttrPuckFoot - IgniteAttrPuckTop + 16.0f}, 4.0f, Hex(0x0a0816));
+	for (int I = 0; I <= 8; ++I)
+	{
+		const float Y = IgniteAttrPuckFoot - (IgniteAttrPuckFoot - IgniteAttrPuckTop) * static_cast<float>(I) / 8.0f;
+		C.FillRect({X - 7.0f, Y - 0.6f, 14.0f, 1.2f}, IgniteHexA(I % 2 == 0 ? L.Accent2 : L.Gold, 0.55f));
+	}
+	C.FillRoundRect({X - 22.0f, 282.0f, 44.0f, 17.0f}, 4.0f, Hex(L.Felt));
+	C.FillRect({X - 22.0f, 288.0f, 44.0f, 3.0f}, IgniteHexA(L.Accent2, 0.6f));
+	C.StrokeRoundRect({X - 22.0f, 282.0f, 44.0f, 17.0f}, 4.0f, Hex(L.Accent), 1.2f);
+	C.FillEllipse(X, 282.0f, 15.0f, 5.0f, Hex(0xc9ced8));
+	C.FillEllipse(X, 279.0f, 11.5f, 6.5f, Hex(0xe8262e));
+	C.FillEllipse(X - 3.5f, 276.5f, 4.5f, 2.0f, Rgba(255, 255, 255, 0.4f));
+}
+
+/** PUSH's puck, risen to the festival's progress: day FestDay of FestDays reaches FestDay / FestDays of the track (the top on the last
+ *  day). It steps once a world day: the band knows the day, not each event's scheduled end (F-look reads the three fields only). */
+void IgniteAttrPuck(Canvas& C, const IgniteBand& B, const festart::FestivalLook& L)
+{
+	const float P = B.FestDays > 0 ? std::min(1.0f, static_cast<float>(B.FestDay) / static_cast<float>(B.FestDays)) : 0.0f;
+	const float X = IgniteAttrTowerCx;
+	const float Y = IgniteAttrPuckFoot - (IgniteAttrPuckFoot - IgniteAttrPuckTop) * P;
+	C.GlowRoundRect({X - 9.0f, Y - 5.0f, 18.0f, 10.0f}, 5.0f, IgniteHexA(L.Gold, 0.35f), 6.0f);
+	C.FillRoundRect({X - 7.0f, Y - 3.0f, 14.0f, 6.0f}, 3.0f, Hex(L.Gold));
+	C.FillRect({X - 5.0f, Y - 2.2f, 10.0f, 1.2f}, Rgba(255, 255, 255, 0.5f));
+}
+
+/** A line of felt pennants in place of the bunting: a cord swagged from (X0, Y0) to (X1, Y1), sagging Sag below its lower end, with N
+ *  pennants W by Hh hanging from it in turn in coral and Outfield Green (the look's Accent2 and Accent), each turned to the cord and
+ *  stitched along its edges (the mockup's pennant_line). */
+void IgniteAttrPennants(Canvas& C, float X0, float Y0, float X1, float Y1, int N, float Sag, float W, float Hh, const festart::FestivalLook& L)
+{
+	const float Mx = (X0 + X1) / 2.0f;
+	const float My = std::max(Y0, Y1) + Sag;
+	const auto At = [&](float T) { return Vec2{(1 - T) * (1 - T) * X0 + 2 * (1 - T) * T * Mx + T * T * X1, (1 - T) * (1 - T) * Y0 + 2 * (1 - T) * T * My + T * T * Y1}; };
+	std::vector<Vec2> Cord;
+	for (int I = 0; I <= 12; ++I)
+	{
+		Cord.push_back(At(static_cast<float>(I) / 12.0f));
+	}
+	C.StrokePolyline(Cord, false, Hex(0xd9cbb8), 1.1f);
+	for (int I = 0; I < N; ++I)
+	{
+		const float T = (static_cast<float>(I) + 0.5f) / static_cast<float>(N);
+		const Vec2 Base = At(T);
+		const float Dx = 2.0f * (1.0f - T) * (Mx - X0) + 2.0f * T * (X1 - Mx);
+		const float Dy = 2.0f * (1.0f - T) * (My - Y0) + 2.0f * T * (Y1 - My);
+		const float Len = std::max(0.001f, std::sqrt(Dx * Dx + Dy * Dy));
+		const float Cs = Dx / Len;
+		const float Sn = Dy / Len;
+		const auto Turn = [&](float Px, float Py) { return Vec2{Base.X + Px * Cs - Py * Sn, Base.Y + Px * Sn + Py * Cs}; };
+		C.FillPolygon({Turn(-W / 2.0f, 0.0f), Turn(W / 2.0f, 0.0f), Turn(W * 0.08f, Hh)}, Hex(I % 2 == 0 ? L.Accent2 : L.Accent));
+		C.StrokePolyline({Turn(-W / 2.0f + 1.8f, 1.5f), Turn(W * 0.07f, Hh - 3.2f), Turn(W / 2.0f - 1.8f, 1.5f)}, false, IgniteHexA(IgCream, 0.45f), 0.6f);
+	}
+}
+
+/** PENNANT's pavilion in place of the bandstand's shell: spotlights in coral and Outfield Green, the latticed back wall, the Lagoon dome
+ *  ribbed and neon-rimmed with its finial (its bulbs are live), the frieze, the two columns, the felt pennants under the frieze, the
+ *  screen, the stage and the foot sign. */
+void IgniteAttrPavilion(Canvas& C, const festart::FestivalLook& L)
+{
+	C.FillPolygon({{214.0f, 300.0f}, {150.0f, 90.0f}, {250.0f, 90.0f}}, IgniteHexA(L.Accent2, 0.06f));
+	C.FillPolygon({{598.0f, 300.0f}, {560.0f, 90.0f}, {680.0f, 90.0f}}, IgniteHexA(L.Accent, 0.07f));
+	C.FillRect({194.0f, 158.0f, 424.0f, 142.0f}, Mix(Hex(L.Felt), Hex(L.FeltDark), 0.55f));
+	for (int I = 1; I < 14; ++I)
+	{
+		C.FillRect({194.0f + static_cast<float>(I) * 30.3f - 0.4f, 160.0f, 0.8f, 126.0f}, IgniteHexA(L.Accent, 0.07f));
+	}
+	std::vector<Vec2> Dome;
+	for (int I = 0; I <= 32; ++I)
+	{
+		Dome.push_back(IgniteAttrDomeAt(2.0f * static_cast<float>(I) / 32.0f));
+	}
+	C.FillPolygon(Dome, Paint::Linear({0.0f, 82.0f}, {0.0f, 136.0f}, Hex(0x167185), Hex(L.FeltDark)));
+	for (const float Xx : {250.0f, 304.0f, 356.0f, 406.0f, 456.0f, 508.0f, 562.0f})
+	{
+		const float Cx = 406.0f + (Xx - 406.0f) * 0.7f;
+		std::vector<Vec2> Rib;
+		for (int J = 0; J <= 8; ++J)
+		{
+			const float T = static_cast<float>(J) / 8.0f;
+			Rib.push_back({(1 - T) * (1 - T) * 406.0f + 2 * (1 - T) * T * Cx + T * T * Xx, (1 - T) * (1 - T) * 84.0f + 2 * (1 - T) * T * 100.0f + T * T * 136.0f});
+		}
+		C.StrokePolyline(Rib, false, IgniteHexA(L.Accent, 0.25f), 1.0f);
+	}
+	C.StrokePolyline(Dome, false, IgniteHexA(L.Accent, 0.25f), 7.0f);
+	C.StrokePolyline(Dome, false, IgniteHexA(L.Accent, 0.9f), 3.0f);
+	C.StrokePolyline({{406.0f, 82.0f}, {406.0f, 77.0f}}, false, Hex(L.Accent), 2.0f, true);
+	C.FillCircle(406.0f, 76.0f, 2.6f, Hex(L.Gold));
+	C.FillRoundRect({168.0f, 136.0f, 476.0f, 24.0f}, 3.0f, Hex(L.FeltDark));
+	C.StrokeRoundRect({168.0f, 136.0f, 476.0f, 24.0f}, 3.0f, Hex(L.Accent), 1.5f);
+	for (const float Cx : {197.0f, 615.0f})
+	{
+		C.FillRect({Cx - 8.0f, 160.0f, 16.0f, 126.0f}, Hex(L.Felt));
+		C.StrokeRoundRect({Cx - 8.0f, 160.0f, 16.0f, 126.0f}, 0.5f, IgniteHexA(L.Accent, 0.65f), 1.2f);
+		for (const float Y : {160.0f, 280.0f})
+		{
+			C.FillRoundRect({Cx - 11.0f, Y, 22.0f, 6.0f}, 1.5f, Hex(L.FeltDark));
+			C.StrokeRoundRect({Cx - 11.0f, Y, 22.0f, 6.0f}, 1.5f, Hex(L.Accent), 1.0f);
+		}
+	}
+	IgniteAttrPennants(C, 196.0f, 162.0f, 616.0f, 162.0f, 17, 9.0f, 12.0f, 13.0f, L);
+	C.FillRoundRect({212.0f, 182.0f, 388.0f, 92.0f}, 12.0f, Hex(0x081a21));
+	C.StrokeRoundRect({212.0f, 182.0f, 388.0f, 92.0f}, 12.0f, Hex(0x1f5560), 1.5f);
+	C.FillRoundRect({212.0f, 182.0f, 388.0f, 40.0f}, 12.0f, Paint::Linear({0.0f, 182.0f}, {0.0f, 222.0f}, IgniteHexA(L.Accent, 0.16f), IgniteHexA(L.Accent, 0.0f)));
+	C.FillRoundRect({188.0f, 286.0f, 436.0f, 14.0f}, 3.0f, Hex(0x0f3039));
+	C.FillRoundRect({188.0f, 286.0f, 436.0f, 3.0f}, 1.0f, IgniteHexA(L.Accent, 0.6f));
+	IgniteAttrHubSign(C, IgniteAttrPavilionSign, Hex(L.FeltDark), L.Accent);
+}
 } // namespace
+
+/**
+ * Update 4 (G1 FL-5): the cache key of the attraction's bulbs as IgniteBoardwalkLive draws them for B (the brand and which steps the
+ * beat has lit; the bulbs wear the look's Gold, never the skin's), 0 with no attraction. Declared by u4_ui's FestBandBudget, which asks
+ * Canvas::IsCached for it (IgniteArt.h is the lead's).
+ */
+uint64_t IgniteAttrBulbsKey(const IgniteBand& B)
+{
+	const fest::Brand Shown = IgniteAttrShown(B);
+	if (Shown == fest::Brand::None)
+	{
+		return 0;
+	}
+	uint64_t H = 0xcbf29ce484222325ull;
+	const uint64_t Parts[3] = {static_cast<uint64_t>(Fnv1a("ignite:fest-bulbs")), static_cast<uint64_t>(Shown), IgniteAttrLit(Shown, B.Now, B.K.Bpm)};
+	for (const uint64_t P : Parts)
+	{
+		H = (H ^ P) * 0x100000001b3ull;
+	}
+	return H;
+}
 
 void IgniteBoardwalkStatic(Canvas& C, const IgniteBand& B)
 {
 	const IgniteTones& K = B.K;
+	// Update 4 (§2.7.4): the festival's attraction while it is Live (None: everything below is today's band, call for call).
+	const fest::Brand Shown = IgniteAttrShown(B);
+	const festart::FestivalLook& Fl = festart::LookOf(Shown);
 	// The sky, in two bands (a vertex gradient holds two stops a run), and the horizon's glow.
 	C.FillRect({0.0f, 72.0f, 1600.0f, 156.0f}, Paint::Linear({0.0f, 72.0f}, {0.0f, 228.0f}, Hex(K.SkyTop), Hex(K.SkyMid)));
 	C.FillRect({0.0f, 228.0f, 1600.0f, 124.0f}, Paint::Linear({0.0f, 228.0f}, {0.0f, 352.0f}, Hex(K.SkyMid), Hex(K.SkyLow)));
@@ -749,18 +1101,26 @@ void IgniteBoardwalkStatic(Canvas& C, const IgniteBand& B)
 	C.FillRect({91.25f, 106.0f, 1.5f, 22.0f}, Hex(0x3a2252));
 	C.FillPolygon({{74.0f, 106.0f}, {110.0f, 106.0f}, {92.0f, 90.0f}}, Hex(K.Coral));
 	C.FillCircle(92.0f, 88.0f, 2.5f, Hex(IgSun));
-	// The bandstand's shell: the dome on its stage, its neon edge, the screen the signs draw on.
-	C.FillPolygon({{214.0f, 300.0f}, {150.0f, 90.0f}, {250.0f, 90.0f}}, Hex(K.Sky, 0.06f));
-	C.FillPolygon({{598.0f, 300.0f}, {560.0f, 90.0f}, {680.0f, 90.0f}}, Hex(IgPink, 0.07f));
-	const std::vector<Vec2> Arch = IgniteArchShape();
-	C.FillPolygon(Arch, Hex(K.Night ? 0x1e1440 : 0x2a1546));
-	C.StrokePolyline(Arch, false, Hex(K.Coral, 0.2f), 9.0f, true);
-	C.StrokePolyline(Arch, false, Hex(K.Coral, 0.9f), 3.0f, true);
-	C.FillRoundRect({212.0f, 138.0f, 388.0f, 146.0f}, 14.0f, Hex(0x160b26));
-	C.FillRoundRect({212.0f, 138.0f, 388.0f, 60.0f}, 14.0f, Paint::Linear({0.0f, 138.0f}, {0.0f, 198.0f}, Hex(IgPink, 0.18f), Hex(IgPink, 0.0f)));
-	C.StrokeRoundRect({212.0f, 138.0f, 388.0f, 146.0f}, 14.0f, Hex(K.Rim), 1.5f);
-	C.FillRoundRect({184.0f, 286.0f, 444.0f, 14.0f}, 3.0f, Hex(0x3a2252));
-	C.FillRoundRect({184.0f, 286.0f, 444.0f, 3.0f}, 1.0f, Hex(K.Coral, 0.6f));
+	// The bandstand's shell: the dome on its stage, its neon edge, the screen the signs draw on. PENNANT's pavilion stands in its place
+	// while PENNANT is Live (§2.7.4).
+	if (Shown == fest::Brand::Pennant)
+	{
+		IgniteAttrPavilion(C, Fl);
+	}
+	else
+	{
+		C.FillPolygon({{214.0f, 300.0f}, {150.0f, 90.0f}, {250.0f, 90.0f}}, Hex(K.Sky, 0.06f));
+		C.FillPolygon({{598.0f, 300.0f}, {560.0f, 90.0f}, {680.0f, 90.0f}}, Hex(IgPink, 0.07f));
+		const std::vector<Vec2> Arch = IgniteArchShape();
+		C.FillPolygon(Arch, Hex(K.Night ? 0x1e1440 : 0x2a1546));
+		C.StrokePolyline(Arch, false, Hex(K.Coral, 0.2f), 9.0f, true);
+		C.StrokePolyline(Arch, false, Hex(K.Coral, 0.9f), 3.0f, true);
+		C.FillRoundRect({212.0f, 138.0f, 388.0f, 146.0f}, 14.0f, Hex(0x160b26));
+		C.FillRoundRect({212.0f, 138.0f, 388.0f, 60.0f}, 14.0f, Paint::Linear({0.0f, 138.0f}, {0.0f, 198.0f}, Hex(IgPink, 0.18f), Hex(IgPink, 0.0f)));
+		C.StrokeRoundRect({212.0f, 138.0f, 388.0f, 146.0f}, 14.0f, Hex(K.Rim), 1.5f);
+		C.FillRoundRect({184.0f, 286.0f, 444.0f, 14.0f}, 3.0f, Hex(0x3a2252));
+		C.FillRoundRect({184.0f, 286.0f, 444.0f, 3.0f}, 1.0f, Hex(K.Coral, 0.6f));
+	}
 	// The Ferris wheel's legs and the violet glow behind it (the wheel turns in the live layer).
 	C.FillPolygon({{786.0f, 214.0f}, {794.0f, 214.0f}, {856.0f, 330.0f}, {842.0f, 330.0f}}, Hex(0x4a3768));
 	C.FillPolygon({{786.0f, 214.0f}, {794.0f, 214.0f}, {738.0f, 330.0f}, {724.0f, 330.0f}}, Hex(0x4a3768));
@@ -807,28 +1167,57 @@ void IgniteBoardwalkStatic(Canvas& C, const IgniteBand& B)
 		C.FillPolygon(Door, Hex(0x12081c));
 		C.StrokePolyline(Door, false, Hex(IgSun, 0.6f), 1.5f);
 	}
-	// The Prize Counter: its back wall, the striped awning, the counter.
-	C.FillRect({1252.0f, 132.0f, 304.0f, 166.0f}, Hex(K.Night ? 0x1c1036 : 0x24123a));
-	for (int I = 0; I < 10; ++I)
+	// PUSH's tower stands between the wheel and the Fuse Booth while PUSH is Live (§2.7.4).
+	if (Shown == fest::Brand::Push)
 	{
-		const float X = 1240.0f + static_cast<float>(I) * 33.0f;
-		const Color Stripe = I % 2 == 0 ? Hex(IgPink) : Hex(0x6b3fd1);
-		C.FillRect({X, 108.0f, 33.0f, 24.0f}, Stripe);
-		std::vector<Vec2> Scallop;
-		for (int J = 0; J <= 6; ++J)
-		{
-			const float T = Pi * static_cast<float>(J) / 6.0f;
-			Scallop.push_back({X + 16.5f - 16.5f * std::cos(T), 132.0f + 10.0f * std::sin(T)});
-		}
-		C.FillPolygon(Scallop, Stripe);
+		IgniteAttrTower(C, Fl);
 	}
-	C.FillRect({1240.0f, 108.0f, 330.0f, 5.0f}, Rgba(255, 255, 255, 0.18f));
-	C.FillRoundRect({1244.0f, 246.0f, 320.0f, 52.0f}, 6.0f, Hex(IgGrape));
-	C.FillRoundRect({1244.0f, 246.0f, 320.0f, 6.0f}, 3.0f, Rgba(255, 255, 255, 0.12f));
-	// String lights between the attractions.
-	IgniteStringLights(C, 150.0f, 258.0f, 186.0f, 262.0f, 0u);
-	IgniteStringLights(C, 626.0f, 250.0f, 708.0f, 262.0f, 1u);
-	IgniteStringLights(C, 872.0f, 262.0f, 960.0f, 246.0f, 2u);
+	// The Prize Counter: its back wall, the striped awning, the counter. FEIGN's arch stands in its place while FEIGN is Live (§2.7.4:
+	// the arch replaces the booth for the festival's days; the Prize Counter page stays reachable from Ignite's own navigation).
+	if (Shown == fest::Brand::Feign)
+	{
+		IgniteAttrArch(C, Fl);
+	}
+	else
+	{
+		C.FillRect({1252.0f, 132.0f, 304.0f, 166.0f}, Hex(K.Night ? 0x1c1036 : 0x24123a));
+		for (int I = 0; I < 10; ++I)
+		{
+			const float X = 1240.0f + static_cast<float>(I) * 33.0f;
+			const Color Stripe = I % 2 == 0 ? Hex(IgPink) : Hex(0x6b3fd1);
+			C.FillRect({X, 108.0f, 33.0f, 24.0f}, Stripe);
+			std::vector<Vec2> Scallop;
+			for (int J = 0; J <= 6; ++J)
+			{
+				const float T = Pi * static_cast<float>(J) / 6.0f;
+				Scallop.push_back({X + 16.5f - 16.5f * std::cos(T), 132.0f + 10.0f * std::sin(T)});
+			}
+			C.FillPolygon(Scallop, Stripe);
+		}
+		C.FillRect({1240.0f, 108.0f, 330.0f, 5.0f}, Rgba(255, 255, 255, 0.18f));
+		C.FillRoundRect({1244.0f, 246.0f, 320.0f, 52.0f}, 6.0f, Hex(IgGrape));
+		C.FillRoundRect({1244.0f, 246.0f, 320.0f, 6.0f}, 3.0f, Rgba(255, 255, 255, 0.12f));
+	}
+	// String lights between the attractions. PENNANT hangs felt pennants on the pavilion's two instead (in place of the bunting), and
+	// PUSH's span from the wheel ends short of the tower's foot.
+	if (Shown == fest::Brand::Pennant)
+	{
+		IgniteAttrPennants(C, 150.0f, 258.0f, 189.0f, 262.0f, 2, 9.0f, 10.0f, 12.0f, Fl);
+		IgniteAttrPennants(C, 623.0f, 252.0f, 708.0f, 262.0f, 5, 11.0f, 10.0f, 12.0f, Fl);
+	}
+	else
+	{
+		IgniteStringLights(C, 150.0f, 258.0f, 186.0f, 262.0f, 0u);
+		IgniteStringLights(C, 626.0f, 250.0f, 708.0f, 262.0f, 1u);
+	}
+	if (Shown == fest::Brand::Push)
+	{
+		IgniteStringLights(C, 872.0f, 262.0f, 912.0f, 258.0f, 2u);
+	}
+	else
+	{
+		IgniteStringLights(C, 872.0f, 262.0f, 960.0f, 246.0f, 2u);
+	}
 	IgniteStringLights(C, 1200.0f, 246.0f, 1246.0f, 254.0f, 3u);
 	// The railing, the deck's planks and fascia, the water and its pilings.
 	C.FillRect({0.0f, 299.0f, 1600.0f, 2.0f}, Hex(0x5b3446));
@@ -862,7 +1251,9 @@ void IgniteBoardwalkLive(Canvas& C, const IgniteBand& B)
 	}
 	// The bandstand's bulbs, two of three lit and stepping on the beat. Each is on or off, so the row is one of the chase's
 	// 23 steps (or all dark for the first moment of a beat): it replays from the Boardwalk pool by which bulbs are lit
-	// (G1_AUDIT M3).
+	// (G1_AUDIT M3). Under PENNANT's pavilion the dome carries the bulbs instead.
+	const fest::Brand Shown = IgniteAttrShown(B);
+	if (Shown != fest::Brand::Pennant)
 	{
 		uint32_t Lit = 0;
 		for (int I = 0; I < 23; ++I)
@@ -876,6 +1267,17 @@ void IgniteBoardwalkLive(Canvas& C, const IgniteBand& B)
 				IgniteBulb(At, P.X, P.Y - 2.0f, 2.6f, Hex(IgSun), Hex(0x7a3060), (Lit >> I) & 1u ? 1.0f : 0.0f);
 			}
 		}, Canvas::CachePool::Boardwalk);
+	}
+	// Update 4 (§2.7.4, §2.7.7): the attraction's bulbs chase on the beat the same way, the row replayed from the Boardwalk pool by
+	// which steps are lit (IgniteAttrBulbsKey); PUSH's puck stands at the festival's progress.
+	if (Shown != fest::Brand::None)
+	{
+		const uint64_t Lit = IgniteAttrLit(Shown, Now, K.Bpm);
+		C.Cached(IgniteAttrBulbsKey(B), 0.0f, 0.0f, [Shown, Lit](Canvas& At) { IgniteAttrBulbs(At, Shown, Lit); }, Canvas::CachePool::Boardwalk);
+		if (Shown == fest::Brand::Push)
+		{
+			IgniteAttrPuck(C, B, festart::LookOf(Shown));
+		}
 	}
 	// The water: each sign's light trembling on the bay. Every line sways on one phase (Now x 1.3), so the strip replays
 	// from the Boardwalk pool at 64 steps of it: a line lands within 0.4 units of where it would (G1_AUDIT M3).
