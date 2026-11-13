@@ -65,12 +65,22 @@
 // seats names a repeating event, so no other NextFor answer moves) and FestSeats (SeatsWon over every edition equals the sum over
 // its Main-ticket satellites at three moments; R-14's session half: a seat won in Ring Rush 2027's trio, planted as the session
 // plants a won seat, registers the hero into its Main through the session's path with the clock at day 165, no world simulated).
+//
+// G1, FN-7 (F-net; PLAN_FNET §4 FN-7): marks, News and the record field. fest::Marks, Network::News' festival posts and
+// fest::RecordOf (with Network's DayMax walk) have their bodies, and three checks land with F-net's halves: FestMarks (every edition
+// to 2028 marked FESTIVAL and MAIN from T-30, never before, inside [From, To), all ten brands; the session's wall on Night One and
+// on day 26 with no Ignite account), FestNews (the announcements, opening nights, the first-festival and championship lines,
+// PENNANT I's sample, RCOP 2026's scripted posts, no festival a week out, and the record posts against RecordOf on every 2026-2027
+// rival edition) and FestRecordOf (the planted Big Top and 365-day cases, a brute force over Window on 200 samples, RiverLine
+// claiming none, and the walk's budget printed: SPEC §2.14, asserted under SS_PERF=1). session_seams.cpp:724 ("seams: no marks,
+// badges or sponsors yet") fails in F-net's tree from here, as SPEC §8.4 predicts (Q8; F-world's patch to the lead, A16).
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/WorldSim.h"
 #include "CopyLint.h"
 #include "Trademarks.h"
 #include "ShortStack/Common.h"
 #include "ShortStack/Game/Festival.h"
+#include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Lobby.h"
 #include "ShortStack/Game/Network.h"
@@ -713,13 +723,14 @@ void FestCalendarFactsNet()
 
 	// §2.9.2 (FN-2a): a rival's "series a week out" post skips a festival series (it is announced at T-30, FN-7's posts), while a
 	// plain series keeps it: Ignite's News a day after FEIGN 2026's T-7 holds no FEIGN post, and a day after Wildfire Winter 2027's
-	// T-7 holds its week-out post.
+	// T-7 holds its week-out post. FN-7: the week-out post's own form ("FEIGN 2026 starts Nov 30", tagged with the series' Short);
+	// FEIGN's T-30 announcement ("FEIGN is coming to Ignite", tagged FESTIVAL) is FestNews'.
 	const net::Network& Ig = net::Site(net::SiteId::Ignite);
 	net::HeroStats NoHero;
 	int FeignPosts = 0;
 	for (const net::NewsItem& It : Ig.News(FestNetAt(56 - 7 + 1, 12 * 60), NoHero, 60))
 	{
-		FeignPosts += It.Kind == net::NewsKind::Series && (It.Tag == "FEIGN" || It.Title.find("FEIGN") != std::string::npos) ? 1 : 0;
+		FeignPosts += It.Kind == net::NewsKind::Series && (It.Tag == "FEIGN" || It.Title.rfind("FEIGN 2026 starts", 0) == 0) ? 1 : 0;
 	}
 	const net::SeriesInfo* Wild = Ig.FindSeries("ignite.wildfeb27");
 	int WildPosts = 0;
@@ -4036,6 +4047,469 @@ void FestTalkBubbleCurveNet()
 		"StoryText writes the curve as a 7th field only when it isn't Standard and StoryOf reads it back; old six-field stories (and a 7th of 0) read Standard (\"" + Text + "\")");
 }
 
+// ------------------------------------------------------------------ FestMarks, FestNews, FestRecordOf (F-net; FN-7)
+
+/** The first mark of Kind at At labelled Label in Ms (nullptr: none). */
+const ss::life::Mark* FestNetMark(const std::vector<ss::life::Mark>& Ms, int Kind, double At, const std::string& Label)
+{
+	for (const ss::life::Mark& M : Ms)
+	{
+		if (M.Kind == Kind && M.At == At && M.Label == Label)
+		{
+			return &M;
+		}
+	}
+	return nullptr;
+}
+
+/** §2.9.1, §2.15.1 FestMarks (F-net's half; the "no SERIES mark for a festival series" half is F-world's FW-7, site::Marks' skip):
+ *  fest::Marks draws every festival's FESTIVAL mark at FirstDay 00:00 and its MAIN mark at the Main's start, labelled "<Name> opens"
+ *  and "<Name> Main Event" (U22), Where the host site's name, from T-30 (DayOf(Now) >= FirstDay - 30) and not a minute before, inside
+ *  [From, To) only, for all ten brands (every edition to 2028 on the three sites); and Session::Marks merges them whatever accounts
+ *  the hero holds: on Night One RCOP 2026's two (day 13 00:00, the Main's start on day 34) and nothing of FEIGN's, and on day 26 with
+ *  no Ignite account FEIGN 2026's two as well. Planted: account-only marks (a festival marked only on a site the hero holds an
+ *  account with: Night One's career holds RiverLine's alone). */
+void FestMarksNet()
+{
+	namespace fest = ss::fest;
+	namespace net = ss::net;
+	std::string Bad;
+	std::set<int> Brands;
+	int Editions = 0;
+	const double From = FestNetAt(-60);
+	const double To = FestNetAt(ss::world::DayOn(2029, 1, 1));
+	for (const fest::Festival& F : fest::All())
+	{
+		if (F.Year > 2028)
+		{
+			continue;
+		}
+		++Editions;
+		Brands.insert(static_cast<int>(F.Which));
+		const std::string Where = net::Def(F.Site).Name;
+		const std::string Opens = F.Name + " opens";
+		const std::string Main = F.Name + " Main Event";
+		const double Day1 = FestNetAt(F.FirstDay);
+		const double T30 = FestNetAt(F.FirstDay - fest::kAnnounceDays);
+		const std::vector<ss::life::Mark> On = fest::Marks(From, To, T30);
+		const std::vector<ss::life::Mark> Before = fest::Marks(From, To, T30 - 1.0);
+		const ss::life::Mark* O = FestNetMark(On, fest::MarkFestival, Day1, Opens);
+		const ss::life::Mark* M = FestNetMark(On, fest::MarkFestMain, F.MainStart, Main);
+		const bool Early = FestNetMark(Before, fest::MarkFestival, Day1, Opens) || FestNetMark(Before, fest::MarkFestMain, F.MainStart, Main);
+		// [From, To): the opening mark sits in a window that starts on its minute and not in one that ends there.
+		const bool Edges = FestNetMark(fest::Marks(Day1, Day1 + 1.0, T30), fest::MarkFestival, Day1, Opens) && !FestNetMark(fest::Marks(Day1 - 1.0, Day1, T30), fest::MarkFestival, Day1, Opens);
+		if ((!O || !M || O->Where != Where || M->Where != Where || Early || !Edges) && Bad.size() < 400)
+		{
+			Bad += "; " + F.Name + (O ? "" : " no FESTIVAL") + (M ? "" : " no MAIN") + (O && O->Where != Where ? " FESTIVAL at " + O->Where : "") + (M && M->Where != Where ? " MAIN at " + M->Where : "") +
+				(Early ? " marked before T-30" : "") + (Edges ? "" : " outside [From, To)");
+		}
+	}
+	Expect(Editions == 22 && Brands.size() == 10 && Bad.empty(),
+		"FestMarks: every edition to 2028 (" + std::to_string(Editions) + ", " + std::to_string(Brands.size()) + " brands) is marked FESTIVAL on FirstDay 00:00 and MAIN at its Main's start from T-30, never before, at its host's name" + Bad);
+	// Session::Marks: account or not.
+	const fest::Festival* Rcop = fest::FestivalOf("rcop");
+	const fest::Festival* Feign = fest::FestivalOf("ignite.feign26");
+	std::string Session = "no RCOP 2026 or FEIGN 2026";
+	if (Rcop && Feign)
+	{
+		ss::SessionHooks Quiet;
+		ss::Session S(Quiet, "festmarks");
+		const double Night = S.WorldMinutes();
+		const std::vector<ss::life::Mark> First = S.Marks(Night, Night + 60.0 * FestNetDay);
+		const bool RcopTwo = FestNetMark(First, fest::MarkFestival, FestNetAt(13), "RCOP 2026 opens") && FestNetMark(First, fest::MarkFestMain, Rcop->MainStart, "RCOP 2026 Main Event") &&
+			Rcop->FirstDay == 13 && Rcop->MainDay == 34 && net::DayOf(Rcop->MainStart) == 34;
+		// F-world's rewrite of session_seams.cpp:724 (fworld_to_lead_3, the lead's at integration) expects exactly these two in a new
+		// career's first 60 days: FESTIVAL at day 13 00:00 and MAIN at day 34 15:00, both at "RiverLine".
+		const std::vector<ss::life::Mark> Seams = S.Marks(0.0, 60.0 * FestNetDay);
+		const bool SeamsTwo = Seams.size() == 2 && Seams[0].Kind == fest::MarkFestival && Seams[0].At == FestNetAt(13) && Seams[0].Where == "RiverLine" &&
+			Seams[1].Kind == fest::MarkFestMain && Seams[1].At == FestNetAt(34, 15 * 60) && Seams[1].Where == "RiverLine";
+		const bool NoFeign = SeamsTwo && !FestNetMark(First, fest::MarkFestival, FestNetAt(Feign->FirstDay), "FEIGN 2026 opens");
+		bool Account = false;
+		for (const ss::site::Account& A : S.Life.Sites.Accounts)
+		{
+			Account = Account || A.Site == net::SiteId::Ignite;
+		}
+		S.LobbyMinutes = FestNetAt(Feign->FirstDay - fest::kAnnounceDays) - FestNetAt(net::NightOneDay);
+		const std::vector<ss::life::Mark> Later = S.Marks(S.WorldMinutes(), S.WorldMinutes() + 60.0 * FestNetDay);
+		const bool FeignTwo = FestNetMark(Later, fest::MarkFestival, FestNetAt(Feign->FirstDay), "FEIGN 2026 opens") && FestNetMark(Later, fest::MarkFestMain, Feign->MainStart, "FEIGN 2026 Main Event");
+		Session = RcopTwo && NoFeign && !Account && FeignTwo ? std::string()
+			: std::string(RcopTwo ? "" : " RCOP 2026's two missing on Night One") + (NoFeign ? "" : " FEIGN marked on Night One, or not exactly RCOP 2026's two in days 0-60 (" + std::to_string(Seams.size()) + ")") + (Account ? " an Ignite account" : "") +
+				(FeignTwo ? "" : " FEIGN 2026's two missing on day " + std::to_string(net::DayOf(S.WorldMinutes())));
+	}
+	Expect(Session.empty(), "FestMarks: the session's wall sees RCOP 2026's FESTIVAL (day 13 00:00) and MAIN (day 34) on Night One, and FEIGN 2026's two from day 26 with no Ignite account:" + Session);
+}
+
+/** The news items on N at Now titled Title. */
+std::vector<ss::net::NewsItem> FestNetTitled(const ss::net::Network& N, double Now, const std::string& Title)
+{
+	std::vector<ss::net::NewsItem> Out;
+	for (const ss::net::NewsItem& It : N.News(Now, ss::net::HeroStats(), 1000000))
+	{
+		if (It.Title == Title)
+		{
+			Out.push_back(It);
+		}
+	}
+	return Out;
+}
+
+/** A festival's {Festival} in its News posts: the edition's name without its year (§2.11's PENNANT I sample). */
+std::string FestNetBrandName(const ss::fest::Festival& F)
+{
+	const std::string Tail = " " + std::to_string(F.Year);
+	return F.Name.size() > Tail.size() && F.Name.compare(F.Name.size() - Tail.size(), Tail.size(), Tail) == 0 ? F.Name.substr(0, F.Name.size() - Tail.size()) : F.Name;
+}
+
+/** Text ends with Tail. */
+bool FestNetEndsWith(const std::string& Text, const std::string& Tail)
+{
+	return Text.size() >= Tail.size() && Text.compare(Text.size() - Tail.size(), Tail.size(), Tail) == 0;
+}
+
+/** Whole dollars, grouped ("$281,100"). */
+std::string FestNetDollars(ss::Chips Cents)
+{
+	return "$" + ss::Grouped(static_cast<int64_t>(std::llround(static_cast<double>(Cents) / 100.0)));
+}
+
+/** §2.9.2, §2.11, §2.15.1 FestNews (F-net's half; a Mini win's head:fest:title is F-world's FestHeadline), on fresh networks with no
+ *  world (a rival's launch is its LaunchDay): every edition to 2028 posts one announcement at T-30 10:00 on its host's page (a rival's
+ *  never before its launch: FEIGN I's on day 28, its launch day, at 10:00), "<Brand> is coming to <Site>", none a minute before,
+ *  RiverLine's in the ":rl" form ("is back on"); RCOP 2026 posts none and keeps its two scripted posts; the first-festival line only
+ *  on each rival's first festival (FEIGN I, WRIT I), never on a championship; a championship's announcement carries its site's
+ *  sentence (PENNANT I's body equals §2.11's sample word for word); opening night at FirstDay 09:00 (GRIT's nights form with its two
+ *  show times); the rivals' "a week out" post never names a festival; and a rival's record posts are exactly the instances fest::
+ *  RecordOf says set a record (the "ever" line only when Ever), every 2026-2027 rival edition walked. Planted: the record post without
+ *  RecordOf; "It's {Site}'s first festival." appended to PENNANT I's announcement. */
+void FestNewsNet()
+{
+	namespace fest = ss::fest;
+	namespace net = ss::net;
+	const net::Network Ig(net::Def(net::SiteId::Ignite));
+	const net::Network Rit(net::Def(net::SiteId::RunItTwice));
+	const net::Network Rl;
+	auto NetOf = [&](net::SiteId S) -> const net::Network& { return S == net::SiteId::Ignite ? Ig : S == net::SiteId::RunItTwice ? Rit : Rl; };
+	const std::vector<fest::Festival>& All = fest::All();
+	// Each rival's first festival in a world that opened it on its LaunchDay.
+	std::map<int, const fest::Festival*> FirstOf;
+	for (const fest::Festival& F : All)
+	{
+		if (F.Site != net::SiteId::RiverLine && F.FirstDay >= net::Def(F.Site).LaunchDay && !FirstOf.count(static_cast<int>(F.Site)))
+		{
+			FirstOf[static_cast<int>(F.Site)] = &F;
+		}
+	}
+	std::string Bad;
+	std::string Pennant1, Reign1, GritOpen;
+	int Announced = 0, Opened = 0, Firsts = 0, Champs = 0;
+	for (const fest::Festival& F : All)
+	{
+		if (F.Year > 2028)
+		{
+			continue;
+		}
+		const net::Network& N = NetOf(F.Site);
+		const net::SeriesInfo* Sr = N.FindSeries(F.SeriesId);
+		const net::EventTemplate* Main = N.FindTemplate(F.MainId);
+		if (!Sr || !Main)
+		{
+			Bad += "; " + F.Name + " not on its network";
+			continue;
+		}
+		const bool Home = F.Site == net::SiteId::RiverLine;
+		const std::string Brand = FestNetBrandName(F);
+		const std::string Site = net::Def(F.Site).Name;
+		const int Days = F.LastDay - F.FirstDay + 1;
+		if (F.SeriesId != "rcop")
+		{
+			const double At = std::max(FestNetAt(F.FirstDay - fest::kAnnounceDays, 600), Home ? FestNetAt(F.FirstDay - fest::kAnnounceDays, 600) : FestNetAt(net::Def(F.Site).LaunchDay, 600));
+			const std::string Title = Brand + " is coming to " + Site;
+			const std::vector<net::NewsItem> Got = FestNetTitled(N, At, Title);
+			const bool Early = !FestNetTitled(N, At - 1.0, Title).empty();
+			const std::string Body = Got.size() == 1 ? Got[0].Body : std::string();
+			const std::string Lead = Home ? Brand + " is back on " + ss::fest::DateInSentence(F.FirstDay, net::DayOf(At)) + ": " : Brand + " opens on " + ss::fest::DateInSentence(F.FirstDay, net::DayOf(At)) + ": ";
+			const bool First = Body.find("first festival") != std::string::npos;
+			const bool WantFirst = !Home && FirstOf[static_cast<int>(F.Site)] == &F && !fest::IsChampionship(F.Which);
+			const std::string ChampLead = F.Site == net::SiteId::Ignite ? " Main Events at " : " It's the club's championship: Main Events at ";
+			const bool Champ = Body.find(ChampLead) != std::string::npos;
+			const bool WantChamp = !Home && fest::IsChampionship(F.Which);
+			const bool Ok = Got.size() == 1 && Got[0].At == At && !Early && Got[0].Tag == "FESTIVAL" && Got[0].Kind == net::NewsKind::Series && Body.rfind(Lead, 0) == 0 &&
+				First == WantFirst && Champ == WantChamp && (!WantFirst || FestNetEndsWith(Body, " It's " + Site + "'s first festival."));
+			if (!Ok && Bad.size() < 600)
+			{
+				Bad += "; " + F.Name + " announcement at " + FestNetDate(net::DayOf(At)) + ": " + std::to_string(Got.size()) + " post(s)" + (Early ? ", one a minute early" : "") + " \"" + Body + "\"";
+			}
+			Announced += Got.size() == 1 ? 1 : 0;
+			Firsts += First ? 1 : 0;
+			Champs += Champ ? 1 : 0;
+			Pennant1 = F.SeriesId == "ignite.pennant27" ? Body : Pennant1;
+			Reign1 = F.SeriesId == "runittwice.reign27" ? Body : Reign1;
+		}
+		// Opening night.
+		const double Open = FestNetAt(F.FirstDay, 540);
+		const std::string OpenTitle = Brand + " opens tonight";
+		const std::vector<net::NewsItem> Got = FestNetTitled(N, Open, OpenTitle);
+		const bool Early = !FestNetTitled(N, Open - 1.0, OpenTitle).empty();
+		const std::string Body = Got.size() == 1 ? Got[0].Body : std::string();
+		const std::string Want = F.Which == fest::Brand::Grit ? "Night 1 of " + std::to_string(Days) + ". Two shows a night, at "
+			: "Day 1 of " + std::to_string(Days) + ". " + std::to_string(Sr->Events) + " events, " + FestNetDollars(Sr->GtdCents) + " guaranteed. The Main Event is on " +
+				ss::fest::DateInSentence(F.MainDay, F.FirstDay) + ".";
+		const bool OpenOk = Got.size() == 1 && Got[0].At == Open && !Early && Got[0].Tag == "FESTIVAL" && (F.Which == fest::Brand::Grit ? Body.rfind(Want, 0) == 0 : Body == Want);
+		if (!OpenOk && Bad.size() < 600)
+		{
+			Bad += "; " + F.Name + " opening night: " + std::to_string(Got.size()) + " post(s)" + (Early ? ", one a minute early" : "") + " \"" + Body + "\"";
+		}
+		Opened += Got.size() == 1 ? 1 : 0;
+		GritOpen = F.SeriesId == "runittwice.grit27" ? Body : GritOpen;
+		// A week out: the rivals' series post never names a festival (it was announced at T-30).
+		if (!Home)
+		{
+			for (const net::NewsItem& It : N.News(FestNetAt(F.FirstDay - 7, 600), net::HeroStats(), 1000000))
+			{
+				if (It.Title.rfind(F.Name + " starts", 0) == 0 && Bad.size() < 600)
+				{
+					Bad += "; " + F.Name + " a week out: \"" + It.Title + "\"";
+				}
+			}
+		}
+	}
+	Expect(Bad.empty() && Firsts == 2 && Champs == 4 && Announced > 20 && Opened > 20,
+		"FestNews: one announcement an edition at T-30 10:00 (a rival's never before its launch), RiverLine's \"is back on\", the first-festival line on FEIGN I and WRIT I only (" + std::to_string(Firsts) +
+			"), a championship's sentence on PENNANT and REIGN (" + std::to_string(Champs) + "), opening night at 09:00, no festival a week out (" + std::to_string(Announced) + " announced, " +
+			std::to_string(Opened) + " opened)" + Bad);
+	Expect(Pennant1 == "PENNANT opens on Mar 30: 39 events, $281,100 guaranteed, and a $215 Main Event with $10,000 added. Main Events at $2.20, $22 and $215 close it. Satellites start at $1.10.",
+		"FestNews: PENNANT I's announcement equals §2.11's sample (\"" + Pennant1 + "\")");
+	Expect(Reign1.find(" It's the club's championship: Main Events at ") != std::string::npos && Reign1.find("first festival") == std::string::npos && Reign1.find(", and satellites from $") != std::string::npos,
+		"FestNews: REIGN I's announcement carries RunItTwice's championship sentence and no first-festival line (\"" + Reign1 + "\")");
+	Expect(GritOpen.rfind("Night 1 of ", 0) == 0 && GritOpen.find(". Two shows a night, at 7 PM and 10 PM.") != std::string::npos, "FestNews: GRIT 2027's opening night names its two shows (\"" + GritOpen + "\")");
+	// RCOP 2026 keeps its two scripted posts and has no announcement; its opening night is §2.2.2's computed guarantee.
+	{
+		std::string Got;
+		bool Schedule = false, Raised = false, Announce = false;
+		for (const net::NewsItem& It : Rl.News(FestNetAt(12, 23 * 60), net::HeroStats(), 1000000))
+		{
+			Schedule = Schedule || It.Title == "RCOP 2026: the schedule";
+			Raised = Raised || It.Title == "RCOP Main Event guarantee raised to $25M";
+			Announce = Announce || (It.Tag == "FESTIVAL" && It.Title.find("RCOP") != std::string::npos);
+		}
+		const std::vector<net::NewsItem> Open = FestNetTitled(Rl, FestNetAt(13, 9 * 60), "RCOP opens tonight");
+		Got = Open.size() == 1 ? Open[0].Body : std::to_string(Open.size()) + " posts";
+		Expect(Schedule && Raised && !Announce && Got == "Day 1 of 22. 154 events, $78,203,400 guaranteed. The Main Event is on Nov 8.",
+			"FestNews: RCOP 2026 keeps its two scripted posts, posts no announcement, and opens on day 13 at 09:00 (\"" + Got + "\")");
+	}
+	// Records: on every 2026-2027 rival edition, the record posts are exactly the instances RecordOf names.
+	int Instances = 0, Posts = 0, Ever = 0, Year = 0;
+	std::string RecBad;
+	for (const fest::Festival& F : All)
+	{
+		if (F.Site == net::SiteId::RiverLine || F.Year > 2027)
+		{
+			continue;
+		}
+		const net::Network& N = NetOf(F.Site);
+		const std::string Site = net::Def(F.Site).Name;
+		std::set<std::pair<double, std::string>> Want;
+		for (const net::EventInstance& E : N.Window(FestNetAt(F.FirstDay), FestNetAt(F.LastDay + 1)))
+		{
+			if (N.TemplateOf(E).Series != F.SeriesId)
+			{
+				continue;
+			}
+			++Instances;
+			const fest::FieldRecord R = fest::RecordOf(N, E, nullptr);
+			if (R.Ever || R.Year)
+			{
+				Want.insert({E.Start + E.LateReg, N.NameOf(E) + " draws a record field|" + ss::Grouped(E.Entries) +
+					(R.Ever ? " runners: the biggest field " + Site + " has ever had." : " runners: " + Site + "'s biggest field this year.")});
+				Ever += R.Ever ? 1 : 0;
+				Year += R.Ever ? 0 : 1;
+			}
+		}
+		std::set<std::pair<double, std::string>> Seen;
+		for (double Q = FestNetAt(F.FirstDay) + 3.0 * FestNetDay; Q < FestNetAt(F.LastDay + 5); Q += 3.0 * FestNetDay)
+		{
+			for (const net::NewsItem& It : N.News(Q, net::HeroStats(), 1000000))
+			{
+				if (It.Kind == net::NewsKind::Record && It.Tag == "FESTIVAL" && It.At >= FestNetAt(F.FirstDay) && It.At < FestNetAt(F.LastDay + 2))
+				{
+					Seen.insert({It.At, It.Title + "|" + It.Body});
+				}
+			}
+		}
+		Posts += static_cast<int>(Seen.size());
+		if (Seen != Want && RecBad.size() < 400)
+		{
+			RecBad += "; " + F.Name + ": " + std::to_string(Seen.size()) + " posted, " + std::to_string(Want.size()) + " by RecordOf";
+		}
+	}
+	std::printf("festivals: FestNews: %d rival festival instances 2026-2027, %d record posts (%d ever, %d this year)\n", Instances, Posts, Ever, Year);
+	Expect(RecBad.empty() && Posts > 0 && Posts < Instances && Ever > 0 && Year > 0,
+		"FestNews: a rival's record posts are exactly the instances fest::RecordOf names, the ever line only when Ever (" + std::to_string(Posts) + " of " + std::to_string(Instances) + ")" + RecBad);
+}
+
+/** One sample's brute force (FestRecordOf): the largest field among Sorted's instances (Window's, start order) that started from
+ *  From up to E's start, E left out. */
+int FestNetBruteMax(const std::vector<ss::net::EventInstance>& Sorted, const ss::net::EventInstance& E, double From)
+{
+	int Most = 0;
+	for (const ss::net::EventInstance& X : Sorted)
+	{
+		if (X.Start > E.Start)
+		{
+			break;
+		}
+		Most = X.Start >= From && X.Id != E.Id ? std::max(Most, X.Entries) : Most;
+	}
+	return Most;
+}
+
+/** §2.4.5, §2.14, §2.15.1 FestRecordOf, on fresh rival networks with no world (the launch is the LaunchDay): planted, a field that
+ *  beats its year but not Ignite's first Big Top reads Year true, Ever false: since v1.6 PENNANT 2027's General Admission (2,600
+ *  planned) sets 2027's best before Ignite's second Big Top, so FEIGN 2027's Big Top reads neither (printed) and the case is planted on
+ *  2027's first mega, General Admission, between 2027's best before it and FEIGN 2026's Big Top (§2.4.5's v1.6 note); a 2028 instance planted
+ *  between the best of its last 365 days and the best ever reads Ever false; a brute force over Window from the launch agrees with
+ *  RecordOf on 200 sampled instances (100 a rival, 2026-2028, festival and plain); RiverLine claims none. The budget (§2.14,
+ *  RecordOf <= 80 ms once a session per rival, in Prewarm): FillDayMax's walk to day 730 a rival is timed and printed, and the cost
+ *  at day 0 (Ignite opens on day 28); asserted under SS_PERF=1 only. Planted: a 365-day window. */
+void FestRecordOfNet()
+{
+	namespace fest = ss::fest;
+	namespace net = ss::net;
+	std::string Bad;
+	int Sampled = 0, SampleEver = 0, SampleYear = 0;
+	std::string Budget;
+	bool PlantedYear = false, Planted365 = false;
+	std::string PlantNote;
+	for (const net::SiteId S : {net::SiteId::Ignite, net::SiteId::RunItTwice})
+	{
+		const auto T0 = std::chrono::steady_clock::now();
+		const net::Network N(net::Def(S));
+		const auto T1 = std::chrono::steady_clock::now();
+		N.Prewarm(FestNetAt(0));
+		const auto T2 = std::chrono::steady_clock::now();
+		N.Prewarm(FestNetAt(730));
+		const auto T3 = std::chrono::steady_clock::now();
+		const double Day0 = std::chrono::duration<double, std::milli>(T2 - T1).count();
+		const double Walk = std::chrono::duration<double, std::milli>(T3 - T2).count();
+		std::printf("festivals: FestRecordOf: %s FillDayMax in Prewarm: day 0 %.3f ms, the walk to day 730 %.1f ms (budget 80 ms; the network built in %.0f ms)\n", net::Def(S).Name.c_str(), Day0, Walk,
+			std::chrono::duration<double, std::milli>(T1 - T0).count());
+		Budget += " " + std::string(net::Def(S).Name) + " " + std::to_string(Walk) + " ms";
+		if (std::getenv("SS_PERF"))
+		{
+			Expect(Walk <= 80.0 && Day0 <= 1.0, "FestRecordOf: RecordOf's day maxima cost <= 80 ms a rival to day 730 in Prewarm and nothing at day 0 (" + std::string(net::Def(S).Name) + ": " +
+				std::to_string(Walk) + " ms, " + std::to_string(Day0) + " ms)");
+		}
+		const double Launch = FestNetAt(net::Def(S).LaunchDay);
+		const std::vector<net::EventInstance> Sorted = N.Window(Launch, FestNetAt(ss::world::DayOn(2029, 1, 1)));
+		auto Brute = [&](const net::EventInstance& E) {
+			fest::FieldRecord R;
+			const double Jan = std::max(Launch, FestNetAt(ss::world::DayOn(ss::world::YearOf(net::DayOf(E.Start)), 1, 1)));
+			R.Ever = E.Entries > FestNetBruteMax(Sorted, E, Launch);
+			R.Year = E.Entries > FestNetBruteMax(Sorted, E, Jan);
+			return R;
+		};
+		// 200 samples: 60 festival and 40 plain instances a rival, by stride over 2026-2028.
+		std::vector<size_t> Fest, Plain;
+		for (size_t I = 0; I < Sorted.size(); ++I)
+		{
+			const std::string& Series = N.TemplateOf(Sorted[I]).Series;
+			(fest::FestivalOf(Series) ? Fest : Plain).push_back(I);
+		}
+		std::vector<size_t> Picks;
+		for (size_t K = 0; K < 60 && !Fest.empty(); ++K)
+		{
+			Picks.push_back(Fest[K * Fest.size() / 60]);
+		}
+		for (size_t K = 0; K < 40 && !Plain.empty(); ++K)
+		{
+			Picks.push_back(Plain[K * Plain.size() / 40]);
+		}
+		for (size_t I : Picks)
+		{
+			const net::EventInstance& E = Sorted[I];
+			const fest::FieldRecord Got = fest::RecordOf(N, E, nullptr);
+			const fest::FieldRecord Want = Brute(E);
+			++Sampled;
+			SampleEver += Got.Ever ? 1 : 0;
+			SampleYear += Got.Year ? 1 : 0;
+			if ((Got.Ever != Want.Ever || Got.Year != Want.Year) && Bad.size() < 400)
+			{
+				Bad += "; " + N.NameOf(E) + " on " + FestNetDate(net::DayOf(E.Start)) + " (" + std::to_string(E.Entries) + "): RecordOf " + (Got.Ever ? "ever" : "-") + "/" + (Got.Year ? "year" : "-") +
+					", brute " + (Want.Ever ? "ever" : "-") + "/" + (Want.Year ? "year" : "-");
+			}
+		}
+		if (S != net::SiteId::Ignite)
+		{
+			continue;
+		}
+		// Planted (§2.15.1, v1.6): a field between its year's best and Ignite's first Big Top (FEIGN 2026's), on 2027's first mega.
+		auto Find = [&](const char* Series, const char* Name) -> const net::EventInstance* {
+			for (const net::EventInstance& E : Sorted)
+			{
+				if (N.TemplateOf(E).Series == Series && N.TemplateOf(E).Name.find(Name) != std::string::npos)
+				{
+					return &E;
+				}
+			}
+			return nullptr;
+		};
+		const net::EventInstance* Top1 = Find("ignite.feign26", "The Big Top");
+		const net::EventInstance* Top2 = Find("ignite.feign27", "The Big Top");
+		const net::EventInstance* Mega = Find("ignite.pennant27", "General Admission");
+		if (Top1 && Top2 && Mega)
+		{
+			const fest::FieldRecord Second = fest::RecordOf(N, *Top2, nullptr);
+			const int YearMax = FestNetBruteMax(Sorted, *Mega, FestNetAt(ss::world::DayOn(2027, 1, 1)));
+			const int EverMax = FestNetBruteMax(Sorted, *Mega, Launch);
+			net::EventInstance P = *Mega;
+			P.Entries = YearMax + 1;
+			const fest::FieldRecord R = fest::RecordOf(N, P, nullptr);
+			PlantedYear = YearMax + 1 <= Top1->Entries && Top1->Entries <= EverMax && R.Year && !R.Ever;
+			PlantNote += " FEIGN 2026's Big Top " + std::to_string(Top1->Entries) + ", FEIGN 2027's " + std::to_string(Top2->Entries) + " (" + (Second.Ever ? "ever" : "-") + "/" +
+				(Second.Year ? "year" : "-") + ", 2027's best before it " + std::to_string(FestNetBruteMax(Sorted, *Top2, FestNetAt(ss::world::DayOn(2027, 1, 1)))) + "); PENNANT 2027's General Admission " +
+				std::to_string(Mega->Entries) + " planted at " + std::to_string(P.Entries) + " (2027's best before it " + std::to_string(YearMax) + ", the best ever " + std::to_string(EverMax) + "): " +
+				(R.Ever ? "ever" : "-") + "/" + (R.Year ? "year" : "-") + ";";
+		}
+		// Planted: the latest 2028 festival instance whose best ever was set more than 365 days before it.
+		for (auto It = Sorted.rbegin(); It != Sorted.rend() && !Planted365; ++It)
+		{
+			const net::EventInstance& E = *It;
+			if (!fest::FestivalOf(N.TemplateOf(E).Series))
+			{
+				continue;
+			}
+			const int EverMax = FestNetBruteMax(Sorted, E, Launch);
+			const int Last365 = FestNetBruteMax(Sorted, E, E.Start - 365.0 * FestNetDay);
+			if (Last365 + 1 >= EverMax)
+			{
+				continue;
+			}
+			net::EventInstance P = E;
+			P.Entries = Last365 + 1;
+			const fest::FieldRecord R = fest::RecordOf(N, P, nullptr);
+			Planted365 = !R.Ever;
+			PlantNote += " " + N.NameOf(E) + " on " + FestNetDate(net::DayOf(E.Start)) + " planted at " + std::to_string(P.Entries) + " (its last 365 days' best " + std::to_string(Last365) +
+				", the best ever " + std::to_string(EverMax) + "): " + (R.Ever ? "ever" : "-") + ";";
+			break;
+		}
+	}
+	std::printf("festivals: FestRecordOf: %d samples (%d ever, %d this year);%s\n", Sampled, SampleEver, SampleYear, PlantNote.c_str());
+	Expect(Sampled == 200 && Bad.empty() && SampleEver > 0 && SampleYear > SampleEver, "FestRecordOf: RecordOf agrees with a brute force over Window from the launch on 200 sampled instances" + Bad);
+	Expect(PlantedYear, "FestRecordOf: a field that beats its year but not Ignite's first Big Top (planted on PENNANT 2027's General Admission) reads Year true, Ever false;" + PlantNote);
+	Expect(Planted365, "FestRecordOf: a 2028 field above its last 365 days' best but below the best ever is no \"ever\";" + PlantNote);
+	// RiverLine never claims a record (§2.4.5).
+	{
+		const net::Network& Rl = net::Shared();
+		const fest::Festival* Rcop = fest::FestivalOf("rcop");
+		net::EventInstance Main;
+		const bool Found = Rcop && Rl.Next(Rcop->MainId, FestNetAt(Rcop->MainDay), Main);
+		Main.Entries = 10000000;
+		const fest::FieldRecord R = Found ? fest::RecordOf(Rl, Main, nullptr) : fest::FieldRecord();
+		Expect(Found && !R.Ever && !R.Year, "FestRecordOf: RiverLine claims no record (RCOP 2026's Main at 10,000,000 runners)");
+	}
+	(void)Budget;
+}
+
 /** fest::All()'s first build, timed once the networks exist (SPEC §2.14: built once, <= 1 ms; asserted under SS_PERF=1 only). */
 void FestNetAllBudget()
 {
@@ -4097,6 +4571,19 @@ void SegNet()
 	if (Only("FestSeats"))
 	{
 		FestSeatsNet();
+	}
+	// G1, FN-7: marks, News and the record field.
+	if (Only("FestMarks"))
+	{
+		FestMarksNet();
+	}
+	if (Only("FestNews"))
+	{
+		FestNewsNet();
+	}
+	if (Only("FestRecordOf"))
+	{
+		FestRecordOfNet();
 	}
 	// FN-2a: the rival festivals (FEIGN and GRIT) and the copy.
 	if (Only("FestTemplatesAppended"))

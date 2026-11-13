@@ -45,6 +45,14 @@
 //
 // G1, FN-4b (F-net; SPEC v1.7 §2.11; PLAN_FNET's Corrections item 1): NetSitesFestRoomWords, the six plans' room words for
 // fest::Inventory (G/Festival.cpp), read from the plans themselves, so the inventory lists every word a numbered name can draw.
+//
+// G1, FN-7 (F-net; SPEC v1.7 §2.4.5, §2.14; PLAN_FNET §4 FN-7): DayMax, fest::RecordOf's day maxima. FillDayMax walks a rival's
+// days from its launch (the attached world's or its LaunchDay, the earlier) to DayOf(Now): each day's runs as Instances lists them
+// (G/Network.cpp's NetDaySlots, the one schedule both read) through Make, never DayCache, keeping the largest field. A day's
+// largest field is the schedule's (Make is a pure function of the template and the start), so the walk is the same in every world
+// and is kept across calls: a walked day holds at least 8 (Make's floor), 0 marks a day not walked yet, and each call walks only
+// those. Prewarm walks to the clock; DayMaxOn walks lazily up to a later day it is asked for (a session past its load). RiverLine
+// returns at once: its festival news never claims a record (§2.4.5).
 #include "ShortStack/Game/Network.h"
 
 #include "SitesDetail.h"
@@ -62,8 +70,21 @@ namespace ss
 {
 namespace net
 {
+namespace network_detail
+{
+// G/Network.cpp's (F-net's; FN-7): every run scheduled on Day as (template index, start), the list Instances makes and caches.
+std::vector<std::pair<int, double>> NetDaySlots(const std::vector<EventTemplate>& Temps, const std::vector<int>& Recurring, const std::map<int, std::vector<int>>& OnDay,
+	const std::map<std::string, int>& TempIndex, SiteId Site, int Day);
+} // namespace network_detail
 namespace netsites_detail
 {
+/** G1, FN-7 (§2.4.5): the first day DayMax walks on rival N, its launch day in the attached world or its LaunchDay, the earlier (a
+ *  forced or a later launch keeps every day a RecordOf can read walked); never below day 0. */
+int NetSitesFestDayMaxFrom(const Network& N)
+{
+	return std::max(0, std::min(N.Definition().LaunchDay, DayOf(NetSitesLaunch(N))));
+}
+
 // G/NetworkSites.cpp's helpers (both files F-net's; external linkage, declared here as SPEC §2.3.1 reuses them).
 Chips NetSitesCents(double Dollars);
 int NetSitesAt(int H, int M);
@@ -635,15 +656,50 @@ void Network::BuildFestivals()
 	}
 }
 
-void Network::FillDayMax(double /*Now*/) const
+void Network::FillDayMax(double Now) const
 {
+	// G1, FN-7 (§2.4.5): rival sites only, from the launch to DayOf(Now), each day not walked yet through Make (never DayCache).
+	if (NetSite == SiteId::RiverLine || Rules->Key.empty())
+	{
+		return;
+	}
+	const int To = DayOf(Now);
+	const int From = netsites_detail::NetSitesFestDayMaxFrom(*this);
+	if (To < From)
+	{
+		return;
+	}
+	if (DayMax.size() <= static_cast<size_t>(To))
+	{
+		DayMax.resize(static_cast<size_t>(To) + 1, 0);
+	}
+	for (int Day = From; Day <= To; ++Day)
+	{
+		int& Most = DayMax[static_cast<size_t>(Day)];
+		if (Most != 0)
+		{
+			continue;
+		}
+		for (const std::pair<int, double>& Slot : network_detail::NetDaySlots(Temps, Recurring, OnDay, TempIndex, NetSite, Day))
+		{
+			Most = std::max(Most, Make(Slot.first, Slot.second).Entries);
+		}
+	}
 }
 
-int Network::DayMaxOn(int /*Day*/) const
+int Network::DayMaxOn(int Day) const
 {
-	// H0 (PLAN_FNET P1): 0, as if FillDayMax had walked nothing. Nothing calls it before F-net's fest::RecordOf, which lands with
-	// this body (DayMax's entry for Day) at FN-7.
-	return 0;
+	// G1, FN-7 (PLAN_FNET P1's read): the largest field the schedule starts on Day, walked lazily up to Day when a session has run
+	// past what Prewarm walked; 0 before the launch, on RiverLine and on a site not registered.
+	if (NetSite == SiteId::RiverLine || Rules->Key.empty() || Day < netsites_detail::NetSitesFestDayMaxFrom(*this))
+	{
+		return 0;
+	}
+	if (static_cast<size_t>(Day) >= DayMax.size() || DayMax[static_cast<size_t>(Day)] == 0)
+	{
+		FillDayMax(static_cast<double>(Day) * MinutesPerDay);
+	}
+	return DayMax[static_cast<size_t>(Day)];
 }
 } // namespace net
 } // namespace ss

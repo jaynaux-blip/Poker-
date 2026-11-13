@@ -48,6 +48,15 @@
 // out; every other festival's satellites all seat its Main, so its figure is the plain sum), each one-off's runs on its day and a
 // recurring satellite's (RCOP's step4 and mega-rcop) from Buildup to the Main's start, counted once finished. Worked out per world
 // minute and kept per series under a lock (the hub and a desk worker may both ask), the LastEnd precedent.
+//
+// G1, FN-7 (F-net; SPEC v1.7 §2.9.1, §2.4.5; PLAN_FNET §4 FN-7): Marks and RecordOf. Marks lists every festival from its Announced
+// phase (DayOf(Now) >= FirstDay - 30), on every site and whatever accounts the hero holds: MarkFestival at FirstDay 00:00 ("FEIGN
+// 2026 opens") and MarkFestMain at the Main's start ("FEIGN 2026 Main Event", U22's labels with the edition's name), Where the host
+// site's name, each inside [From, To). RecordOf measures E against every instance its site started from the launch in this world (W's
+// SiteLaunched, else the site's LaunchDay) up to E's start: the launch day from its launch minute and E's own day up to E's start
+// walked through the site's Window (E itself left out), every day between from Network::DayMaxOn (G/NetworkFestival.cpp's walk,
+// filled in Prewarm and lazily after). Ever: E's field beats them all; Year: it beats every one since Jan 1 of E's year. RiverLine
+// never claims a record (§2.4.5). Network::News posts the record line only when RecordOf says so.
 #include "ShortStack/Game/Festival.h"
 
 #include "ShortStack/Game/Life.h"
@@ -457,9 +466,51 @@ Phase PhaseOf(const Festival& F, double WorldMin, const world::World* W)
 	return WorldMin < End ? Phase::Closing : WorldMin < End + kAfterglowDays * Day ? Phase::Afterglow : Phase::Off;
 }
 
-FieldRecord RecordOf(const net::Network& /*N*/, const net::EventInstance& /*E*/, const world::World* /*W*/)
+FieldRecord RecordOf(const net::Network& N, const net::EventInstance& E, const world::World* W)
 {
-	return FieldRecord();
+	// §2.4.5 (FN-7): a rival's festival news only; RiverLine has a past the network doesn't keep.
+	FieldRecord Rec;
+	if (N.Site() == net::SiteId::RiverLine)
+	{
+		return Rec;
+	}
+	const double Said = W ? W->SiteLaunched(N.Site()) : -1.0;
+	const double Launch = Said >= 0.0 ? Said : fest_detail::FestCalMinute(N.Definition().LaunchDay);
+	if (E.Start < Launch)
+	{
+		return Rec;
+	}
+	const int LaunchDay = net::DayOf(Launch);
+	const int Day = net::DayOf(E.Start);
+	const int JanFirst = world::DayOn(world::YearOf(Day), 1, 1);
+	int Ever = 0, Year = 0;
+	auto Count = [&](int On, int Entries) {
+		Ever = std::max(Ever, Entries);
+		Year = On >= JanFirst ? std::max(Year, Entries) : Year;
+	};
+	// The launch day from the lobby's opening minute (it can open mid-day), when it comes before E's day.
+	if (LaunchDay < Day)
+	{
+		for (const net::EventInstance& X : N.Window(Launch, fest_detail::FestCalMinute(LaunchDay + 1) - 0.5))
+		{
+			Count(LaunchDay, X.Entries);
+		}
+	}
+	for (int D = LaunchDay + 1; D < Day; ++D)
+	{
+		Count(D, N.DayMaxOn(D));
+	}
+	// E's own day, every instance that started up to E's start but E.
+	for (const net::EventInstance& X : N.Window(std::max(Launch, fest_detail::FestCalMinute(Day)), E.Start + 0.5))
+	{
+		if (X.Id != E.Id)
+		{
+			Count(Day, X.Entries);
+		}
+	}
+	Rec.Ever = E.Entries > Ever;
+	Rec.Year = E.Entries > Year;
+	return Rec;
 }
 
 int SeatsWon(const Festival& F, double Now)
@@ -487,9 +538,35 @@ double RacePoints(int Place, int Entries, Chips BuyInCents, PayoutCurve Curve)
 	return Place <= PaidPlaces(Entries, Curve) ? net::Points(Place, Entries, BuyInCents) : 0.0;
 }
 
-std::vector<life::Mark> Marks(double /*From*/, double /*To*/, double /*Now*/)
+std::vector<life::Mark> Marks(double From, double To, double Now)
 {
-	return {};
+	// §2.9.1 (FN-7): every festival from its Announced phase, account or not; All() is in FirstDay order, so the first edition not
+	// yet Announced ends the walk.
+	std::vector<life::Mark> Out;
+	const int Today = net::DayOf(Now);
+	auto Add = [&Out, From, To](double At, int Kind, const std::string& Label, const std::string& Where) {
+		if (At >= From && At < To)
+		{
+			life::Mark M;
+			M.At = At;
+			M.Kind = Kind;
+			M.Label = Label;
+			M.Where = Where;
+			Out.push_back(M);
+		}
+	};
+	for (const Festival& F : All())
+	{
+		if (Today < F.FirstDay - kAnnounceDays)
+		{
+			break;
+		}
+		const std::string Where = net::Def(F.Site).Name;
+		Add(fest_detail::FestCalMinute(F.FirstDay), MarkFestival, F.Name + " opens", Where);
+		Add(F.MainStart, MarkFestMain, F.Name + " Main Event", Where);
+	}
+	std::stable_sort(Out.begin(), Out.end(), [](const life::Mark& A, const life::Mark& B) { return A.At < B.At; });
+	return Out;
 }
 
 const Festival* PassFestival(net::SiteId Site, double World)
