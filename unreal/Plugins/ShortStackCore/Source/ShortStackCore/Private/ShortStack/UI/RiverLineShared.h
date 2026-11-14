@@ -1291,6 +1291,12 @@ Skin SitesSkin(net::SiteId Site, double WorldMin);
  * as the six-argument SitesButton above, which draws in RiverLine's.
  */
 bool SitesButton(Ui& UI, Canvas& Cv, const std::string& Id, const Rect& R, const std::string& Label, const ButtonOpts& Opts, const SiteLook& L);
+/**
+ * PIE G2 P4: a button's label and the line under it set inside R as SitesButton draws them in look L. What fits is left exactly as
+ * it was; else the label takes Shorter (if given), then both shrink together to a floor, then a line that still doesn't fit ends
+ * in an ellipsis. SitesTwoPress' buttons and RegisterBlock's disabled states (g1p-rit) go through it.
+ */
+void SitesFitButton(const Canvas& C, const SiteLook& L, const Rect& R, std::string& Label, ButtonOpts& O, const char* Shorter);
 /** The pointer an overlay held back from what draws under it (SitesBlockUnder), handed back by SitesUnblock. */
 struct SitesBlocked
 {
