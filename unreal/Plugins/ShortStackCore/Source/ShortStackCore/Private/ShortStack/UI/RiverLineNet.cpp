@@ -35,6 +35,8 @@ using namespace rlnet_detail;
 namespace rlfest_detail
 {
 const fest::Festival* FestNextEdition(const fest::Festival& F); // below (FH-3a): the brand's next edition
+// UI/RiverLineFestival.cpp (g1p-hub): a line under a disabled register button set out for a status cell W wide (its size; the lines).
+float HubLockLines(const Canvas& C, const std::string& Lock, float W, std::vector<std::string>& Lines);
 } // namespace rlfest_detail
 
 namespace rlnet_detail
@@ -2138,7 +2140,44 @@ void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState&
 		O.Kind = ButtonKind::Secondary;
 		O.Enabled = false;
 		O.Sub = Sub;
+		// g1p-rit (the lead's PIE re-check of the polish pass: WRIT's hub row cut "RunItTwice balance $0.00 · top up in the Cashier" at its
+		// cell's edge): the label and the line inside the button by SitesTwoPress' own rule (SitesFitButton, P4), so a state that fits
+		// draws exactly as before and a longer one shrinks label and line together. Where even P4's floor would end the line in an
+		// ellipsis (a rival's balance line in a GRIT row's 300 cell), the label keeps its size and the line stands whole on two lines
+		// under it, set out as the hub sets out a career lock line there (HubLockLines; HubLockedCell's layout), broken at the line's
+		// own " · " where it has one (the dot dropped at the break).
+		std::string Text = Label;
+		ButtonOpts Fit = O;
+		rlsites_detail::SitesFitButton(*C, Look, R, Text, Fit, nullptr);
+		if (Fit.Sub == O.Sub)
+		{
+			rlsites_detail::SitesButton(UI, *C, "regx", R, Text, Fit, Look);
+			return;
+		}
+		std::vector<std::string> Lines;
+		float Size = rlfest_detail::HubLockLines(*C, Sub, R.W, Lines);
+		const size_t Dot = Sub.find(" \xC2\xB7 ");
+		if (Lines.size() == 2 && Dot != std::string::npos)
+		{
+			// HubLockLines' two-line sizes: the largest up to 10.5 (9 at least) at which both fit the cell less 10 a side.
+			Lines = {Sub.substr(0, Dot), Sub.substr(Dot + 4)};
+			Size = 10.5f;
+			while (Size > 9.0f && std::max(C->Measure(Lines[0], Size, 600, true), C->Measure(Lines[1], Size, 600, true)) > R.W - 20.0f)
+			{
+				Size = std::max(9.0f, Size - 0.25f);
+			}
+		}
+		O.Sub = " "; // holds the label where it stands over a line
 		rlsites_detail::SitesButton(UI, *C, "regx", R, Label, O, Look);
+		const float A0 = C->GetAlpha();
+		C->SetAlpha(A0 * 0.35f);
+		const float Cy = R.Y + R.H / 2.0f;
+		for (size_t I = 0; I < Lines.size(); ++I)
+		{
+			const float Base = Lines.size() == 1 ? Cy + O.Size * 0.85f : Cy + 8.5f + 11.0f * static_cast<float>(I);
+			C->Text(Lines[I], R.X + R.W / 2.0f, Base, Ts(Size, 600, pal::Ink, Align::Center, Baseline::Alphabetic, true));
+		}
+		C->SetAlpha(A0);
 	};
 	if (S.IsPlaying(E.Id))
 	{
