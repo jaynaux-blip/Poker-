@@ -55,6 +55,11 @@
 // keyed, and a reload plays nothing). The hub's Details on RunItTwice holds the Main through rlrit_detail::RitHoldSelection (stream B's
 // FestYourStrip N-3 half, now through the hub's fsmain); X1 reads "Player of the Series" (the belt's honour, U20/U21) as a title, not a
 // count of people.
+// G1 polish (key g1p-hub, after G1's PIE, durable/update4/g1/PIE_G1_NOTES.md): FestLockFits (every lock line fits its status cell,
+// measured and drawn on three hosts' pages), FestBannerStats (every edition's banner stats whole on its host), FestMainCardFits (every
+// Main's guarantee whole, Details clear of it), FestWaveClear (RCOP's waves behind the header text at every phase), FestRollPillClear
+// (no pill reaches CHAMPIONS' prize), the champion card's close line on the card, a finished satellite's winner line, RunItTwice's
+// codes on the hub's rows (no "#"), and FestLockedMain in 2027. Every check at both UI scales; each one's plant in its comment.
 #include "UiSeg.h"
 
 #include "CopyLint.h"
@@ -108,7 +113,18 @@ void FestMomentHold(RiverLine& RL);
 void HubPinsDraw(RiverLine& RL, Canvas& Cv, double Now);
 // FH-7: the edition the hub drew in its live frame at Now ("" none) and whether that frame was the broadcast (FestHubBudgets).
 std::string HubShownKey(const RiverLine& RL, double Now, bool& Broadcast);
+// g1p-hub: a lock line set out for a status cell (its size; the line or lines), the banner's stat columns, the Main card's Details and
+// guarantee room, and the boxes RCOP's waves passed behind in the last banner.
+float HubLockLines(const Canvas& C, const std::string& Lock, float W, std::vector<std::string>& Lines);
+void HubStatLayout(const Canvas& C, net::SiteId Site, const std::pair<std::string, std::string> (&Stats)[4], float (&X)[4], float (&MaxW)[4]);
+void HubMainBoxes(net::SiteId Site, bool Broadcast, Rect& Details, float& GtdRoom);
+std::vector<Rect> HubWaveClear(const RiverLine& RL);
 } // namespace rlfest_detail
+namespace festart
+{
+// UI/FestivalArt.cpp (g1p-hub): RCOP's wave lines for a minute's progress and a drop, broken around Clear (canvas units).
+std::vector<std::vector<Vec2>> FestWaveLines(const FestivalLook& L, const Rect& R, float Day, float Drop, const std::vector<Rect>& Clear, std::vector<int>& Kinds);
+} // namespace festart
 namespace rlignite_detail
 {
 // UI/RiverLineIgnite.cpp (stream B, FH-3b): chip 10's face on Ignite's floor (FestHubBudgets' floor-chip row).
@@ -502,6 +518,8 @@ void FestHonestLinesHubs(const DrawList& NightOne, const DrawList& Buildup)
 	}
 }
 
+void FestWaveClearHubs(HubsLaptop& P, const ss::fest::Festival& Rcop); // g1p-hub, below
+
 /** FH-1a's pages: fest_hub_rl_announced (Night One: RCOP 2026 Announced, the countdown over OPENS IN) and fest_hub_rl_buildup (day 6,
  *  RCOP's Buildup: FirstDay 13 - 7). */
 void FestHubPagesRiverLine()
@@ -533,6 +551,13 @@ void FestHubPagesRiverLine()
 	// brands F-net has built so far each in theirs, the rest empty until their rows land.
 	ui_test::Expect(ui_test::DrewRun(NightOne, "RCOP") && ui_test::DrewRun(NightOne, "Oct 18"), "THE FESTIVAL YEAR: RCOP 2026's cell, its Short and its opening date");
 	ui_test::Expect(ui_test::TextAt(NightOne, "RCOP") > 84.0f && ui_test::TextAt(NightOne, "RCOP") < 124.0f, "THE FESTIVAL YEAR: RCOP's cell sits in the strip's rect");
+	// g1p-hub: RCOP's waves behind the header, through a day of the Buildup (this laptop's pages are all drawn above).
+	if (Rcop)
+	{
+		const auto G0 = std::chrono::steady_clock::now();
+		FestWaveClearHubs(P, *Rcop);
+		std::printf("  g1p-hub: FestWaveClear %.2f s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - G0).count());
+	}
 }
 
 /** The settings the clause half needs: a running deal that plays only on Ignite, so a RiverLine registration strikes (update 2 §5.7,
@@ -1593,6 +1618,559 @@ void HubsBudgetState(HubsLaptop& P, const ss::fest::Festival& F, ss::fest::Phase
 	HubsDrawn(Tag, P);
 }
 
+// ------------------------------------------------------------------ G1 polish (key g1p-hub): the hub's small fixes after G1's PIE
+
+/** g1p-hub: a text run's box in canvas units (the canvas keeps its 1600 x 1000 units at every pixel scale; the scale changes how finely
+ *  it tessellates and the size the host measures at): the measured width, the ascent above the baseline and a quarter of its size below. */
+struct HubsBox
+{
+	float X0 = 0.0f, Y0 = 0.0f, X1 = 0.0f, Y1 = 0.0f;
+};
+
+HubsBox HubsRunBox(const ss::ui::DrawCmd& Cmd)
+{
+	ui_test::TableMeasurer M;
+	const float W = M.Width(Cmd.Text.Text, Cmd.Text.Face, Cmd.Text.SizePx);
+	return {Cmd.Text.X, Cmd.Text.Y, Cmd.Text.X + W, Cmd.Text.BaselineY + 0.25f * Cmd.Text.SizePx};
+}
+
+/** g1p-hub: Network::Joinable's lock lines as the three sites write them for a career with nothing unlocked (Unlocks 0), read off the
+ *  first templates of each site with a run after day 13 (the schedules' own events: bounties, satellites, six-max, Omaha, Flip & Run,
+ *  big fields). */
+std::vector<std::string> HubsLockLines()
+{
+	static std::vector<std::string> Read;
+	if (!Read.empty())
+	{
+		return Read;
+	}
+	std::set<std::string> Seen;
+	for (const ss::net::SiteId Site : {ss::net::SiteId::RiverLine, ss::net::SiteId::Ignite, ss::net::SiteId::RunItTwice})
+	{
+		const ss::net::Network& Net = ss::net::Site(Site);
+		int Tried = 0;
+		for (const ss::net::EventTemplate& T : Net.Templates())
+		{
+			ss::net::EventInstance E;
+			if (Tried >= 300 || !Net.Next(T.Id, 13.0 * ss::net::MinutesPerDay, E))
+			{
+				continue;
+			}
+			++Tried;
+			std::string Lock;
+			if (!Net.Joinable(E, &Lock, 0) && !Lock.empty())
+			{
+				Seen.insert(Lock);
+			}
+		}
+	}
+	Read.assign(Seen.begin(), Seen.end());
+	return Read;
+}
+
+/** FestLockFits (g1p-hub item 1; PIE s03_hub_race, s08_grit_hub: "Cash in any tournament to unlock bounty even…"): every lock line set
+ *  out by rlfest_detail::HubLockLines for a row's status cell (360 wide; a GRIT row's 300) at both UI scales fits the cell less its
+ *  margins (10 a side) whole, every word kept, at 9 or more; the 360 cell holds each on one line (11.5 or more, the row's look). Plant:
+ *  the set-out returning RegisterBlock's one line at 14.4 (the old cell) fails on the bounty, big-field and Omaha lines. */
+void FestLockFits(const std::vector<std::string>& Locks)
+{
+	namespace rf = ss::ui::rlfest_detail;
+	bool Bounty = false, Sat = false, Six = false;
+	for (const std::string& Lk : Locks)
+	{
+		Bounty = Bounty || Lk.find("bounty") != std::string::npos;
+		Sat = Sat || Lk.find("satellites") != std::string::npos;
+		Six = Six || Lk.find("six-max") != std::string::npos;
+	}
+	ui_test::Expect(Bounty && Sat && Six, ("FestLockFits: the sites' lock lines are read off their templates (" + std::to_string(Locks.size()) + " lines, the bounty, satellite and six-max ones among them)").c_str());
+	int Bad = 0;
+	std::string Worst;
+	for (const float Scale : {1.0f, 1.5f})
+	{
+		ui_test::TableMeasurer M;
+		DrawList L;
+		ss::ui::Canvas C(L, M, RiverLine::Width, RiverLine::Height, Scale);
+		for (const std::string& Lock : Locks)
+		{
+			for (const float W : {360.0f, 300.0f})
+			{
+				std::vector<std::string> Lines;
+				const float Size = rf::HubLockLines(C, Lock, W, Lines);
+				bool Fits = Size >= 9.0f && !Lines.empty() && Lines.size() <= 2 && (W < 360.0f || (Lines.size() == 1 && Size >= 11.5f));
+				std::string Joined;
+				float Widest = 0.0f;
+				for (const std::string& Ln : Lines)
+				{
+					Widest = std::max(Widest, C.Measure(Ln, Size, 600, true));
+					Joined += (Joined.empty() ? "" : " ") + Ln;
+				}
+				Fits = Fits && Widest <= W - 20.0f && Joined == Lock;
+				if (!Fits)
+				{
+					++Bad;
+					char Buf[200];
+					std::snprintf(Buf, sizeof(Buf), " \"%s\" in %.0f at x%.1f: %zu line(s) at %.2f, %.1f wide;", Lock.c_str(), static_cast<double>(W), static_cast<double>(Scale), Lines.size(),
+						static_cast<double>(Size), static_cast<double>(Widest));
+					Worst += Buf;
+				}
+			}
+		}
+	}
+	ui_test::Expect(Bad == 0, ("FestLockFits: every lock line fits a status cell (360 on one line, a GRIT row's 300) at both scales" + (Worst.empty() ? std::string() : ":" + Worst)).c_str());
+}
+
+/** FestLockFits' drawn half (g1p-hub item 1): on a hub frame at Scale, every run that is a lock line or a part of one standing centred in
+ *  a row's status cell (Rows: the host's rows rect; a single row's cell is 360 wide, a GRIT row's 300, both ending 12 inside the rows'
+ *  right edge) lies inside that cell less 4 a side. Returns the runs seen (Bad counts the ones that spill). */
+int HubsLockCells(const DrawList& L, float Scale, const ss::ui::Rect& Rows, const std::vector<std::string>& Locks, int& Bad, std::string& Where)
+{
+	int Seen = 0;
+	const float Right = Rows.X + Rows.W - 12.0f;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type != ss::ui::DrawCmd::Kind::Text || Cmd.Text.Text.size() < 8)
+		{
+			continue;
+		}
+		bool IsLock = false;
+		for (const std::string& Lk : Locks)
+		{
+			IsLock = IsLock || Lk.find(Cmd.Text.Text) != std::string::npos;
+		}
+		const HubsBox B = HubsRunBox(Cmd);
+		const float Mid = (B.X0 + B.X1) / 2.0f;
+		const float Cell = std::fabs(Mid - (Right - 180.0f)) < 2.0f ? 360.0f : std::fabs(Mid - (Right - 150.0f)) < 2.0f ? 300.0f : 0.0f;
+		if (!IsLock || Cell <= 0.0f || B.Y0 < Rows.Y || B.Y1 > Rows.Y + Rows.H + 20.0f)
+		{
+			continue;
+		}
+		++Seen;
+		if (B.X0 < Right - Cell + 4.0f || B.X1 > Right - 4.0f)
+		{
+			++Bad;
+			char Buf[200];
+			std::snprintf(Buf, sizeof(Buf), " \"%s\" %.1f-%.1f in a %.0f cell at x%.1f;", Cmd.Text.Text.c_str(), static_cast<double>(B.X0), static_cast<double>(B.X1), static_cast<double>(Cell),
+				static_cast<double>(Scale));
+			Where += Buf;
+		}
+	}
+	return Seen;
+}
+
+/** FestLockFits on a hub page P just drew (One, its 1.0 list) and the same frame at 1.5. Want: the page must show a lock line. */
+void FestLockFitsPage(HubsLaptop& P, const DrawList& One, const std::string& Page, const ss::ui::Rect& Rows, const std::vector<std::string>& Locks, bool Want)
+{
+	int Bad = 0;
+	std::string Where;
+	const int Seen = HubsLockCells(One, 1.0f, Rows, Locks, Bad, Where) + HubsLockCells(P.Frame(1.5f), 1.5f, Rows, Locks, Bad, Where);
+	std::printf("  FestLockFits: %s shows %d lock-line run(s) in its status cells at the two scales\n", Page.c_str(), Seen);
+	ui_test::Expect((!Want || Seen > 0) && Bad == 0, ("FestLockFits: " + Page + "'s lock lines stand inside their status cells at both scales" + (Where.empty() ? std::string() : ":" + Where)).c_str());
+}
+
+/** FestBannerStats (g1p-hub item 2; PIE s08_writ_hub, s08_grit_hub: "Jan 22 – Jan …", "May 12 – Ma…"): for every edition of the 2026-2028
+ *  calendars on its host, at both UI scales, rlfest_detail::HubStatLayout sets the banner's four stats so every value (24/900) fits its
+ *  room whole (the dates beside the progress field, the progress field before the Main card) and no column's text reaches the next
+ *  one's, for each state the fourth can show: the countdown, every DAY or NIGHT {N} OF {M}, MAIN EVENT TODAY and COMPLETE. Plant: the
+ *  columns kept StatGap apart (the old layout) fails on RunItTwice's dates. */
+void FestBannerStats()
+{
+	namespace rf = ss::ui::rlfest_detail;
+	namespace rn = ss::ui::rlnet_detail;
+	int Editions = 0, Sets = 0, Bad = 0;
+	std::string Worst;
+	for (const float Scale : {1.0f, 1.5f})
+	{
+		ui_test::TableMeasurer M;
+		DrawList L;
+		ss::ui::Canvas C(L, M, RiverLine::Width, RiverLine::Height, Scale);
+		for (const ss::fest::Festival& F : ss::fest::All())
+		{
+			const ss::net::SeriesInfo* Sr = F.Year >= 2026 && F.Year <= 2028 ? ss::net::Site(F.Site).FindSeries(F.SeriesId) : nullptr;
+			if (!Sr)
+			{
+				continue;
+			}
+			Editions += Scale == 1.0f ? 1 : 0;
+			const int Days = F.LastDay - F.FirstDay + 1;
+			std::vector<std::pair<std::string, std::string>> States = {{"99D 23H 59M", "OPENS IN"}, {"MAIN EVENT TODAY", "PROGRESS"}, {"COMPLETE", "PROGRESS"}};
+			for (int N = 1; N <= Days; ++N)
+			{
+				States.push_back({std::string(F.Which == ss::fest::Brand::Grit ? "NIGHT " : "DAY ") + std::to_string(N) + " OF " + std::to_string(Days), "PROGRESS"});
+			}
+			const std::string Dates = ss::net::DateLabel(F.FirstDay) + " \xE2\x80\x93 " + ss::net::DateLabel(F.LastDay);
+			for (const std::pair<std::string, std::string>& St : States)
+			{
+				const std::pair<std::string, std::string> Stats[4] = {{rn::NetMoney(Sr->GtdCents), "GUARANTEED"}, {std::to_string(Sr->Events), "EVENTS"}, {Dates, "DATES"}, St};
+				float X[4];
+				float Room[4];
+				rf::HubStatLayout(C, F.Site, Stats, X, Room);
+				++Sets;
+				for (int I = 0; I < 4; ++I)
+				{
+					const float Vw = C.Measure(Stats[I].first, 24.0f, 900);
+					const float Prev = I == 0 ? 0.0f : std::max(C.Measure(Stats[I - 1].first, 24.0f, 900), C.Measure(Stats[I - 1].second, 11.0f, 800));
+					if (Vw > Room[I] || (I > 0 && X[I] < X[I - 1] + Prev + 12.0f))
+					{
+						++Bad;
+						if (Worst.size() < 400)
+						{
+							char Buf[200];
+							std::snprintf(Buf, sizeof(Buf), " %s \"%s\" %.1f in %.1f at x%.1f;", F.Name.c_str(), Stats[I].first.c_str(), static_cast<double>(Vw), static_cast<double>(Room[I]),
+								static_cast<double>(Scale));
+							Worst += Buf;
+						}
+					}
+				}
+			}
+		}
+	}
+	std::printf("  FestBannerStats: %d editions of 2026-2028, %d stat sets at the two scales\n", Editions, Sets);
+	ui_test::Expect(Editions >= 20 && Bad == 0, ("FestBannerStats: every edition's banner stats stand whole on its host at both scales, the dates beside the progress field" +
+												 (Worst.empty() ? std::string() : ":" + Worst)).c_str());
+}
+
+/** A NetSpaced line's width (the glyphs' advances and the tracking between them), as the Main card's MAIN EVENT line draws it. */
+float HubsSpacedWidth(const ss::ui::Canvas& C, const std::string& Str, float Size, int Weight, float Track)
+{
+	float Total = 0.0f;
+	int N = 0;
+	for (size_t I = 0; I < Str.size();)
+	{
+		const unsigned char B = static_cast<unsigned char>(Str[I]);
+		const size_t Len = B >= 0xF0 ? 4 : B >= 0xE0 ? 3 : B >= 0xC0 ? 2 : 1;
+		Total += C.Measure(Str.substr(I, Len), Size, Weight) + Track;
+		I += Len;
+		++N;
+	}
+	return N > 0 ? Total - Track : 0.0f;
+}
+
+/** FestMainCardFits (g1p-hub item 3; PIE s04_mainday_hub: "$25,000,000 GUARANT…"): for every edition's Main of the 2026-2028 calendars
+ *  with a guarantee, on its host, at both UI scales, "{Gtd} GUARANTEED" (22/900) fits the room rlfest_detail::HubMainBoxes gives it on
+ *  Main Event Day and on every other day, and on Main Event Day the MAIN EVENT line (10.5/800, tracked 1.5) ends 8 before Details, which
+ *  stands at its right. Plant: Details beside the guarantee (the old {M.X + M.W - 104, M.Y + 36}, the guarantee's room M.W - 132). */
+void FestMainCardFits()
+{
+	namespace rf = ss::ui::rlfest_detail;
+	namespace rn = ss::ui::rlnet_detail;
+	int Mains = 0, Bad = 0;
+	std::string Worst;
+	for (const float Scale : {1.0f, 1.5f})
+	{
+		ui_test::TableMeasurer M;
+		DrawList L;
+		ss::ui::Canvas C(L, M, RiverLine::Width, RiverLine::Height, Scale);
+		for (const ss::fest::Festival& F : ss::fest::All())
+		{
+			const ss::net::Network& Net = ss::net::Site(F.Site);
+			ss::net::EventInstance Main;
+			if (F.Year < 2026 || F.Year > 2028 || F.MainId.empty() || !Net.Next(F.MainId, static_cast<double>(F.FirstDay) * ss::net::MinutesPerDay, Main) || Net.TemplateOf(Main).GtdCents <= 0)
+			{
+				continue;
+			}
+			Mains += Scale == 1.0f ? 1 : 0;
+			const ss::ui::Rect Card = F.Site == ss::net::SiteId::RunItTwice ? ss::ui::Rect{1170.0f, 160.0f, 390.0f, 164.0f} : ss::ui::Rect{1166.0f, 152.0f, 386.0f, 164.0f};
+			const std::string Gtd = rn::NetMoney(Net.TemplateOf(Main).GtdCents) + " GUARANTEED";
+			const int Day = ss::net::DayOf(Main.Start);
+			const std::string Head = "MAIN EVENT \xC2\xB7 " + rn::NetUpper(ss::net::WeekdayName(Day)) + " " + rn::NetUpper(ss::net::DateLabel(Day)) + " \xC2\xB7 " + ss::net::TimeLabel(Main.Start);
+			for (const bool Broadcast : {false, true})
+			{
+				ss::ui::Rect Details;
+				float Room = 0.0f;
+				rf::HubMainBoxes(F.Site, Broadcast, Details, Room);
+				const float Gw = C.Measure(Gtd, 22.0f, 900);
+				const float Hw = HubsSpacedWidth(C, Head, 10.5f, 800, 1.5f);
+				const bool Fits = Gw <= Room && Card.X + 18.0f + Gw <= Card.X + Card.W - 18.0f &&
+					(!Broadcast || (Card.X + 18.0f + Hw + 8.0f <= Details.X && Details.Y + Details.H <= Card.Y + 58.0f - 22.0f * 0.8f));
+				if (!Fits)
+				{
+					++Bad;
+					char Buf[200];
+					std::snprintf(Buf, sizeof(Buf), " %s%s: \"%s\" %.1f in %.1f, the MAIN EVENT line %.1f, Details at %.1f (x%.1f);", F.Name.c_str(), Broadcast ? " (Main Event Day)" : "", Gtd.c_str(),
+						static_cast<double>(Gw), static_cast<double>(Room), static_cast<double>(Hw), static_cast<double>(Details.X), static_cast<double>(Scale));
+					Worst += Buf;
+				}
+			}
+		}
+	}
+	std::printf("  FestMainCardFits: %d Mains with a guarantee in 2026-2028\n", Mains);
+	ui_test::Expect(Mains >= 20 && Bad == 0, ("FestMainCardFits: every Main's guarantee fits its card whole, Details clear of it and of the MAIN EVENT line, at both scales" +
+											  (Worst.empty() ? std::string() : ":" + Worst)).c_str());
+}
+
+/** FestMainCardFits' drawn half: the Main Event Day page One (and the frame at 1.5) draws Gtd whole and Details' label clear of it. */
+void FestMainCardPage(HubsLaptop& P, const DrawList& One, const std::string& Gtd)
+{
+	int Whole = 0;
+	bool Clear = true;
+	const DrawList Half = P.Frame(1.5f);
+	for (int K = 0; K < 2; ++K)
+	{
+		const DrawList& L = K == 0 ? One : Half;
+		HubsBox G;
+		HubsBox D;
+		bool HasG = false, HasD = false;
+		for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+		{
+			if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == Gtd)
+			{
+				G = HubsRunBox(Cmd);
+				HasG = true;
+			}
+			if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == "Details" && Cmd.Text.X > 1166.0f)
+			{
+				D = HubsRunBox(Cmd);
+				HasD = true;
+			}
+		}
+		Whole += HasG ? 1 : 0;
+		Clear = Clear && HasD && (!HasG || D.X0 > G.X1 + 4.0f || D.Y1 < G.Y0 || D.Y0 > G.Y1);
+	}
+	ui_test::Expect(Whole == 2 && Clear, ("FestMainCardFits: fest_hub_rl_mainday draws \"" + Gtd + "\" whole and Details clear of it, at both scales").c_str());
+}
+
+/** The silver wave line's core vertices: Crest Silver at its 0.5 (FestBannerWave's K = 0 line). */
+bool HubsSilver(const ss::ui::Color& C, uint32_t Silver)
+{
+	const ss::ui::Color W = ss::ui::Hex(Silver, 0.5f);
+	return std::fabs(C.R - W.R) < 0.01f && std::fabs(C.G - W.G) < 0.01f && std::fabs(C.B - W.B) < 0.01f && C.A > 0.3f && C.A < 0.6f;
+}
+
+/** FestWaveClear (g1p-hub item 5; PIE s03_hub_race, s09b_rcop2027_hub: the line through "The RiverLine Championship of Online Poker…"):
+ *  RCOP's waves pass behind the hub's header text at every phase of their motion. Drawn: the RCOP hub at 48 times through a world day
+ *  (every half hour of the waves' climb) and six frames through the rise after an open, each at both UI scales: no core vertex of the
+ *  silver line lies in the box of any header text run (the banner's runs right of the crest: the word-mark's absent, it is a run of its
+ *  own face only where no look draws it). Geometry: with the boxes the hub handed the banner (rlfest_detail::HubWaveClear), every minute
+ *  of the day and eleven drops through the rise, festart::FestWaveLines leaves every wave line's pieces out of every box, the waves still
+ *  drawn (pieces at every phase), the boxes covering every drawn header run, and without the boxes the lines would cross them. Plant:
+ *  the hub drawing festart::FestBanner (no boxes) fails the drawn half. */
+void FestWaveClearHubs(HubsLaptop& P, const ss::fest::Festival& Rcop)
+{
+	namespace rf = ss::ui::rlfest_detail;
+	const ss::ui::festart::FestivalLook& Look = ss::ui::festart::LookOf(Rcop.Which);
+	const ss::ui::Rect Banner{24.0f, 132.0f, 1552.0f, 204.0f};
+	int Frames = 0, Runs = 0, Hits = 0, Uncovered = 0;
+	std::string Where;
+	auto Check = [&](const std::string& Tag) {
+		for (const float Scale : {1.0f, 1.5f})
+		{
+			const DrawList L = P.Frame(Scale);
+			++Frames;
+			const std::vector<ss::ui::Rect> Clear = rf::HubWaveClear(P.RL);
+			std::vector<HubsBox> Boxes;
+			for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+			{
+				const float Base = Cmd.Text.BaselineY;
+				if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.X >= 205.0f && Base > Banner.Y && Base < Banner.Y + Banner.H && !Cmd.Text.Text.empty() && Cmd.Text.Text != " ")
+				{
+					const HubsBox B = HubsRunBox(Cmd);
+					Boxes.push_back(B);
+					bool Covered = false;
+					for (const ss::ui::Rect& R : Clear)
+					{
+						Covered = Covered || (B.X0 >= R.X - 0.5f && B.X1 <= R.X + R.W + 0.5f && B.Y0 >= R.Y - 0.5f && B.Y1 <= R.Y + R.H + 0.5f);
+					}
+					Uncovered += Covered ? 0 : 1;
+					if (!Covered && Where.size() < 300)
+					{
+						Where += " uncovered \"" + Cmd.Text.Text + "\" (" + Tag + ");";
+					}
+				}
+			}
+			Runs += static_cast<int>(Boxes.size());
+			for (const ss::ui::Vertex& V : L.Vertices)
+			{
+				if (!HubsSilver(V.Col, Look.Accent2))
+				{
+					continue;
+				}
+				const float X = V.X;
+				const float Y = V.Y;
+				for (const HubsBox& B : Boxes)
+				{
+					if (X > B.X0 && X < B.X1 && Y > B.Y0 && Y < B.Y1)
+					{
+						++Hits;
+						if (Where.size() < 300)
+						{
+							char Buf[120];
+							std::snprintf(Buf, sizeof(Buf), " a wave vertex at (%.0f, %.0f) %s x%.1f;", static_cast<double>(X), static_cast<double>(Y), Tag.c_str(), static_cast<double>(Scale));
+							Where += Buf;
+						}
+					}
+				}
+			}
+		}
+	};
+	const double Start = P.S.WorldMinutes();
+	for (int K = 0; K < 48; ++K)
+	{
+		P.At(Start + 30.0 * static_cast<double>(K));
+		Check("minute " + std::to_string(static_cast<int>(std::fmod(Start + 30.0 * K, ss::net::MinutesPerDay))));
+	}
+	// The rise: a new open, then frames 0.3 s apart from its first (the waves drawn live, Drop units lower).
+	P.RL.ShowSeries(std::string(), P.Now);
+	P.RL.OpenPage(RiverLine::Page::Series, P.Now);
+	for (int K = 0; K < 6; ++K)
+	{
+		Check("the rise at " + std::to_string(K * 3) + "/10 s");
+		P.Now += 0.3;
+	}
+	// The geometry, every minute and through the rise, with the boxes of the last frame.
+	const std::vector<ss::ui::Rect> Clear = rf::HubWaveClear(P.RL);
+	int Inside = 0, Empty = 0, Crossing = 0;
+	std::vector<int> Kinds;
+	for (int Minute = 0; Minute <= 1440; Minute += 1)
+	{
+		for (int D = 0; D <= 10; ++D)
+		{
+			if (D > 0 && Minute % 60 != 0)
+			{
+				continue;
+			}
+			const float Day = static_cast<float>(Minute) / 1440.0f;
+			const float Drop = Banner.H * 0.6f * static_cast<float>(D) / 10.0f;
+			const std::vector<std::vector<ss::ui::Vec2>> Lines = ss::ui::festart::FestWaveLines(Look, Banner, Day, Drop, Clear, Kinds);
+			Empty += Lines.empty() ? 1 : 0;
+			for (const std::vector<ss::ui::Vec2>& Ln : Lines)
+			{
+				for (size_t I = 0; I + 1 < Ln.size(); ++I)
+				{
+					const ss::ui::Vec2 Mid{(Ln[I].X + Ln[I + 1].X) * 0.5f + Banner.X, (Ln[I].Y + Ln[I + 1].Y) * 0.5f + Banner.Y};
+					for (const ss::ui::Rect& R : Clear)
+					{
+						Inside += Mid.X > R.X + 0.5f && Mid.X < R.X + R.W - 0.5f && Mid.Y > R.Y + 0.5f && Mid.Y < R.Y + R.H - 0.5f ? 1 : 0;
+					}
+				}
+			}
+			for (const std::vector<ss::ui::Vec2>& Ln : ss::ui::festart::FestWaveLines(Look, Banner, Day, Drop, {}, Kinds))
+			{
+				for (const ss::ui::Vec2& Pt : Ln)
+				{
+					for (const ss::ui::Rect& R : Clear)
+					{
+						Crossing += Pt.X + Banner.X > R.X && Pt.X + Banner.X < R.X + R.W && Pt.Y + Banner.Y > R.Y && Pt.Y + Banner.Y < R.Y + R.H ? 1 : 0;
+					}
+				}
+			}
+		}
+	}
+	std::printf("  FestWaveClear: %d frames, %d header runs, %zu boxes; the geometry: %d pieces' segments inside a box, %d empty phases, %d crossings without the boxes\n", Frames, Runs,
+		Clear.size(), Inside, Empty, Crossing);
+	ui_test::Expect(Frames == 108 && Runs > 0 && Hits == 0 && Uncovered == 0, ("FestWaveClear: RCOP's silver wave passes behind every header run of the hub at 48 times of day and through the rise, at both scales" +
+																			  (Where.empty() ? std::string() : ":" + Where)).c_str());
+	ui_test::Expect(!Clear.empty() && Inside == 0 && Empty == 0 && Crossing > 0, "FestWaveClear: at every minute of the climb and every drop of the rise the wave lines stay out of the header's boxes, and only the boxes keep them out");
+}
+
+/** FestRollPillClear (g1p-hub item 4; PIE s09b_rcop2027_hub: DEFENDING CHAMPION over the prize): CHAMPIONS on RCOP 2027's day 395, where
+ *  RCOP 2026's Main champion defends, at both UI scales: on every roll line, every run right of the name column ends 6 (a pill's padding)
+ *  before the line's figure begins, and the champion's name is drawn. Plant: the name's MaxW without HubNameTail's room. */
+void FestRollPillClear(HubsLaptop& P, const std::string& Champion)
+{
+	P.OpenHub();
+	const DrawList One = HubsTab(P, 1);
+	const DrawList Half = P.Frame(1.5f);
+	int Lines = 0, Bad = 0;
+	std::string Where;
+	for (int K = 0; K < 2; ++K)
+	{
+		const DrawList& L = K == 0 ? One : Half;
+		std::map<int, std::vector<HubsBox>> ByLine;
+		std::map<int, std::vector<std::string>> Texts;
+		for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+		{
+			const float X = Cmd.Text.X;
+			const float Base = Cmd.Text.BaselineY;
+			if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && X >= 1044.0f + 22.0f + 138.0f && Base > 392.0f && Base < 950.0f)
+			{
+				ByLine[static_cast<int>(std::lround(Base))].push_back(HubsRunBox(Cmd));
+				Texts[static_cast<int>(std::lround(Base))].push_back(Cmd.Text.Text);
+			}
+		}
+		for (const auto& Line : ByLine)
+		{
+			if (Line.second.size() < 2)
+			{
+				continue;
+			}
+			++Lines;
+			size_t Fig = 0;
+			for (size_t I = 1; I < Line.second.size(); ++I)
+			{
+				Fig = Line.second[I].X1 > Line.second[Fig].X1 ? I : Fig;
+			}
+			for (size_t I = 0; I < Line.second.size(); ++I)
+			{
+				if (I != Fig && Line.second[I].X1 + 6.0f > Line.second[Fig].X0)
+				{
+					++Bad;
+					Where += " \"" + Texts[Line.first][I] + "\" reaches \"" + Texts[Line.first][Fig] + "\" (x" + (K == 0 ? "1.0" : "1.5") + ");";
+				}
+			}
+		}
+	}
+	ui_test::Expect(Lines >= 4 && Bad == 0 && ui_test::Drew(One, Champion), ("FestRollPillClear: on RCOP 2027's CHAMPIONS no name, glyph or pill reaches a line's prize at either scale (" +
+																			 std::to_string(Lines) + " lines" + (Where.empty() ? std::string(")") : "):" + Where)).c_str());
+}
+
+/** FestLockedMain in every year (g1p-hub item 14; §2.2.3, §2.16 step 3; PIE s09b: RCOP 2027's Step 1 row had no lock line): on RCOP
+ *  2027's day 395, the rows scrolled to their end, every RCOP ladder row in view (step1-4, mega-rcop) shows RCOP 2027's Main lock line
+ *  and U31 beside its button. Plant: the seat followed by template (FindTemplate: "rcop-main" names RCOP 2026's Main, past by then). */
+void FestLockedMainRows2027(HubsLaptop& P, const ss::fest::Festival& Rcop27)
+{
+	const std::string Lock = HubsMainLock(P.S, Rcop27);
+	const std::string U31 = "A seat won here waits in your wallet until big fields open.";
+	P.OpenHub();
+	for (int K = 0; K < 12; ++K)
+	{
+		P.RL.UI.Ptr.Active = true;
+		P.RL.UI.Ptr.X = 300.0f;
+		P.RL.UI.Ptr.Y = 600.0f;
+		P.RL.UI.Ptr.Wheel = 1.0f;
+		P.Frame(1.0f);
+	}
+	P.Away();
+	const DrawList L = P.Frame(1.0f);
+	const std::vector<std::string> Rows = P.RL.ListedEvents();
+	const ss::net::Network& Net = ss::net::Site(Rcop27.Site);
+	const int First = std::max(0, static_cast<int>(Rows.size()) - 7);
+	int Ladder = 0, Kept = 0;
+	for (int I = First; I < static_cast<int>(Rows.size()); ++I)
+	{
+		const std::string Id = Net.TemplateOf(HubsInstance(Net, Rows[static_cast<size_t>(I)])).Id;
+		if (Id != "step1" && Id != "step2" && Id != "step3" && Id != "step4" && Id != "mega-rcop")
+		{
+			continue;
+		}
+		++Ladder;
+		const float RowY = 408.0f + 72.0f * static_cast<float>(I - First);
+		Kept += HubsRunBetween(L, Lock, RowY, RowY + 66.0f).first >= 0.0f && HubsRunBetween(L, U31, RowY, RowY + 66.0f).first >= 0.0f ? 1 : 0;
+	}
+	ui_test::Expect(!Lock.empty() && Ladder > 0 && Kept == Ladder,
+		("FestLockedMain (every year): RCOP 2027's ladder rows keep its Main's lock line and U31 on day 395 (" + std::to_string(Kept) + " of " + std::to_string(Ladder) + " rows, \"" + Lock + "\")").c_str());
+}
+
+/** g1p-hub item 13 (§2.16 step 8, N-2; PIE s08_writ_hub: "#5" pills): the runs in the rows rect Rows of L: Hash, the "#{n}" pills;
+ *  Coded, the names that start with "{Short} {nn}: " (RunItTwice's code with no "#"). */
+void HubsRowCodes(const DrawList& L, const ss::ui::Rect& Rows, const std::string& Short, int& Hash, int& Coded)
+{
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		const std::string& T = Cmd.Text.Text;
+		const float X = Cmd.Text.X;
+		const float Base = Cmd.Text.BaselineY;
+		if (Cmd.Type != ss::ui::DrawCmd::Kind::Text || X < Rows.X || X > Rows.X + Rows.W || Base < Rows.Y || Base > Rows.Y + Rows.H)
+		{
+			continue;
+		}
+		Hash += T.size() >= 2 && T[0] == '#' && std::isdigit(static_cast<unsigned char>(T[1])) ? 1 : 0;
+		Coded += T.size() > Short.size() + 5 && T.compare(0, Short.size() + 1, Short + " ") == 0 && std::isdigit(static_cast<unsigned char>(T[Short.size() + 1])) &&
+				std::isdigit(static_cast<unsigned char>(T[Short.size() + 2])) && T.compare(Short.size() + 3, 2, ": ") == 0
+			? 1
+			: 0;
+	}
+}
+
 void FestCareerIgnite()
 {
 	HubsLaptop P("u4-fest-career-a");
@@ -1609,6 +2187,13 @@ void FestCareerIgnite()
 	HubsTo(P, 56, 18.0);
 	HubsOpenHost(P, ss::net::SiteId::Ignite);
 	const DrawList L = HubsPage("fest_hub_ig_live", P);
+	{
+		// g1p-hub: FestLockFits on Ignite's rows; Ignite keeps its "#n" pills (item 13 is RunItTwice's alone).
+		FestLockFitsPage(P, L, "fest_hub_ig_live", {24.0f, 408.0f, 1000.0f, 462.0f}, HubsLockLines(), false);
+		int Hash = 0, Coded = 0;
+		HubsRowCodes(L, {24.0f, 408.0f, 1000.0f, 462.0f}, "FEIGN", Hash, Coded);
+		ui_test::Expect(Hash > 0, ("g1p-hub: Ignite's FEIGN rows keep their \"#n\" pills (" + std::to_string(Hash) + ")").c_str());
+	}
 	ui_test::Expect(ui_test::DrewRun(L, "FEIGN") && ui_test::DrewRun(L, "DAY 1 OF 10"), "fest_hub_ig_live: Ignite's SERIES page is FEIGN 2026's hub on its first day (DAY 1 OF 10)");
 	ui_test::Expect(ui_test::DrewRun(L, "PLAYER OF THE SERIES"), "fest_hub_ig_live: THE RACE is preselected while Live");
 	ui_test::Expect(HubsRunsIn(L, 24.0f, 870.0f, 1024.0f, 884.0f) == 0, "fest_hub_ig_live: no row text below y 870 (the rows end above Ignite's dock)");
@@ -1916,6 +2501,7 @@ void FestMainDayRcop(HubsLaptop& P, const ss::fest::Festival& Rcop)
 	P.OpenHub();
 	ui_test::Expect(ss::fest::PhaseOf(Rcop, P.S.WorldMinutes(), &P.S.Living()) == ss::fest::Phase::MainDay, "fest_hub_rl_mainday: RCOP 2026 is on its Main day");
 	const DrawList L = HubsPage("fest_hub_rl_mainday", P);
+	FestMainCardPage(P, L, ss::ui::rlnet_detail::NetMoney(ss::net::Site(Rcop.Site).FindTemplate(Rcop.MainId)->GtdCents) + " GUARANTEED");
 	FestMainDayCommon("fest_hub_rl_mainday", L, P, Rcop, Main, 210.0f, 132.0f, 12);
 	const std::string Lock = HubsMainLock(P.S, Rcop);
 	ui_test::Expect(ui_test::DrewRun(L, "REGISTRATIONS") && (Lock.empty() || ui_test::DrewRun(L, Lock)),
@@ -2110,6 +2696,11 @@ void FestCareerRiverLine()
 	const size_t Stung = P.H.Sounds.size();
 	P.OpenHub();
 	const DrawList Live = HubsPage("fest_hub_rl_live", P);
+	const auto G0 = std::chrono::steady_clock::now();
+	const std::vector<std::string> Locks = HubsLockLines();
+	FestLockFits(Locks);
+	std::printf("  g1p-hub: FestLockFits (the lines read and set out) %.2f s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - G0).count());
+	FestLockFitsPage(P, Live, "fest_hub_rl_live", {24.0f, 408.0f, 1000.0f, 504.0f}, Locks, true);
 	const std::string Lock = HubsMainLock(P.S, *Rcop);
 	ui_test::Expect(!Lock.empty() && ui_test::DrewRun(Live, Lock), ("FestLockedMain: RCOP 2026's Main card shows the lock line (\"" + Lock + "\")").c_str());
 	ui_test::Expect(ui_test::DrewRun(Live, "PLAYER OF THE SERIES") && !ui_test::Drew(Live, "No champion yet."), "FestLockedMain: the hub opens on THE RACE while Live, never past it");
@@ -2226,6 +2817,27 @@ void FestCareerRiverLine()
 		const std::string WonText = Won == 1 ? std::string("1 SEAT WON") : std::to_string(Won) + " SEATS WON";
 		ui_test::Expect(ss::fest::PhaseOf(*Writ, P.S.WorldMinutes(), &P.S.Living()) == ss::fest::Phase::Afterglow && ui_test::DrewRun(Done, WonText),
 			("U33: once finished The Summons' row reads \"" + WonText + "\" (read in WRIT's Afterglow)").c_str());
+		// g1p-hub item 9 (PIE s08a_pennant_crown_champions: a satellite's winner with "$0.00"): The Summons' winner won a seat, and no
+		// row prints a $0.00 prize. Item 13 (§2.16 step 8, N-2; PIE s08_writ_hub): WRIT's rows read THE BOARD's codes, "WRIT {nn}: ...",
+		// with no "#n" pill. Both scales. Plants: Money(W.Prize) for a satellite's winner; the "#n" pill and NetShortName on RunItTwice.
+		const DrawList DoneHalf = P.Frame(1.5f);
+		const ss::ui::Rect RitRows{232.0f, 412.0f, 860.0f, 504.0f};
+		int Hash = 0, Coded = 0, Zero = 0, Seat = 0;
+		for (int K = 0; K < 2; ++K)
+		{
+			const DrawList& Ld = K == 0 ? Done : DoneHalf;
+			HubsRowCodes(Ld, RitRows, "WRIT", Hash, Coded);
+			for (const ss::ui::DrawCmd& Cmd : Ld.Cmds)
+			{
+				const bool InRows = Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.X >= RitRows.X && Cmd.Text.BaselineY >= RitRows.Y &&
+					Cmd.Text.BaselineY <= RitRows.Y + RitRows.H;
+				Zero += InRows && Cmd.Text.Text == "$0.00" ? 1 : 0;
+				Seat += InRows && Cmd.Text.Text == "Won a seat" ? 1 : 0;
+			}
+		}
+		ui_test::Expect(Seat == 2 && Zero == 0, ("g1p-hub: The Summons' winner reads \"Won a seat\", no row a $0.00 prize, at both scales (" + std::to_string(Seat) + ", " + std::to_string(Zero) + ")").c_str());
+		ui_test::Expect(Hash == 0 && Coded >= 2, ("g1p-hub: WRIT's rows print THE BOARD's codes (\"WRIT {nn}: ...\") and no \"#n\" pill, at both scales (" + std::to_string(Coded) + " coded, " +
+			std::to_string(Hash) + " pills)").c_str());
 	}
 	// FH-7, FestHubBudgets: GRIT 2027's Buildup on RunItTwice (day 216), drawn.
 	HubsBudgetState(P, *Grit, ss::fest::Phase::Buildup, "rit_buildup (GRIT 2027)");
@@ -2233,6 +2845,19 @@ void FestCareerRiverLine()
 	HubsTo(P, Grit->FirstDay + 1, 18.0);
 	HubsOpenHost(P, ss::net::SiteId::RunItTwice);
 	const DrawList Twice = HubsPage("fest_hub_rit_twice", P);
+	{
+		// g1p-hub item 2 (PIE s08_grit_hub: "May 12 – Ma…"): GRIT's dates whole beside NIGHT 2 OF 12 at both scales; item 13: no "#n"
+		// pill on its rows (a show's codes stand in its runs' column); item 1: its lock lines inside the 300 cells. Plant (item 2): the
+		// stats kept StatGap apart.
+		const std::string Dates = ss::net::DateLabel(Grit->FirstDay) + " \xE2\x80\x93 " + ss::net::DateLabel(Grit->LastDay);
+		const DrawList Half = P.Frame(1.5f);
+		ui_test::Expect(ui_test::DrewRun(Twice, Dates) && ui_test::DrewRun(Half, Dates), ("FestBannerStats: GRIT 2027's banner draws its dates whole, " + Dates + ", at both scales").c_str());
+		int Hash = 0, Coded = 0;
+		HubsRowCodes(Twice, {232.0f, 412.0f, 860.0f, 504.0f}, "GRIT", Hash, Coded);
+		HubsRowCodes(Half, {232.0f, 412.0f, 860.0f, 504.0f}, "GRIT", Hash, Coded);
+		ui_test::Expect(Hash == 0, ("g1p-hub: GRIT's rows carry no \"#n\" pill at either scale (" + std::to_string(Hash) + ")").c_str());
+		FestLockFitsPage(P, Twice, "fest_hub_rit_twice", {232.0f, 412.0f, 860.0f, 504.0f}, HubsLockLines(), false);
+	}
 	FestStripTenPage(Twice, HubsStripRunItTwice, P.S.WorldMinutes());
 	ui_test::Expect(ui_test::DrewRun(Twice, "NIGHT 2 OF 12"), "fest_hub_rit_twice: GRIT's banner counts nights (U2: NIGHT 2 OF 12)");
 	ui_test::Expect(ui_test::DrewRun(Twice, "NIGHT 1") && ui_test::DrewRun(Twice, "NIGHT 12"), "fest_hub_rit_twice: GRIT's day strip reads nights");
@@ -2353,6 +2978,14 @@ void FestCareerRiverLine()
 			("fest_card_defending: " + (N ? N->Name : std::string("?")) + "'s card carries DEFENDING CHAMPION and \"" + Honorific + "\"").c_str());
 		P.RL.ShowPlayer(-1, P.Now);
 		P.Frame(1.0f);
+		// g1p-hub items 4 and 14 (after the card's page; the next open, day 399's, starts afresh).
+		const auto G1 = std::chrono::steady_clock::now();
+		FestRollPillClear(P, N ? N->Name : std::string("?"));
+		if (Rcop27)
+		{
+			FestLockedMainRows2027(P, *Rcop27);
+		}
+		std::printf("  g1p-hub: FestRollPillClear and FestLockedMain (2027) %.2f s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - G1).count());
 	}
 	// FH-5b, U4 (§2.6.3): RCOP 2027's Main Event Day (day 399, 14:30, its field registering): the Main card names RCOP 2026's champion while FieldStoriesOf lists
 	// them in the Main's field (and only then). Plant: the U4 line dropped.
@@ -2429,6 +3062,7 @@ std::string HubsMomentKey(const std::optional<ss::FestMoment>& M)
 struct HubsMoment
 {
 	DrawList Settled;                 // two seconds after its first live frame
+	DrawList Settled15;               // g1p-hub: the same frame at 1.5
 	ss::FestMoment M;                 // the moment as the session handed it
 	long long Vertices = 0, Runs = 0; // the card's cost over the page beneath
 	int Champion = 0, Applause = 0, Bubble = 0;
@@ -2486,6 +3120,7 @@ HubsMoment HubsPlayMoment(HubsLaptop& P, const DrawList& Under, const char* Page
 	P.Now = ui_test::Step(P.S, P.Now, 1.5);
 	From = P.H.Sounds.size();
 	Out.Settled = Page ? HubsPage(Page, P) : P.Frame(1.0f);
+	Out.Settled15 = P.Frame(1.5f);
 	Count(From);
 	const HubsCost K = HubsCostOf(Out.Settled);
 	const HubsCost U = HubsCostOf(Under);
@@ -2554,6 +3189,22 @@ void FestMomentsFeign(HubsLaptop& P, const ss::fest::Festival& Feign)
 		ui_test::Expect(Mo.Still, (std::string("FestPreviewStill (moments): ") + Pages[I] + "'s still is settled, silent, and leaves the moment pending").c_str());
 		ui_test::Expect(Mo.Waited, (std::string("FestOneFrameClicks (moments): a click before 1.6 s closes nothing (") + Pages[I] + ")").c_str());
 		ui_test::Expect(Mo.Closed && Mo.Next.empty(), (std::string(Pages[I]) + ": TAKE A BOW closes the moment").c_str());
+		// g1p-hub item 8 (PIE s07_moment_feign_b, s07_moment_belt: the line over Ignite's FUSE at y 912): U19 stands on the champion card
+		// {500, 170, 600, 580}, under TAKE A BOW (to y 726), at both scales. Plant: the old y 912.
+		int OnCard = 0;
+		for (int K = 0; K < 2; ++K)
+		{
+			const DrawList& Lc = K == 0 ? Mo.Settled : Mo.Settled15;
+			for (const ss::ui::DrawCmd& Cmd : Lc.Cmds)
+			{
+				if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == "Click anywhere to continue.")
+				{
+					const HubsBox B = HubsRunBox(Cmd);
+					OnCard += B.X0 >= 516.0f && B.X1 <= 1084.0f && B.Y0 >= 727.0f && B.Y1 <= 749.0f ? 1 : 0;
+				}
+			}
+		}
+		ui_test::Expect(OnCard == 2, (std::string(Pages[I]) + ": \"Click anywhere to continue.\" stands on the card under TAKE A BOW, clear of Ignite's FUSE and dock, at both scales").c_str());
 		ui_test::Expect(Mo.Vertices <= 10000 && Mo.Runs <= 60, (std::string(Pages[I]) + ": the moment within 10k vertices and 60 runs over the page (\xC2\xA7" "2.8.10)").c_str());
 	}
 	ui_test::Expect(P.S.Life.Sites.Done.count("festbelt:" + Feign.SeriesId) == 0, "R-7: the DEV belt keeps no festbelt: key");
@@ -2879,6 +3530,13 @@ void SegFest()
 	// FH-2: the real calendar in three frames.
 	FestStripTenMeasures();
 	FestLockedMainWallet();
+	// g1p-hub: the banner's stats and the Main card on every edition of 2026-2028 (the drawn halves sit in the careers).
+	{
+		const auto G0 = std::chrono::steady_clock::now();
+		FestBannerStats();
+		FestMainCardFits();
+		std::printf("  g1p-hub: FestBannerStats and FestMainCardFits %.2f s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - G0).count());
+	}
 	FestCareerIgnite();
 	FestCareerRiverLine();
 	// FH-6a: the marks through the keyed path, a third career.

@@ -32,6 +32,10 @@
 // UI/RiverLineSites.cpp dresses the skin and the festival tables; UI/RiverLine.cpp draws the felt mark and REIGN's rail.
 // G1 FL-9 (F-look): FestArtInventory gains U39, the shelf's empty plinth plate "{SHORT} · not yet" (§2.11, §9.2; PLAN_FLOOK's
 // Corrections item 12, cov2 C14), which the game module's shelf (game/FestShelf.cpp) engraves with {SHORT} the brand's series Short.
+// G1 polish (key g1p-hub, after G1's PIE: RCOP's waves struck through the hub's tagline): FestBannerClear is FestBanner with a list of
+// boxes the waves pass behind (the hub's header text, its flap row and the Main card); each wave line is broken where it would cross
+// one (FestWaveLines), at every minute of the day's climb and through the rise, and the settled fragment's key takes the boxes. With
+// no boxes it draws exactly what FestBanner draws (FestBanner calls it so). FestWordWidth is the word-mark's set-out width.
 #include "ShortStack/UI/FestivalArt.h"
 
 #include "RitArt.h"
@@ -44,6 +48,9 @@
 #include <atomic>
 #include <cmath>
 #include <functional>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace ss
 {
@@ -433,6 +440,18 @@ uint64_t FestBannerKey(const FestivalLook& L, const Rect& R, int Layer, int Minu
 	return FestMix(H, Ints, sizeof(Ints));
 }
 
+/** g1p-hub: FestBannerKey with the boxes the waves pass behind mixed in (none: FestBannerKey itself). */
+uint64_t FestBannerKeyClear(const FestivalLook& L, const Rect& R, int Layer, int Minute, const std::vector<Rect>& Clear)
+{
+	uint64_t H = FestBannerKey(L, R, Layer, Minute);
+	for (const Rect& C : Clear)
+	{
+		const float Q[4] = {C.X, C.Y, C.W, C.H};
+		H = FestMix(H, Q, sizeof(Q));
+	}
+	return H;
+}
+
 /** The banner's outline in R: the host's frame (RiverLine's and Ignite's panel radius, RunItTwice's one cut corner). */
 std::vector<Vec2> FestBannerOutline(const FestivalLook& L, const Rect& R)
 {
@@ -574,15 +593,111 @@ void FestBannerGround(Canvas& C, const FestivalLook& L, float W, float H)
 	}
 }
 
+/** g1p-hub: the part of segment A-B inside box R as [T0, T1] of its length (Liang-Barsky); false when it misses the box. */
+bool FestSegIn(const Vec2& A, const Vec2& B, const Rect& R, float& T0, float& T1)
+{
+	const float Dx = B.X - A.X;
+	const float Dy = B.Y - A.Y;
+	const float P[4] = {-Dx, Dx, -Dy, Dy};
+	const float Q[4] = {A.X - R.X, R.X + R.W - A.X, A.Y - R.Y, R.Y + R.H - A.Y};
+	T0 = 0.0f;
+	T1 = 1.0f;
+	for (int I = 0; I < 4; ++I)
+	{
+		if (P[I] == 0.0f)
+		{
+			if (Q[I] < 0.0f)
+			{
+				return false;
+			}
+			continue;
+		}
+		const float T = Q[I] / P[I];
+		if (P[I] < 0.0f)
+		{
+			T0 = std::max(T0, T);
+		}
+		else
+		{
+			T1 = std::min(T1, T);
+		}
+	}
+	return T0 < T1;
+}
+
+/** g1p-hub: a polyline with the parts inside any box left out, as the pieces between them (each two points or more). */
+std::vector<std::vector<Vec2>> FestClipLine(const std::vector<Vec2>& Line, const std::vector<Rect>& Clear)
+{
+	std::vector<std::vector<Vec2>> Out;
+	std::vector<Vec2> Cur;
+	bool Open = false; // the last segment's kept part reached its end, so the next one's first part carries on the same piece
+	auto Flush = [&Out, &Cur]() {
+		if (Cur.size() >= 2)
+		{
+			Out.push_back(Cur);
+		}
+		Cur.clear();
+	};
+	for (size_t I = 0; I + 1 < Line.size(); ++I)
+	{
+		const Vec2 A = Line[I];
+		const Vec2 B = Line[I + 1];
+		std::vector<std::pair<float, float>> In;
+		for (const Rect& R : Clear)
+		{
+			float T0 = 0.0f;
+			float T1 = 1.0f;
+			if (FestSegIn(A, B, R, T0, T1))
+			{
+				In.push_back({T0, T1});
+			}
+		}
+		std::sort(In.begin(), In.end());
+		auto Keep = [&](float From, float To) {
+			const Vec2 P{A.X + (B.X - A.X) * From, A.Y + (B.Y - A.Y) * From};
+			const Vec2 Q{A.X + (B.X - A.X) * To, A.Y + (B.Y - A.Y) * To};
+			if (!(Open && From <= 0.0f))
+			{
+				Flush();
+				Cur.push_back(P);
+			}
+			Cur.push_back(Q);
+			Open = To >= 1.0f;
+		};
+		float T = 0.0f;
+		bool Kept = false;
+		for (const std::pair<float, float>& Gap : In)
+		{
+			if (Gap.first > T)
+			{
+				Keep(T, Gap.first);
+				Kept = true;
+			}
+			T = std::max(T, Gap.second);
+		}
+		if (T < 1.0f)
+		{
+			Keep(T, 1.0f);
+			Kept = true;
+		}
+		Open = Open && Kept && T < 1.0f;
+	}
+	Flush();
+	return Out;
+}
+
 /** RCOP's waves (WaveRise, §2.7.2): five lines across the banner, the top one in Crest Silver, at the day's mark (Day 0..1: the line
- *  climbs through the day), Drop units lower while they rise; clear of the corners. */
-void FestBannerWave(Canvas& C, const FestivalLook& L, float W, float H, float Day, float Drop)
+ *  climbs through the day), Drop units lower while they rise; clear of the corners. g1p-hub: each line's points, in the banner's own
+ *  units, broken around Clear (boxes in the same units: FestClipLine); with no boxes each line is one piece, as before. */
+std::vector<std::vector<Vec2>> FestWaveLinesIn(const FestivalLook& L, float W, float H, float Day, float Drop, const std::vector<Rect>& Clear, std::vector<int>& Kinds)
 {
 	const float In = FestBannerInset(L);
 	const float Low = H - In - 4.0f * 12.0f - 8.0f - 2.0f;
 	const float High = H * 0.3f;
 	const float Y0 = Low + (High - Low) * Day + Drop;
 	const float Step = 24.0f;
+	std::vector<std::vector<Vec2>> Out;
+	Kinds.clear();
 	for (int K = 0; K < 5; ++K)
 	{
 		std::vector<Vec2> Line;
@@ -595,7 +710,29 @@ void FestBannerWave(Canvas& C, const FestivalLook& L, float W, float H, float Da
 				break;
 			}
 		}
-		C.StrokePolyline(Line, false, K == 0 ? Hex(L.Accent2, 0.5f) : Hex(L.Accent, 0.16f), K == 0 ? 2.0f : 1.4f);
+		if (Clear.empty())
+		{
+			Out.push_back(std::move(Line));
+			Kinds.push_back(K);
+			continue;
+		}
+		for (std::vector<Vec2>& Piece : FestClipLine(Line, Clear))
+		{
+			Out.push_back(std::move(Piece));
+			Kinds.push_back(K);
+		}
+	}
+	return Out;
+}
+
+void FestBannerWave(Canvas& C, const FestivalLook& L, float W, float H, float Day, float Drop, const std::vector<Rect>& Clear = {})
+{
+	std::vector<int> Kinds;
+	const std::vector<std::vector<Vec2>> Lines = FestWaveLinesIn(L, W, H, Day, Drop, Clear, Kinds);
+	for (size_t I = 0; I < Lines.size(); ++I)
+	{
+		const int K = Kinds[I];
+		C.StrokePolyline(Lines[I], false, K == 0 ? Hex(L.Accent2, 0.5f) : Hex(L.Accent, 0.16f), K == 0 ? 2.0f : 1.4f);
 	}
 }
 
@@ -961,7 +1098,36 @@ fest::Brand DevLook()
 	return static_cast<fest::Brand>(festart_detail::FestDevSlot().load(std::memory_order_relaxed));
 }
 
+void FestBannerClear(Canvas& C, const FestivalLook& L, const Rect& R, double SinceOpen, float DayProgress, bool MainDay, bool Still, const std::vector<Rect>& Clear);
+
 void FestBanner(Canvas& C, const FestivalLook& L, const Rect& R, double SinceOpen, float DayProgress, bool MainDay, bool Still)
+{
+	FestBannerClear(C, L, R, SinceOpen, DayProgress, MainDay, Still, {});
+}
+
+/** g1p-hub: the waves as FestBanner draws them for a minute of the day's progress and a drop through the rise, in the banner's own
+ *  units (Clear: boxes in canvas units, moved by the banner's origin R.X, R.Y); Kinds[i] is piece i's line, 0 the Crest Silver one.
+ *  u4_ui's FestWaveClear checks that no piece enters a box at any minute or drop. */
+std::vector<std::vector<Vec2>> FestWaveLines(const FestivalLook& L, const Rect& R, float Day, float Drop, const std::vector<Rect>& Clear, std::vector<int>& Kinds)
+{
+	std::vector<Rect> Local;
+	for (const Rect& Q : Clear)
+	{
+		Local.push_back({Q.X - R.X, Q.Y - R.Y, Q.W, Q.H});
+	}
+	return festart_detail::FestWaveLinesIn(L, R.W, R.H, Day, Drop, Local, Kinds);
+}
+
+/** g1p-hub: FestWordMark's set-out width for Text at Size (its caps and tracking; per glyph when it moves letter by letter). */
+float FestWordWidth(const Canvas& C, const FestivalLook& L, const std::string& Text, float Size)
+{
+	namespace fd = festart_detail;
+	return fd::FestWordLay(C, L, L.Caps ? fd::FestUpper(Text) : Text, Size).Width;
+}
+
+/** g1p-hub (PIE: RCOP's waves through the hub's tagline): FestBanner whose waves pass behind Clear (canvas units: the header's text
+ *  boxes, its flap row, the Main card). Every other layer is FestBanner's own; with no boxes the draw is FestBanner's, byte for byte. */
+void FestBannerClear(Canvas& C, const FestivalLook& L, const Rect& R, double SinceOpen, float DayProgress, bool MainDay, bool Still, const std::vector<Rect>& Clear)
 {
 	// G1 FL-7 (§2.8.2's banner ground, §2.7.2, §2.7.7): F-hubs draws the crest, the word-mark and the stats over it. Settled layers are
 	// cached fragments (the ground once; RCOP's waves per world minute; the curtains and the door-light once); a motion still running
@@ -980,14 +1146,19 @@ void FestBanner(Canvas& C, const FestivalLook& L, const Rect& R, double SinceOpe
 		const int Minute = fd::FestMinuteOf(DayProgress);
 		const float Day = static_cast<float>(Minute) / static_cast<float>(fd::FestDayMinutes);
 		const double Risen = motion::CountUp(0.0, 1.0, T, 0.0, fd::FestWaveSeconds);
+		std::vector<Rect> Local;
+		for (const Rect& Q : Clear)
+		{
+			Local.push_back({Q.X - R.X, Q.Y - R.Y, Q.W, Q.H});
+		}
 		if (Risen >= 1.0)
 		{
-			C.Cached(fd::FestBannerKey(L, R, fd::FestLayerWave, Minute), R.X, R.Y, [&](Canvas& At) { fd::FestBannerWave(At, L, W, H, Day, 0.0f); });
+			C.Cached(fd::FestBannerKeyClear(L, R, fd::FestLayerWave, Minute, Local), R.X, R.Y, [&](Canvas& At) { fd::FestBannerWave(At, L, W, H, Day, 0.0f, Local); });
 		}
 		else
 		{
 			C.PushClip(R);
-			fd::FestLive(C, R.X, R.Y, 1.0f, [&](Canvas& At) { fd::FestBannerWave(At, L, W, H, Day, static_cast<float>((1.0 - Risen) * H * 0.6)); });
+			fd::FestLive(C, R.X, R.Y, 1.0f, [&](Canvas& At) { fd::FestBannerWave(At, L, W, H, Day, static_cast<float>((1.0 - Risen) * H * 0.6), Local); });
 			C.PopClip();
 		}
 	}
