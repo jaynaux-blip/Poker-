@@ -2063,8 +2063,10 @@ void FestWaveClearHubs(HubsLaptop& P, const ss::fest::Festival& Rcop)
 }
 
 /** FestRollPillClear (g1p-hub item 4; PIE s09b_rcop2027_hub: DEFENDING CHAMPION over the prize): CHAMPIONS on RCOP 2027's day 395, where
- *  RCOP 2026's Main champion defends, at both UI scales: on every roll line, every run right of the name column ends 6 (a pill's padding)
- *  before the line's figure begins, and the champion's name is drawn. Plant: the name's MaxW without HubNameTail's room. */
+ *  RCOP 2026's Main champion (a network player, so PlayerName's glyph and pill follow the name) defends, at both UI scales: on every roll
+ *  line (a figure right-aligned at the body's right less 22), every run right of the name column whose baseline sits within 8 of the
+ *  figure's (a pill's label sits a little lower than the name's) ends 6 (a pill's padding) before the figure begins, and the champion's
+ *  name is drawn. Plant: the name's MaxW without HubNameTail's room (PlayerName's DEFENDING CHAMPION over the figure). */
 void FestRollPillClear(HubsLaptop& P, const std::string& Champion)
 {
 	P.OpenHub();
@@ -2072,44 +2074,41 @@ void FestRollPillClear(HubsLaptop& P, const std::string& Champion)
 	const DrawList Half = P.Frame(1.5f);
 	int Lines = 0, Bad = 0;
 	std::string Where;
+	const float Right = 1044.0f + 532.0f - 22.0f;
 	for (int K = 0; K < 2; ++K)
 	{
 		const DrawList& L = K == 0 ? One : Half;
-		std::map<int, std::vector<HubsBox>> ByLine;
-		std::map<int, std::vector<std::string>> Texts;
+		std::vector<std::pair<HubsBox, std::string>> Runs;
+		std::vector<std::pair<HubsBox, std::string>> Figures;
 		for (const ss::ui::DrawCmd& Cmd : L.Cmds)
 		{
-			const float X = Cmd.Text.X;
-			const float Base = Cmd.Text.BaselineY;
-			if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && X >= 1044.0f + 22.0f + 138.0f && Base > 392.0f && Base < 950.0f)
+			if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.X >= 1044.0f + 22.0f + 138.0f && Cmd.Text.BaselineY > 392.0f && Cmd.Text.BaselineY < 950.0f)
 			{
-				ByLine[static_cast<int>(std::lround(Base))].push_back(HubsRunBox(Cmd));
-				Texts[static_cast<int>(std::lround(Base))].push_back(Cmd.Text.Text);
+				const HubsBox B = HubsRunBox(Cmd);
+				(std::fabs(B.X1 - Right) < 1.0f ? Figures : Runs).push_back({B, Cmd.Text.Text});
 			}
 		}
-		for (const auto& Line : ByLine)
+		for (const std::pair<HubsBox, std::string>& Fig : Figures)
 		{
-			if (Line.second.size() < 2)
+			const float Base = Fig.first.Y1;
+			int Beside = 0;
+			for (const std::pair<HubsBox, std::string>& Run : Runs)
 			{
-				continue;
-			}
-			++Lines;
-			size_t Fig = 0;
-			for (size_t I = 1; I < Line.second.size(); ++I)
-			{
-				Fig = Line.second[I].X1 > Line.second[Fig].X1 ? I : Fig;
-			}
-			for (size_t I = 0; I < Line.second.size(); ++I)
-			{
-				if (I != Fig && Line.second[I].X1 + 6.0f > Line.second[Fig].X0)
+				if (std::fabs(Run.first.Y1 - Base) > 8.0f)
+				{
+					continue;
+				}
+				++Beside;
+				if (Run.first.X1 + 6.0f > Fig.first.X0)
 				{
 					++Bad;
-					Where += " \"" + Texts[Line.first][I] + "\" reaches \"" + Texts[Line.first][Fig] + "\" (x" + (K == 0 ? "1.0" : "1.5") + ");";
+					Where += " \"" + Run.second + "\" reaches \"" + Fig.second + "\" (x" + (K == 0 ? "1.0" : "1.5") + ");";
 				}
 			}
+			Lines += Beside > 0 ? 1 : 0;
 		}
 	}
-	ui_test::Expect(Lines >= 4 && Bad == 0 && ui_test::Drew(One, Champion), ("FestRollPillClear: on RCOP 2027's CHAMPIONS no name, glyph or pill reaches a line's prize at either scale (" +
+	ui_test::Expect(Lines >= 8 && Bad == 0 && ui_test::Drew(One, Champion), ("FestRollPillClear: on RCOP 2027's CHAMPIONS no name, glyph or pill reaches a line's prize at either scale (" +
 																			 std::to_string(Lines) + " lines" + (Where.empty() ? std::string(")") : "):" + Where)).c_str());
 }
 
