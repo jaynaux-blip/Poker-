@@ -13,8 +13,11 @@
 #include "Components/WidgetComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "MaterialDomain.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "MeshDescription.h"
 #include "NightOneGame.h"
 #include "NightOneGameMode.h"
 #include "NightOneStage.h"
@@ -26,6 +29,7 @@
 #include "ShortStack/UI/Canvas.h"
 #include "ShortStack/UI/FestivalArt.h"
 #include "SlateDrawList.h"
+#include "StaticMeshAttributes.h"
 
 #include <algorithm>
 #include <array>
@@ -283,6 +287,104 @@ std::string FsPlateLine(const FFsPlan& P, ss::fest::Brand B, const std::string& 
 	}
 	return Short + Template.substr(7);
 }
+
+// The board's budget (§9.4: the board <= 5k triangles with its pins; G1 polish P-shelf, where the full board drew 25,244 triangles in 28
+// sections). A pin is the kit's body (SM_FS_Pin: fest_pinboard.py's 12-sided lathe, 108 triangles) and its enamel field, a flat
+// hexagon of 4 triangles (the engine's cylinder it replaces drew 512) 3.0 mm out from the cork. Its corners sit inside the body's rim,
+// between the rim's inner wall (9.35 mm out from the middle at that height) and its outer wall (11.43 mm at its flats), so the field's
+// visible edge is the body's own 12-sided inner wall, as before. The bodies draw in one instanced group a grade (gold, silver,
+// outline) and the fields in one: an outline rim's Accent2 and each field's colour are the instance's own through the tint material
+// (shops_setup.py's M_NS_ClothTint: its custom data 0-2 the colour). Without that material each colour is its own group, as before.
+constexpr int FsFieldSides = 6;          // the field's corners: a hexagon, 4 triangles
+constexpr double FsFieldCorner = 0.0110; // its corners' radius (m): its flats at 9.53 mm, outside the inner wall's 9.35 mm
+constexpr double FsFieldOut = 0.0030;    // its face out from the cork (m): the old disc's face (2.6-3.0 mm), under the rim's 3.4 mm top
+constexpr int FsPinSegments = 12;        // fest_pinboard.py's PIN_SEGMENTS: the body's and the stand-ins' sides
+constexpr double FsPinShapeH = 0.0026;   // the stand-in body's depth (m) when SM_FS_Pin isn't imported: the field just over its face
+/** fest_pinboard.py's pin profile (r, z in metres, z out from the cork): the outer wall's foot, its top, the rim's outer and inner top
+ *  edges, the inner wall's foot at the field, the field's middle. */
+constexpr double FsPinProfile[6][2] = {{0.012, 0.0}, {0.012, 0.0028}, {0.0115, 0.0034}, {0.0095, 0.0034}, {0.0092, 0.0026}, {0.0, 0.0026}};
+/** FestPinArt's rims (UI/EventArt.cpp's FestGoldMetal and FestSilverMetal, as the board drew them): won an event, cashed. */
+constexpr uint32_t FsGoldRim = 0xe8b64a, FsSilverRim = 0xc9d3e6;
+
+/** One pin's look: its body's group (0 gold, 1 silver, 2 outline), its rim's and its field's sRGB colours. */
+struct FFsPinLook
+{
+	int Body = 2;
+	uint32_t Rim = 0;
+	uint32_t Enamel = 0;
+};
+
+/** An outline pin's dulled enamel (EventArt's FestPinArt: Sink(Accent, 0.5)). */
+uint32_t FsSink(uint32_t Hex)
+{
+	return ((((Hex >> 16) & 0xffu) / 2u) << 16) | ((((Hex >> 8) & 0xffu) / 2u) << 8) | ((Hex & 0xffu) / 2u);
+}
+
+/** A pin's look (FestPinArt's, UI/EventArt.cpp): the rim gold (Grade 3, won an event), silver (2, cashed) or an outline in the look's
+ *  Accent2 (1, played); the field the look's Accent, dulled by half on a played pin. */
+FFsPinLook FsPinLookOf(const FFsPin& Pin)
+{
+	const ss::ui::festart::FestivalLook& L = ss::ui::festart::LookOf(Pin.Brand);
+	FFsPinLook K;
+	K.Body = Pin.Grade >= 3 ? 0 : Pin.Grade == 2 ? 1 : 2;
+	K.Rim = K.Body == 0 ? FsGoldRim : K.Body == 1 ? FsSilverRim : static_cast<uint32_t>(L.Accent2);
+	K.Enamel = K.Body < 2 ? static_cast<uint32_t>(L.Accent) : FsSink(static_cast<uint32_t>(L.Accent));
+	return K;
+}
+
+/** Six hex digits ("e8b64a"). */
+std::string FsHex6(uint32_t Hex)
+{
+	static const char FsDigits[] = "0123456789abcdef";
+	std::string S(6, '0');
+	for (int I = 5; I >= 0; --I)
+	{
+		S[static_cast<size_t>(I)] = FsDigits[Hex & 0xfu];
+		Hex >>= 4;
+	}
+	return S;
+}
+
+/** The instanced group a pin's body draws in (UFestShelf::PinGroup's key): "body/gold", "body/silver", and with the tint material
+ *  (bTint) "body/outline" for every outline rim, else "body/outline/<rim>" a colour. */
+std::string FsPinBodyKey(const FFsPinLook& K, bool bTint)
+{
+	return K.Body == 0 ? std::string("body/gold") : K.Body == 1 ? std::string("body/silver") : bTint ? std::string("body/outline") : "body/outline/" + FsHex6(K.Rim);
+}
+
+/** The group a pin's enamel field draws in: "field" for every field with the tint material, else "field/<enamel>" a colour. */
+std::string FsPinFieldKey(const FFsPinLook& K, bool bTint)
+{
+	return bTint ? std::string("field") : "field/" + FsHex6(K.Enamel);
+}
+
+/** Every instanced group the plan's pins draw in, sorted (one draw a group and pass; the board's own section besides): with the tint
+ *  material at most four (the gold, silver and outline bodies, the fields). */
+std::vector<std::string> FsPinGroups(const FFsPlan& P, bool bTint)
+{
+	std::vector<std::string> Keys;
+	for (const FFsPin& Pin : P.Pins)
+	{
+		const FFsPinLook K = FsPinLookOf(Pin);
+		Keys.push_back(FsPinBodyKey(K, bTint));
+		Keys.push_back(FsPinFieldKey(K, bTint));
+	}
+	std::sort(Keys.begin(), Keys.end());
+	Keys.erase(std::unique(Keys.begin(), Keys.end()), Keys.end());
+	return Keys;
+}
+
+/** A flat regular polygon's triangles (corner indices; the corners on the unit circle from angle 0, counter-clockwise): the fan from
+ *  corner 0, Sides - 2 triangles. The engine half winds each to face the polygon's front. */
+std::vector<std::array<int, 3>> FsFan(int Sides)
+{
+	std::vector<std::array<int, 3>> Tris;
+	for (int I = 1; I + 1 < Sides; ++I)
+	{
+		Tris.push_back({0, I, I + 1});
+	}
+	return Tris;
+}
 // ---- FestShelfDetail's plan ends
 
 // The kit's numbers (meters, in each piece's Blender frame; fest_shelf.py and fest_pinboard.py).
@@ -334,12 +436,6 @@ FVector FsSlotAt(int Slot)
 FLinearColor FsLinear(uint32 Hex)
 {
 	return FLinearColor::FromSRGBColor(FColor(static_cast<uint8>((Hex >> 16) & 0xff), static_cast<uint8>((Hex >> 8) & 0xff), static_cast<uint8>(Hex & 0xff)));
-}
-
-/** An outline pin's dulled enamel (EventArt's FestPinArt: Sink(Accent, 0.5)). */
-uint32 FsSink(uint32 Hex)
-{
-	return ((((Hex >> 16) & 0xffu) / 2u) << 16) | ((((Hex >> 8) & 0xffu) / 2u) << 8) | ((Hex & 0xffu) / 2u);
 }
 
 /** The trophy each brand's plinth holds (FL-8b's FS_TROPHIES; Ring Rush's ring and the Championship Online's bracelet in FL-8a's cases). */
@@ -437,6 +533,132 @@ UStaticMesh* FsLoad(const TCHAR* Name)
 	}
 	return LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("/Game/ShortStack/Meshes/%s/%s.%s"), Name, Name, Name), nullptr, LOAD_NoWarn | LOAD_Quiet);
 }
+
+/**
+ * A flat regular polygon of Sides corners (G1 polish P-shelf: the pins' enamel field, and the stand-ins' pin body), built here so the
+ * board needs no engine cylinder: unit corner radius in centimetres (the instance's scale sizes it), its face toward +z at z 0; with
+ * bWall a prism instead, its face at z 1 and its flat side walls down to z 0. One section (slot 0 the engine's default material; each
+ * group sets its own), FsFan's triangles, the face's UVs planar. SponsorWear.cpp's FMeshDescription build. Null if the build fails.
+ */
+UStaticMesh* FsDiscMesh(UObject* Outer, int Sides, bool bWall)
+{
+	struct FFsVert
+	{
+		FVector P;
+		FVector N;
+		FVector2D UV;
+	};
+	TArray<FFsVert> Verts;
+	TArray<int32> Tris;
+	// Wound so its front faces Facing (the engine's front: (C - A) x (B - A) along the normal, SponsorWear.cpp's rule).
+	auto Tri = [&Verts, &Tris](int32 A, int32 B, int32 C, const FVector& Facing) {
+		const FVector Cross = FVector::CrossProduct(Verts[C].P - Verts[A].P, Verts[B].P - Verts[A].P);
+		if (FVector::DotProduct(Cross, Facing) < 0.0)
+		{
+			Swap(B, C);
+		}
+		Tris.Add(A);
+		Tris.Add(B);
+		Tris.Add(C);
+	};
+	const double Top = bWall ? 1.0 : 0.0;
+	for (int I = 0; I < Sides; ++I)
+	{
+		const double A = 2.0 * UE_DOUBLE_PI * I / Sides;
+		const FVector P(FMath::Cos(A), FMath::Sin(A), Top);
+		Verts.Add({P, FVector(0.0, 0.0, 1.0), FVector2D(0.5 + 0.5 * P.X, 0.5 - 0.5 * P.Y)});
+	}
+	for (const std::array<int, 3>& T : FsFan(Sides))
+	{
+		Tri(T[0], T[1], T[2], FVector(0.0, 0.0, 1.0));
+	}
+	for (int I = 0; bWall && I < Sides; ++I)
+	{
+		// A side's flat quad, its own four corners (the wall's normal, not the face's).
+		const FVector Ta = Verts[I].P;
+		const FVector Tb = Verts[(I + 1) % Sides].P;
+		const FVector Out = ((Ta + Tb) * FVector(1.0, 1.0, 0.0)).GetSafeNormal(UE_SMALL_NUMBER, FVector(1.0, 0.0, 0.0));
+		const int32 Q = Verts.Num();
+		Verts.Add({Ta, Out, FVector2D(0.0, 0.0)});
+		Verts.Add({Tb, Out, FVector2D(1.0, 0.0)});
+		Verts.Add({FVector(Tb.X, Tb.Y, 0.0), Out, FVector2D(1.0, 1.0)});
+		Verts.Add({FVector(Ta.X, Ta.Y, 0.0), Out, FVector2D(0.0, 1.0)});
+		Tri(Q, Q + 1, Q + 2, Out);
+		Tri(Q, Q + 2, Q + 3, Out);
+	}
+
+	FMeshDescription Desc;
+	FStaticMeshAttributes Attr(Desc);
+	Attr.Register();
+	TVertexAttributesRef<FVector3f> Positions = Attr.GetVertexPositions();
+	TVertexInstanceAttributesRef<FVector3f> Normals = Attr.GetVertexInstanceNormals();
+	TVertexInstanceAttributesRef<FVector3f> Tangents = Attr.GetVertexInstanceTangents();
+	TVertexInstanceAttributesRef<float> Signs = Attr.GetVertexInstanceBinormalSigns();
+	TVertexInstanceAttributesRef<FVector2f> UVs = Attr.GetVertexInstanceUVs();
+	TVertexInstanceAttributesRef<FVector4f> Colors = Attr.GetVertexInstanceColors();
+	TPolygonGroupAttributesRef<FName> GroupNames = Attr.GetPolygonGroupMaterialSlotNames();
+	UVs.SetNumChannels(1);
+	const FName Slot(TEXT("fs_disc"));
+	const FPolygonGroupID Group = Desc.CreatePolygonGroup();
+	GroupNames[Group] = Slot;
+	TArray<FVertexInstanceID> Ids;
+	Ids.Reserve(Verts.Num());
+	for (const FFsVert& V : Verts)
+	{
+		const FVertexID Id = Desc.CreateVertex();
+		Positions[Id] = FVector3f(V.P);
+		const FVertexInstanceID I = Desc.CreateVertexInstance(Id);
+		// The tangent: x in the surface's plane (the face's +x; a wall's run along its top edge).
+		FVector Tangent = FVector(-V.N.Y, V.N.X, 0.0);
+		if (!Tangent.Normalize())
+		{
+			Tangent = FVector(1.0, 0.0, 0.0);
+		}
+		Normals[I] = FVector3f(V.N);
+		Tangents[I] = FVector3f(Tangent);
+		Signs[I] = 1.0f;
+		UVs.Set(I, 0, FVector2f(V.UV));
+		Colors[I] = FVector4f(1.0f, 1.0f, 1.0f, 1.0f);
+		Ids.Add(I);
+	}
+	for (int32 T = 0; T + 2 < Tris.Num(); T += 3)
+	{
+		const FVertexInstanceID Corner[3] = {Ids[Tris[T]], Ids[Tris[T + 1]], Ids[Tris[T + 2]]};
+		Desc.CreateTriangle(Group, MakeArrayView(Corner, 3));
+	}
+	UStaticMesh* Mesh = NewObject<UStaticMesh>(Outer, NAME_None, RF_Transient);
+	Mesh->GetStaticMaterials().Add(FStaticMaterial(UMaterial::GetDefaultMaterial(MD_Surface), Slot));
+	UStaticMesh::FBuildMeshDescriptionsParams Params;
+	Params.bFastBuild = true;
+	Params.bCommitMeshDescription = false;
+	Params.bMarkPackageDirty = false;
+	TArray<const FMeshDescription*> Lods;
+	Lods.Add(&Desc);
+	return Mesh->BuildFromMeshDescriptions(Lods, Params) ? Mesh : nullptr;
+}
+
+/** A material's base colour texture (its first texture parameter named for base colour, diffuse or albedo; ShopStage.cpp's rule), or
+ *  null: the tint material multiplies it by each instance's colour, as TintImported's factor multiplies the imported pin's. */
+UTexture* FsBaseTexture(const UMaterialInterface* Baked)
+{
+	if (!Baked)
+	{
+		return nullptr;
+	}
+	TArray<FMaterialParameterInfo> Infos;
+	TArray<FGuid> Ids;
+	Baked->GetAllTextureParameterInfo(Infos, Ids);
+	for (const FMaterialParameterInfo& Info : Infos)
+	{
+		const FString K = Info.Name.ToString().ToLower().Replace(TEXT("_"), TEXT("")).Replace(TEXT(" "), TEXT(""));
+		UTexture* Tex = nullptr;
+		if ((K.Contains(TEXT("basecolor")) || K.Contains(TEXT("diffuse")) || K.Contains(TEXT("albedo"))) && Baked->GetTextureParameterValue(FHashedMaterialParameterInfo(Info), Tex) && Tex)
+		{
+			return Tex;
+		}
+	}
+	return nullptr;
+}
 } // namespace FestShelfDetail
 
 UFestShelf::UFestShelf()
@@ -526,6 +748,10 @@ void UFestShelf::Build()
 	CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
 	CylinderMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	PinMesh = D::FsLoad(TEXT("SM_FS_Pin"));
+	// The board's pieces (§9.4's 5k triangles): the field a hexagon inside the kit's rim, else a 12-sided disc on the stand-in's body.
+	FieldMesh = D::FsDiscMesh(this, PinMesh ? D::FsFieldSides : D::FsPinSegments, false);
+	BodyShapeMesh = PinMesh ? nullptr : D::FsDiscMesh(this, D::FsPinSegments, true);
+	TintMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/ShortStack/Materials/M_NS_ClothTint.M_NS_ClothTint"), nullptr, LOAD_NoWarn | LOAD_Quiet);
 	Surfaces.Reset();
 	Trophies.Reset();
 	Belts.Reset();
@@ -732,7 +958,22 @@ void UFestShelf::DrawPlates(const FestShelfDetail::FFsPlan& Plan, FNightOneGame&
 	bPlatesDrawn = true;
 }
 
-UInstancedStaticMeshComponent* UFestShelf::PinGroup(const FString& Key, bool bEnamel, uint32 SrgbHex, bool bMetal)
+UMaterialInstanceDynamic* UFestShelf::PinTint(UMaterialInterface* Baked, float Roughness)
+{
+	if (!TintMaterial)
+	{
+		return nullptr;
+	}
+	UMaterialInstanceDynamic* M = UMaterialInstanceDynamic::Create(TintMaterial, this);
+	M->SetScalarParameterValue(TEXT("Roughness"), Roughness);
+	if (UTexture* Tex = FestShelfDetail::FsBaseTexture(Baked))
+	{
+		M->SetTextureParameterValue(TEXT("BaseColorTexture"), Tex);
+	}
+	return M;
+}
+
+UInstancedStaticMeshComponent* UFestShelf::PinGroup(const FString& Key, bool bField, int32 Body, uint32 SrgbHex, bool bShared)
 {
 	if (TObjectPtr<UInstancedStaticMeshComponent>* Found = PinGroups.Find(Key))
 	{
@@ -742,16 +983,31 @@ UInstancedStaticMeshComponent* UFestShelf::PinGroup(const FString& Key, bool bEn
 	{
 		return nullptr;
 	}
+	const bool bMetal = !bField && Body < 2;
 	UInstancedStaticMeshComponent* G = nullptr;
-	if (!bEnamel && PinMesh)
+	if (bField)
 	{
-		// The kit's pin, its baked neutral metal multiplied by the rim's colour (its enamel field lies under the enamel disc).
-		G = FsInstanced(PinMesh, nullptr, BoardRoot, false);
-		TintImported(G, 0, FestShelfDetail::FsLinear(SrgbHex));
+		// The enamel field (FieldMesh; the engine's cylinder only if the build failed), each instance's colour or the group's.
+		G = FsInstanced(FieldMesh ? FieldMesh.Get() : CylinderMesh.Get(), bShared ? PinTint(nullptr, 0.4f) : FsSurface(SrgbHex, 0.4f, 0.0f), BoardRoot, false);
+	}
+	else if (PinMesh)
+	{
+		// The kit's pin, its baked neutral metal multiplied by the rim's colour (its enamel field lies under the hexagon); the outline
+		// rims all in one group, each its own Accent2 through the tint material over the pin's baked colour.
+		G = FsInstanced(PinMesh, bShared ? PinTint(PinMesh->GetMaterial(0), 0.35f) : nullptr, BoardRoot, false);
+		if (!bShared)
+		{
+			TintImported(G, 0, FestShelfDetail::FsLinear(SrgbHex));
+		}
 	}
 	else
 	{
-		G = FsInstanced(CylinderMesh, FsSurface(SrgbHex, bMetal ? 0.25f : 0.4f, bMetal ? 1.0f : 0.0f), BoardRoot, false);
+		G = FsInstanced(BodyShapeMesh ? BodyShapeMesh.Get() : CylinderMesh.Get(), bShared ? PinTint(nullptr, 0.4f) : FsSurface(SrgbHex, bMetal ? 0.25f : 0.4f, bMetal ? 1.0f : 0.0f),
+			BoardRoot, false);
+	}
+	if (bShared)
+	{
+		G->SetNumCustomDataFloats(3);
 	}
 	PinGroups.Add(Key, G);
 	return G;
@@ -768,23 +1024,37 @@ void UFestShelf::ShowPins(const FestShelfDetail::FFsPlan& Plan)
 		}
 	}
 	const FRotator Front(0.0f, BlenderImportYaw(), 0.0f);
-	const FRotator Out(90.0f, 0.0f, 0.0f); // the engine cylinder's axis out of the cork (the root's -X: the pins' faces toward the room)
+	// A built disc's face (+z) out of the cork (the root's -X: the pins' faces toward the room), as the engine cylinder's axis was.
+	const FRotator Out(90.0f, 0.0f, 0.0f);
+	const bool bTint = TintMaterial != nullptr;
+	auto Place = [](UInstancedStaticMeshComponent* G, const FTransform& Xf, bool bShared, uint32 SrgbHex) {
+		const int32 I = G->AddInstance(Xf);
+		if (bShared)
+		{
+			const FLinearColor C = FestShelfDetail::FsLinear(SrgbHex);
+			const float Data[3] = {C.R, C.G, C.B};
+			G->SetCustomData(I, TArrayView<const float>(Data, 3), true);
+		}
+	};
 	for (const D::FFsPin& Pin : Plan.Pins)
 	{
-		const ss::ui::festart::FestivalLook& L = ss::ui::festart::LookOf(Pin.Brand);
+		// FestPinArt's look: the rim gold (won an event), silver (cashed) or an outline in the look's Accent2 (played); the field the
+		// look's Accent, dulled by half on a played pin (FsPinLookOf).
+		const D::FFsPinLook K = D::FsPinLookOf(Pin);
 		const FVector At = D::FsAxes(D::FsPinX0 + D::FsPinDx * Pin.Col, D::FsCorkY, D::FsPinZ0 - D::FsPinDz * Pin.Row);
-		// The rim: gold (won an event), silver (cashed), or an outline in the look's Accent2 (played): FestPinArt's.
-		const bool bMetal = Pin.Grade >= 2;
-		const uint32 Rim = Pin.Grade >= 3 ? 0xe8b64a : Pin.Grade == 2 ? 0xc9d3e6 : static_cast<uint32>(L.Accent2);
-		if (UInstancedStaticMeshComponent* G = PinGroup(FString::Printf(TEXT("rim/%06x"), Rim), false, Rim, bMetal))
+		const bool bSharedBody = bTint && K.Body == 2;
+		if (UInstancedStaticMeshComponent* G = PinGroup(UTF8_TO_TCHAR(D::FsPinBodyKey(K, bTint).c_str()), false, K.Body, K.Rim, bSharedBody))
 		{
-			G->AddInstance(PinMesh ? FTransform(Front, At) : FTransform(Out, At + D::FsAxes(0.0, -0.0013, 0.0), FVector(2.0 * D::FsPinR, 2.0 * D::FsPinR, 0.0026)));
+			const FTransform Shape = BodyShapeMesh ? FTransform(Out, At, FVector(D::FsPinR * 100.0, D::FsPinR * 100.0, D::FsPinShapeH * 100.0))
+												   : FTransform(Out, At + D::FsAxes(0.0, -0.0013, 0.0), FVector(2.0 * D::FsPinR, 2.0 * D::FsPinR, 0.0026));
+			Place(G, PinMesh ? FTransform(Front, At) : Shape, bSharedBody, K.Rim);
 		}
-		// The enamel field in the look's Accent (dulled by half on a played pin), 2.6-3.0 mm out: inside the 3.4 mm rim.
-		const uint32 Enamel = bMetal ? static_cast<uint32>(L.Accent) : D::FsSink(L.Accent);
-		if (UInstancedStaticMeshComponent* G = PinGroup(FString::Printf(TEXT("enamel/%06x"), Enamel), true, Enamel, false))
+		// The field: the hexagon 3.0 mm out, its corners inside the kit's rim; on the stand-in's body a 12-sided disc 0.1 mm over its face.
+		if (UInstancedStaticMeshComponent* G = PinGroup(UTF8_TO_TCHAR(D::FsPinFieldKey(K, bTint).c_str()), true, K.Body, K.Enamel, bTint))
 		{
-			G->AddInstance(FTransform(Out, At + D::FsAxes(0.0, -0.0028, 0.0), FVector(2.0 * D::FsPinFieldR, 2.0 * D::FsPinFieldR, 0.0004)));
+			const double Radius = PinMesh ? D::FsFieldCorner : D::FsPinFieldR;
+			const FTransform Disc(Out, At + D::FsAxes(0.0, -(PinMesh ? D::FsFieldOut : D::FsPinShapeH + 0.0001), 0.0), FVector(Radius * 100.0, Radius * 100.0, 1.0));
+			Place(G, FieldMesh ? Disc : FTransform(Out, At + D::FsAxes(0.0, -0.0028, 0.0), FVector(2.0 * D::FsPinFieldR, 2.0 * D::FsPinFieldR, 0.0004)), bTint, K.Enamel);
 		}
 	}
 }
@@ -840,14 +1110,16 @@ void UFestShelf::Apply(const FestShelfDetail::FFsPlan& Plan, bool bPacked)
 	}
 	ShowPins(Plan);
 	// Printed, never assumed (§9.4): the shelf against 40,000 triangles and 12 draws, the board against 5,000 triangles; the lead's PIE
-	// reads the real draw calls (stat scenerendering) beside these.
+	// reads the real draw calls (stat scenerendering) beside these. Both tallies are the meshes as drawn (an instanced group's triangles
+	// times its instances, its sections once): the board's full state (G1 polish P-shelf) is 40 kit pins of 108 and 40 fields of 4 on the
+	// board's 444, 4,924 triangles, in five sections with the tint material (the board, the gold, silver and outline bodies, the fields).
 	int32 ShelfTris = 0, ShelfSections = 0, BoardTris = 0, BoardSections = 0;
 	TArray<FString> NaniteMeshes;
 	D::FsTally(ShelfRoot, ShelfTris, ShelfSections, NaniteMeshes);
 	D::FsTally(BoardRoot, BoardTris, BoardSections, NaniteMeshes);
-	UE_LOG(LogTemp, Log, TEXT("The festival shelf%s: %d trophies, %d belts, %d pins; the shelf %d triangles in %d mesh sections (+2 engraving strips; caps 40000 and 12), the board %d triangles in %d sections (cap 5000)"),
+	UE_LOG(LogTemp, Log, TEXT("The festival shelf%s: %d trophies, %d belts, %d pins; the shelf %d triangles in %d mesh sections (+2 engraving strips; caps 40000 and 12), the board %d triangles in %d sections, one draw each (cap 5000; pins' tint material %s)"),
 		D::GFsDevAll ? TEXT(" (dev: ss.Fest.Shelf all)") : TEXT(""), TrophiesShown, static_cast<int32>(Plan.Belts.size()), static_cast<int32>(Plan.Pins.size()), ShelfTris,
-		ShelfSections, BoardTris, BoardSections);
+		ShelfSections, BoardTris, BoardSections, TintMaterial ? TEXT("on") : TEXT("missing: a group a colour"));
 	if (NaniteMeshes.Num() > 0)
 	{
 		// The import keeps Nanite unless something turns it off (shortstack_setup's rule reaches only wear and blended meshes): each of

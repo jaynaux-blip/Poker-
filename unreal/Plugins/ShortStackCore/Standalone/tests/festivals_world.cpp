@@ -3520,6 +3520,10 @@ struct FestTicketRunWorld
 	int Unpaid1 = -1, Unpaid2 = -1, UnpaidBack = -1;
 	bool Parsed = false, NoDevKey = false;
 	int ResultPlace = 0, ResultPaid = -1, Rank = 0;
+	// G1 polish (P-shelf, FestDevHooks): ss.Fest.Hub's answer and its laptop half ("hubseries") for RCOP 2026 (live) and FEIGN 2026 (not
+	// announced yet); ss.Fest.Result rcop win twice more at the cash's clock, the hero's RCOP 2026 rows and wins before and after.
+	std::string HubRcop, HubRcopId, HubFeign, HubFeignId, Win1, Win2;
+	int RowsBefore = -1, RowsAfter = -1, WinsBefore = -1, WinsAfter = -1;
 	double Ms = 0.0;
 };
 FestTicketRunWorld& FestTicketsWorld()
@@ -3594,6 +3598,20 @@ FestTicketRunWorld& FestTicketsWorld()
 		{
 			Run->Keys += K.rfind("festticket:", 0) == 0 ? (Run->Keys.empty() ? "" : " ") + K : std::string();
 		}
+		// G1 polish (P-shelf): the dev hooks, after everything above is read.
+		Run->HubRcop = S2.DebugFest("hub rcop");
+		Run->HubRcopId = S2.DebugFest("hubseries rcop");
+		Run->HubFeign = S2.DebugFest("hub feign");
+		Run->HubFeignId = S2.DebugFest("hubseries feign");
+		auto Count = [&S2](int& Rows, int& Wins) {
+			const std::vector<world::HeroFestResult> All = world::HeroFestResults(S2.Living(), "rcop");
+			Rows = static_cast<int>(All.size());
+			Wins = static_cast<int>(std::count_if(All.begin(), All.end(), [](const world::HeroFestResult& R) { return R.Place == 1; }));
+		};
+		Count(Run->RowsBefore, Run->WinsBefore);
+		Run->Win1 = S2.DebugFest("result rcop win");
+		Run->Win2 = S2.DebugFest("result rcop win");
+		Count(Run->RowsAfter, Run->WinsAfter);
 	}
 	Run->Ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count();
 	return *Run;
@@ -4169,6 +4187,114 @@ void FestSaveRoundTripFixture()
 	const bool NoU3 = FestLinesWorld(WorldText, "world\tleague\t").empty() && FestLinesWorld(Saved, "site\tplay").empty();
 	Expect(Parsed && !Curve && NoU3, "FestSaveRoundTrip: the fixture has no recent record with a curve field (R-25), no League line and no site play");
 }
+
+/**
+ * FestDevHooks (G1 polish P-shelf; PIE_G1_NOTES' dev hooks, testing tools, not the game):
+ * - ss.Fest.Hub, one rule (FestHubEdition): with no year, every brand's edition stays the hub's pick through its Closing and Afterglow
+ *   (fest::PhaseOf, read every three hours from its last day to eight days on) and the next edition takes over once its phase reads Off
+ *   (the last edition stays); a year picks that year's, a year with none nothing. FestHubRefusal says "not yet" before the
+ *   announcement and for a rival's hub with no account there, and nothing for an open hub. In the session, "hub" and the laptop half's
+ *   "hubseries" agree: RCOP 2026's series id while it is live, and for FEIGN 2026 (not announced) the same refusal, no series id, so
+ *   the laptop stays put.
+ * - ss.Fest.Result rcop win twice at the cash's clock: two more results, each in its own numbered event (neither the cash's), both wins.
+ * - ss.Fest.Describe's Pass line (FestPassLine): a first edition needs no events and says so; a second edition's events against its
+ *   need; no festival in its window, no count.
+ * Planted bugs: the answer's old rule (LastDay + kAfterglowDays) or the laptop's (+ 2) in FestHubEdition; "hubseries" answering the
+ * series id before the refusal; FestNextNumbered not skipping the hero's played events; the Pass line's " of <needs>" whatever the
+ * need.
+ */
+void FestDevHooks()
+{
+	namespace sfd = ss::session_fest_detail;
+	namespace net = ss::net;
+	using ss::fest::Brand;
+	using ss::fest::Phase;
+	const double Day = net::MinutesPerDay;
+	// The rule, read off the calendar alone (no world: the Afterglow runs three days from LastEnd).
+	int Reads = 0, Wrong = 0;
+	std::string FirstWrong;
+	for (int Br = 1; Br < static_cast<int>(Brand::Count); ++Br)
+	{
+		const Brand B = static_cast<Brand>(Br);
+		std::vector<const ss::fest::Festival*> Mine;
+		for (const ss::fest::Festival& F : ss::fest::All())
+		{
+			if (F.Which == B)
+			{
+				Mine.push_back(&F);
+			}
+		}
+		for (size_t K = 0; K < Mine.size(); ++K)
+		{
+			const ss::fest::Festival& G = *Mine[K];
+			const ss::fest::Festival* Next = K + 1 < Mine.size() ? Mine[K + 1] : &G;
+			for (double T = static_cast<double>(G.LastDay) * Day; T < static_cast<double>(G.LastDay + 8) * Day; T += 180.0)
+			{
+				const bool Over = net::DayOf(T) > G.LastDay && ss::fest::PhaseOf(G, T, nullptr) == Phase::Off;
+				const ss::fest::Festival* Want = Over ? Next : &G;
+				const ss::fest::Festival* Got = sfd::FestHubEdition(B, 0, T, nullptr);
+				++Reads;
+				if (Got != Want && Wrong++ == 0)
+				{
+					FirstWrong = G.Name + " at " + net::DateLabel(net::DayOf(T)) + " " + net::TimeLabel(T) + ": " + (Got ? Got->Name : std::string("none")) + " for " + Want->Name;
+				}
+			}
+		}
+	}
+	const ss::fest::Festival* Rcop26 = FestEditionWorld(Brand::Rcop, 2026);
+	const ss::fest::Festival* Rcop27 = FestEditionWorld(Brand::Rcop, 2027);
+	const ss::fest::Festival* Feign26 = FestEditionWorld(Brand::Feign, 2026);
+	const ss::fest::Festival* Feign27 = FestEditionWorld(Brand::Feign, 2027);
+	if (!Rcop26 || !Rcop27 || !Feign26 || !Feign27)
+	{
+		Expect(false, "FestDevHooks: RCOP 2026 and 2027 and FEIGN 2026 and 2027 exist");
+		return;
+	}
+	const double Noon = static_cast<double>(Rcop26->FirstDay) * Day + 720.0;
+	Expect(Reads > 1000 && Wrong == 0 && sfd::FestHubEdition(Brand::Rcop, 2027, Noon, nullptr) == Rcop27 && sfd::FestHubEdition(Brand::Rcop, 1999, Noon, nullptr) == nullptr,
+		"FestDevHooks: ss.Fest.Hub's one rule keeps each edition through its Closing and Afterglow and moves to the next once it reads Off; a year picks "
+		"its edition, a year with none nothing (" + std::to_string(Wrong) + " of " + std::to_string(Reads) + " reads wrong" +
+			(FirstWrong.empty() ? std::string() : ", first: " + FirstWrong) + ")");
+	const double FeignEarly = static_cast<double>(Feign26->FirstDay - ss::fest::kAnnounceDays - 1) * Day + 720.0;
+	const double FeignLive = static_cast<double>(Feign26->FirstDay) * Day + 720.0;
+	const std::string Early = sfd::FestHubRefusal(*Feign26, FeignEarly, nullptr, true);
+	const std::string NoAccount = sfd::FestHubRefusal(*Feign26, FeignLive, nullptr, false);
+	const std::string Open = sfd::FestHubRefusal(*Feign26, FeignLive, nullptr, true);
+	const std::string Home = sfd::FestHubRefusal(*Rcop26, Noon, nullptr, false);
+	Expect(Early.rfind("not yet: ", 0) == 0 && Early.find("announced") != std::string::npos && NoAccount.rfind("not yet: ", 0) == 0 &&
+			   NoAccount.find("account") != std::string::npos && Open.empty() && Home.empty(),
+		"FestDevHooks: the hub says not yet before its announcement and for a rival's hub with no account there, and opens otherwise ('" + Early + "' | '" + NoAccount +
+			"' | '" + Open + "' | '" + Home + "')");
+	// The Pass line (§2.10 item 1): FEIGN 2026, Ignite's first edition, needs no events; FEIGN 2027 its gate's.
+	const int Needs27 = ss::fest::PassNeeds(*Feign27, net::Def(net::SiteId::Ignite).Gate);
+	const std::string First = sfd::FestPassLine(net::SiteId::Ignite, 2, 5, FeignLive, nullptr, false);
+	const std::string Second = sfd::FestPassLine(net::SiteId::Ignite, 2, 5, static_cast<double>(Feign27->FirstDay) * Day + 720.0, nullptr, true);
+	const std::string None = sfd::FestPassLine(net::SiteId::Ignite, 1, 5, Noon, nullptr, false);
+	Expect(First == "Ignite's Pass: rents 2 of 2, paid events 5 (a first edition needs none), " + Feign26->Name + " in its window (Live)" && Needs27 > 0 &&
+			   Second == "Ignite's Pass: rents 2 of 2, paid events 5 of " + std::to_string(Needs27) + ", " + Feign27->Name + " in its window (Live), account open" &&
+			   None == "Ignite's Pass: rents 1 of 2, paid events 5, no festival in its window",
+		"FestDevHooks: ss.Fest.Describe's Pass line prints what the gate needs: none for a first edition, its events for the next ('" + First + "' | '" + Second + "' | '" +
+			None + "')");
+	// The session half (FestTicketsWorld's run, RCOP 2026 live).
+	const FestTicketRunWorld& Run = FestTicketsWorld();
+	const ss::fest::Festival* Shown = ss::fest::FestivalOf(Run.HubRcopId);
+	Expect(Run.HubRcop.rfind("hub rcop: would open " + Rcop26->Name + "'s hub on RiverLine (", 0) == 0 && Shown == Rcop26 && Run.HubFeign.rfind("not yet: ", 0) == 0 &&
+			   Run.HubFeignId == Run.HubFeign && ss::fest::FestivalOf(Run.HubFeignId) == nullptr,
+		"FestDevHooks: ss.Fest.Hub's answer and its laptop half agree: RCOP 2026's series id while it is live, FEIGN 2026's refusal and no series id before its "
+		"announcement ('" + Run.HubRcop + "' -> '" + Run.HubRcopId + "'; '" + Run.HubFeign + "' -> '" + Run.HubFeignId + "')");
+	auto EventOf = [](const std::string& Answer) { return Answer.substr(0, Answer.find(" (")); };
+	const std::string Cash = EventOf(Run.Result.substr(Run.Result.find(": ") + 2));
+	const std::string E1 = Run.Win1.find(": ") == std::string::npos ? std::string() : EventOf(Run.Win1.substr(Run.Win1.find(": ") + 2));
+	const std::string E2 = Run.Win2.find(": ") == std::string::npos ? std::string() : EventOf(Run.Win2.substr(Run.Win2.find(": ") + 2));
+	Expect(Run.Win1.rfind("result rcop win: ", 0) == 0 && Run.Win2.rfind("result rcop win: ", 0) == 0 && Run.Win1.find(", 1st of ") != std::string::npos &&
+			   Run.Win2.find(", 1st of ") != std::string::npos && !E1.empty() && E1 != E2 && E1 != Cash && E2 != Cash && Run.RowsAfter == Run.RowsBefore + 2 &&
+			   Run.WinsAfter == Run.WinsBefore + 2,
+		"FestDevHooks: ss.Fest.Result rcop win twice at one clock plants two wins, each in its own numbered event the hero hadn't played ('" + Run.Win1 + "' | '" +
+			Run.Win2 + "'; the cash in " + Cash + "; rows " + std::to_string(Run.RowsBefore) + " -> " + std::to_string(Run.RowsAfter) + ", wins " +
+			std::to_string(Run.WinsBefore) + " -> " + std::to_string(Run.WinsAfter) + ")");
+	std::printf("  [FestDevHooks] %d hub reads; %s | %s -> %s | %s\n  [FestDevHooks] %s\n  [FestDevHooks] %s\n  [FestDevHooks] %s | %s\n", Reads, NoAccount.c_str(),
+		Run.HubRcop.c_str(), Run.HubRcopId.c_str(), Run.HubFeign.c_str(), First.c_str(), Second.c_str(), Run.Win1.c_str(), Run.Win2.c_str());
+}
 } // namespace
 
 void SegWorld()
@@ -4301,6 +4427,10 @@ void SegWorld()
 	if (Only("FestStepCredit"))
 	{
 		FestStepCredit();
+	}
+	if (Only("FestDevHooks"))
+	{
+		FestDevHooks(); // G1 polish (P-shelf): ss.Fest.Hub's one rule, Result's next unplayed event, Describe's Pass line
 	}
 	if (Only("FestMainTicket"))
 	{

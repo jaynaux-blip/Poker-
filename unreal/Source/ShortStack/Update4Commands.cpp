@@ -93,10 +93,12 @@ void Update4Log(const TCHAR* Name, const FString& Line, const FString& Answer)
 }
 
 /**
- * ss.Fest.Hub's laptop half (G1, F-hubs' fhubs_to_lead_3; LEAD_CALLS R-19): the edition <brand> [year] names (fest::All(): that
- * year's, else the brand's on-stage or next edition), opened on its host's SERIES page through the laptop (RiverLine::DebugOpen's
- * "riverline series <site>", then ShowSeries on the edition's series id, so the host routes it to FestivalHub, SPEC v1.7 §2.8.1).
- * A rival's hub shows once the player holds an account there (DebugOpen's site rule). "" when it opened, else why not.
+ * ss.Fest.Hub's laptop half (G1, F-hubs' fhubs_to_lead_3; LEAD_CALLS R-19): the edition <brand> [year] names, opened on its host's
+ * SERIES page through the laptop (RiverLine::DebugOpen's "riverline series <site>", then ShowSeries on the edition's series id, so the
+ * host routes it to FestivalHub, SPEC v1.7 §2.8.1). G1 polish (P-shelf): the edition and the refusal are the session's, one rule with
+ * DebugFest's hub answer (its "hubseries" verb, SessionFest.cpp's FestHubEdition and FestHubRefusal): the edition's series id when the
+ * hub would open, else the answer's "not yet" (before its announcement, or a rival's with no account there), and then the laptop is
+ * left as it was. "" when it opened, else why not.
  */
 FString Update4OpenHub(UWorld* World, const TArray<FString>& Args)
 {
@@ -106,21 +108,15 @@ FString Update4OpenHub(UWorld* World, const TArray<FString>& Args)
 	{
 		return TEXT("ss.Fest.Hub <brand> [year]: only at home (Night One), with a brand named");
 	}
-	const std::string Key(TCHAR_TO_UTF8(*Args[0].ToLower()));
-	const int Year = Args.Num() > 1 ? FCString::Atoi(*Args[1]) : 0;
-	const int Today = ss::net::DayOf(Game->Session.WorldMinutes());
-	const ss::fest::Festival* Pick = nullptr;
-	for (const ss::fest::Festival& F : ss::fest::All())
+	std::string Ask = "hubseries";
+	for (const FString& A : Args)
 	{
-		// All() is in FirstDay order: with no year, the first edition of the brand not yet past its Afterglow's reach.
-		if (!Pick && Key == ss::fest::BrandKey(F.Which) && (Year > 0 ? F.Year == Year : F.LastDay + ss::fest::kAfterglowDays + 2 >= Today))
-		{
-			Pick = &F;
-		}
+		Ask += " " + std::string(TCHAR_TO_UTF8(*A));
 	}
+	const ss::fest::Festival* Pick = ss::fest::FestivalOf(Game->Session.DebugFest(Ask));
 	if (!Pick)
 	{
-		return FString::Printf(TEXT("ss.Fest.Hub %s: no such edition (rcop, ring, tco, slam, push, feign, writ, grit, pennant, reign [year])"), *Args[0]);
+		return TEXT("The laptop doesn't open the hub (the answer above says why).");
 	}
 	if (!Game->Client.DebugOpen(std::string("riverline series ") + ss::net::KeyOf(Pick->Site)))
 	{
