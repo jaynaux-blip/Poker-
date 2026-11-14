@@ -60,6 +60,9 @@
 // Main's guarantee whole, Details clear of it), FestWaveClear (RCOP's waves behind the header text at every phase), FestRollPillClear
 // (no pill reaches CHAMPIONS' prize), the champion card's close line on the card, a finished satellite's winner line, RunItTwice's
 // codes on the hub's rows (no "#"), and FestLockedMain in 2027. Every check at both UI scales; each one's plant in its comment.
+// g1p-rit (the lead's PIE re-check of the polish pass, p10_writ_hub): FestRegisterFits, RegisterBlock's Insufficient funds line for a
+// rival ("RunItTwice balance $0.00 · top up in the Cashier") whole inside a hub row's status cell: WRIT's and FEIGN's 360 cells, GRIT's 300,
+// drawn at both scales with the balance at $0 for two frames.
 #include "UiSeg.h"
 
 #include "CopyLint.h"
@@ -72,6 +75,7 @@
 #include "ShortStack/Game/World.h"
 #include "ShortStack/UI/FestivalArt.h"
 #include "ShortStack/UI/RiverLine.h"
+#include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/WorldFestDetail.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/UI/RiverLineShared.h"
 
@@ -1895,6 +1899,102 @@ void FestLockFitsPage(HubsLaptop& P, const DrawList& One, const std::string& Pag
 	ui_test::Expect((!Want || Seen > 0) && Bad == 0, ("FestLockFits: " + Page + "'s lock lines stand inside their status cells at both scales" + (Where.empty() ? std::string() : ":" + Where)).c_str());
 }
 
+/** FestRegisterFits (g1p-rit; the lead's PIE re-check of the polish pass, p10_writ_hub: WRIT 04's row cut "RunItTwice balance $0.00 · top
+ *  up in the Cashier" at "…in the Casl"): on the hub P has open on Site, with Site's balance at $0 and Grant's career unlocks added for two
+ *  frames (1.0 and 1.5; both put back after and the clock unmoved, so the career's pages are unchanged), every row whose status cell
+ *  shows RegisterBlock's Insufficient funds line ("{Site} balance $0.00 · top up in the Cashier", on one line, or on two broken at its
+ *  " · ") holds it whole (no ellipsis) and inside the cell (360 wide, a GRIT row's 300, both ending 12 inside the rows' right edge) less 4
+ *  a side. Want: at least that many such cells at each scale. Plant: RegisterBlock's Disabled without the fit (the old lambda, the line
+ *  at 14.4 on one line) fails on WRIT's and FEIGN's 360 cells and GRIT's 300 at both scales; SitesFitButton alone, without the two
+ *  lines, fails on GRIT's 300 (the line ends in an ellipsis). */
+void FestRegisterFitsPage(HubsLaptop& P, ss::net::SiteId Site, const std::string& Page, const ss::ui::Rect& Rows, const std::vector<std::string>& Grant, int Want)
+{
+	const std::string Line = ss::ui::rlsites_detail::SitesShortName(Site) + " balance $0.00 \xC2\xB7 top up in the Cashier";
+	const std::string Dots = "\xE2\x80\xA6";
+	ss::site::Account* A = ss::site::AccountOf(P.S.Life.Sites, Site);
+	const ss::Chips Kept = A ? A->Cents : 0;
+	if (A)
+	{
+		A->Cents = 0;
+	}
+	std::vector<std::string> Added;
+	for (const std::string& U : Grant)
+	{
+		if (P.S.Life.Unlocks.insert(U).second)
+		{
+			Added.push_back(U);
+		}
+	}
+	const float Right = Rows.X + Rows.W - 12.0f;
+	int Bad = 0;
+	int Cells[2] = {0, 0};
+	std::string Where, Seen;
+	for (int K = 0; K < 2; ++K)
+	{
+		const float Scale = K == 0 ? 1.0f : 1.5f;
+		const DrawList L = P.Frame(Scale);
+		// A cell's runs, by its width and its row (the rows stand 72 apart from the rows' top), in baseline order.
+		std::map<std::pair<int, int>, std::vector<const ss::ui::DrawCmd*>> ByCell;
+		for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+		{
+			if (Cmd.Type != ss::ui::DrawCmd::Kind::Text || Cmd.Text.Text.size() < 8)
+			{
+				continue;
+			}
+			std::string T = Cmd.Text.Text;
+			if (T.size() > Dots.size() && T.compare(T.size() - Dots.size(), Dots.size(), Dots) == 0)
+			{
+				T.erase(T.size() - Dots.size());
+			}
+			const HubsBox B = HubsRunBox(Cmd);
+			const float Mid = (B.X0 + B.X1) / 2.0f;
+			const int Cell = std::fabs(Mid - (Right - 180.0f)) < 2.0f ? 360 : std::fabs(Mid - (Right - 150.0f)) < 2.0f ? 300 : 0;
+			if (Line.find(T) == std::string::npos || Cell == 0 || Cmd.Text.BaselineY < Rows.Y || Cmd.Text.BaselineY > Rows.Y + Rows.H)
+			{
+				continue;
+			}
+			ByCell[{Cell, static_cast<int>(std::floor((Cmd.Text.BaselineY - Rows.Y) / 72.0f))}].push_back(&Cmd);
+		}
+		for (auto& [Key, Runs] : ByCell)
+		{
+			std::sort(Runs.begin(), Runs.end(), [](const ss::ui::DrawCmd* X, const ss::ui::DrawCmd* Y) { return X->Text.BaselineY < Y->Text.BaselineY; });
+			std::string Joined;
+			bool Inside = true;
+			char Buf[240];
+			for (const ss::ui::DrawCmd* Cmd : Runs)
+			{
+				const HubsBox B = HubsRunBox(*Cmd);
+				Inside = Inside && B.X0 >= Right - static_cast<float>(Key.first) + 4.0f && B.X1 <= Right - 4.0f;
+				Joined += (Joined.empty() ? "" : " ") + Cmd->Text.Text;
+				std::snprintf(Buf, sizeof(Buf), " \"%s\" %.1f-%.1f at %.2f;", Cmd->Text.Text.c_str(), static_cast<double>(B.X0), static_cast<double>(B.X1), static_cast<double>(Cmd->Text.SizePx));
+				Seen += Buf;
+			}
+			++Cells[K];
+			std::snprintf(Buf, sizeof(Buf), " (row %d, %d cell at x%.1f)", Key.second, Key.first, static_cast<double>(Scale));
+			Seen += Buf;
+			const bool Whole = Joined == Line || (Runs.size() == 2 && Runs[0]->Text.Text + " \xC2\xB7 " + Runs[1]->Text.Text == Line);
+			if (!Inside || !Whole)
+			{
+				++Bad;
+				Where += " \"" + Joined + "\"" + Buf + (Inside ? " not whole;" : " outside its cell;");
+			}
+		}
+	}
+	for (const std::string& U : Added)
+	{
+		P.S.Life.Unlocks.erase(U);
+	}
+	if (A)
+	{
+		A->Cents = Kept;
+	}
+	std::printf("  FestRegisterFits: %s shows %d / %d Insufficient funds cell(s) at 1.0 / 1.5:%s\n", Page.c_str(), Cells[0], Cells[1], Seen.c_str());
+	ui_test::Expect(Cells[0] >= Want && Cells[1] >= Want && Bad == 0,
+		("FestRegisterFits: " + Page + "'s Insufficient funds line (" + Line + ") stands whole inside its status cell at both scales (" + std::to_string(Cells[0]) + " / " +
+			std::to_string(Cells[1]) + " cells)" + (Where.empty() ? std::string() : ":" + Where))
+			.c_str());
+}
+
 /** FestBannerStats (g1p-hub item 2; PIE s08_writ_hub, s08_grit_hub: "Jan 22 – Jan …", "May 12 – Ma…"): for every edition of the 2026-2028
  *  calendars on its host, at both UI scales, rlfest_detail::HubStatLayout sets the banner's four stats so every value (24/900) fits its
  *  room whole (the dates beside the progress field, the progress field before the Main card) and no column's text reaches the next
@@ -2377,6 +2477,8 @@ void FestCareerIgnite()
 		int Hash = 0, Coded = 0;
 		HubsRowCodes(L, {24.0f, 408.0f, 1000.0f, 462.0f}, "FEIGN", Hash, Coded);
 		ui_test::Expect(Hash > 0, ("g1p-hub: Ignite's FEIGN rows keep their \"#n\" pills (" + std::to_string(Hash) + ")").c_str());
+		// g1p-rit: Ignite's Insufficient funds line in a 360 cell (the bounty row unlocked, a $0 balance, for two frames).
+		FestRegisterFitsPage(P, ss::net::SiteId::Ignite, "fest_hub_ig_live", {24.0f, 408.0f, 1000.0f, 462.0f}, {"bounty"}, 1);
 	}
 	ui_test::Expect(ui_test::DrewRun(L, "FEIGN") && ui_test::DrewRun(L, "DAY 1 OF 10"), "fest_hub_ig_live: Ignite's SERIES page is FEIGN 2026's hub on its first day (DAY 1 OF 10)");
 	ui_test::Expect(ui_test::DrewRun(L, "PLAYER OF THE SERIES"), "fest_hub_ig_live: THE RACE is preselected while Live");
@@ -2978,6 +3080,8 @@ void FestCareerRiverLine()
 			const DrawList W = P.Frame(1.0f);
 			const std::string Want = Seats == 1 ? std::string("1 SEAT AT THE POOL SO FAR") : std::to_string(Seats) + " SEATS AT THE POOL SO FAR";
 			ui_test::Expect(Ls.Pool > 0 && ui_test::DrewRun(W, Want), ("U33: The Summons' row reads \"" + Want + "\" (max(1, Pool / SeatValue) while it registers)").c_str());
+			// g1p-rit (PIE p10_writ_hub): WRIT's rows with a $0 RunItTwice balance, the 360 cells (The Summons' satellite unlocked, two frames).
+			FestRegisterFitsPage(P, ss::net::SiteId::RunItTwice, "WRIT 2027 (The Summons' hour)", {232.0f, 412.0f, 860.0f, 504.0f}, {"satellite"}, 1);
 			SummonsDone = Sum;
 			SummonsSeat = T.SeatValueCents;
 		}
@@ -3043,6 +3147,8 @@ void FestCareerRiverLine()
 		HubsRowCodes(Half, {232.0f, 412.0f, 860.0f, 504.0f}, "GRIT", Hash, Coded);
 		ui_test::Expect(Hash == 0, ("g1p-hub: GRIT's rows carry no \"#n\" pill at either scale (" + std::to_string(Hash) + ")").c_str());
 		FestLockFitsPage(P, Twice, "fest_hub_rit_twice", {232.0f, 412.0f, 860.0f, 504.0f}, HubsLockLines(), false);
+		// g1p-rit: the same line in GRIT's 300 cell (the show's bounty unlocked, a $0 balance, for two frames).
+		FestRegisterFitsPage(P, ss::net::SiteId::RunItTwice, "fest_hub_rit_twice", {232.0f, 412.0f, 860.0f, 504.0f}, {"bounty"}, 1);
 	}
 	FestStripTenPage(Twice, HubsStripRunItTwice, P.S.WorldMinutes());
 	ui_test::Expect(ui_test::DrewRun(Twice, "NIGHT 2 OF 12"), "fest_hub_rit_twice: GRIT's banner counts nights (U2: NIGHT 2 OF 12)");
