@@ -2124,6 +2124,32 @@ void FestYourStripTickets(HostsLaptop& P, std::string& Report)
 	std::string Hit;
 	const bool ClearSheet = HostsStripClear(Sheet, {Want}, "YOUR IGNITE BALANCE", Hit);
 	ui_test::Expect(ClearSheet, ("FestYourStrip (U37): U37 on the sheet crosses no other line (" + Hit + ")").c_str());
+	// g1p-hub item 14 (§2.16 step 8a, R-18; PIE s08a_step2_ticket_your): the hub's YOUR panel lists the ticket too, here before the hero's
+	// first PENNANT event (no pin: U11's line, then U37 under it), in the panel's body {1044, 392, 532, 478}. Plant: the panel returning
+	// after U11 with no U37 (the old early return). The sheet above is closed first (Ignite's side state forgotten, as the wallet's half does).
+	{
+		ss::ui::rlignite_detail::IgniteForget(&P.RL);
+		// The moments this career earned on its way (FEIGN 2026's mark) are seen first: an overlay holds the pointer over the hub.
+		while (P.S.PeekFestMoment())
+		{
+			P.S.DoneFestMoment();
+		}
+		P.OpenPlay();
+		P.RL.ShowSeries(std::string(), P.Now);
+		P.RL.OpenPage(ss::ui::RiverLine::Page::Series, P.Now);
+		P.Settled();
+		const float Tw = (532.0f - 12.0f) / 3.0f;
+		const ss::ui::DrawList Your = P.Press(1044.0f + 2.0f * (Tw + 6.0f) + Tw / 2.0f, 366.0f);
+		const bool NoPin = !ss::fest::YourLine(*Pennant, &P.S.Living()).Shown;
+		const std::string U11 = "Play any " + ss::fest::NameAfterArticle(Pennant->Name) + " event for your pin.";
+		float U37Y = -1.0f;
+		for (const ss::ui::DrawCmd& Cmd : Your.Cmds)
+		{
+			U37Y = Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == Want && Cmd.Text.X >= 1044.0f && Cmd.Text.BaselineY > 392.0f && Cmd.Text.BaselineY < 870.0f ? Cmd.Text.BaselineY : U37Y;
+		}
+		ui_test::Expect(NoPin && ui_test::DrewRun(Your, U11) && U37Y > 0.0f,
+			("FestYourStrip (U37): the hub's YOUR panel on Ignite reads " + Want + " under U11 before the hero's first " + Pennant->Name + " event (no pin: " + (NoPin ? "yes" : "no") + ")").c_str());
+	}
 	ss::net::EventInstance Plain;
 	bool HasPlain = false;
 	for (const ss::net::EventTemplate& T : Ig.Templates())

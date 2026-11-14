@@ -146,6 +146,24 @@
 // - The Main card's Details (HubMainDetails): on RunItTwice it holds the Main through stream B's rlrit_detail::RitHoldSelection (N-3), so
 //   the Prospectus opens on the Main on a day THE BOARD's window doesn't list it; elsewhere the selection, as before.
 // - HubShownKey: the edition and the broadcast flag of the hub's last live frame, for FestHubBudgets (tests/u4_ui_fest.cpp).
+//
+// G1 polish (key g1p-hub, after G1's PIE: durable/update4/g1/PIE_G1_NOTES.md; the user's "Keep it as is & do the small fixes"):
+// - A row's career lock fits its status cell (HubLockLines, HubLockedCell): where RegisterBlock's one 14.4 line wouldn't fit, the
+//   hub draws the same disabled button with the lock line shrunk to fit (11.5 at least), else on two lines; RegisterBlock otherwise.
+// - The banner's stats (HubStatLayout): a value wider than its column pulls itself left into the room the column before it leaves,
+//   so every edition's dates sit whole beside the progress field on every host (RunItTwice's "Jan 22 - Jan 31"); columns that fit stay.
+// - Main Event Day's Main card: Details stands at the right of the MAIN EVENT line, so the guarantee takes the card's width
+//   (HubMainBoxes).
+// - CHAMPIONS: a name's MaxW keeps room for the glyph and the pill PlayerName draws after it (HubNameTail), so DEFENDING CHAMPION
+//   never reaches the prize; where that room would leave the name less than its flag and a few letters, the name is drawn bare.
+// - RCOP's waves pass behind the header's text: the banner and the hero band hand their text boxes and the Main card to
+//   festart::FestBannerClear (HubBannerArt), which breaks the waves around them at every phase of their motion.
+// - The champion card's "Click anywhere to continue." stands on the card, under TAKE A BOW (clear of Ignite's FUSE and dock).
+// - A finished satellite row shows what its winner won ("Won a seat", "Won a Step {K} ticket"), never a $0.00 prize.
+// - RunItTwice's rows print the festival's code as THE BOARD does (rlrit_detail::RitFestCode: "WRIT 05: $215 Clerk's Office NLHE",
+//   §2.16 step 8), no "#n" pill; a GRIT row's codes stay in its runs' column. Ignite and RiverLine keep "#n".
+// - YOUR <FESTIVAL> lists a held step ticket (U37) before the hero's pin too; a satellite's seat is followed up its ladder by ticket
+//   (Network::NextFor), so RCOP's step rows keep the Main's lock line and U31 in every year, not only 2026 (§2.2.3, §2.16 step 3).
 #include "ShortStack/UI/RiverLine.h"
 
 #include "../Game/SitesDetail.h"
@@ -186,7 +204,21 @@ namespace rlrit_detail
 // UI/RiverLineRit.cpp (stream B, FH-5a; the lead's N-3): the Main card's Details on RunItTwice selects the Main and holds it, so the
 // Prospectus opens on it while THE BOARD's window doesn't list it (FH-7 wires the hub's fsmain to it, HubMainDetails).
 void RitHoldSelection(RiverLine& RL, const std::string& InstanceId);
+// g1p-hub: a festival event's code as THE BOARD prints it ("WRIT 05: ", "GRIT 02-E: "), "" for every other event (N-2).
+std::string RitFestCode(const net::Network& Net, const net::EventInstance& E);
 } // namespace rlrit_detail
+namespace rlnet_detail
+{
+// UI/RiverLineNet.cpp (FH-6b): the edition a person defends (PlayerName's DEFENDING CHAMPION pill); g1p-hub's CHAMPIONS keeps room for it.
+const fest::Festival* NetFestDefends(const world::World& W, int Npc, double WorldMin);
+} // namespace rlnet_detail
+namespace festart
+{
+// UI/FestivalArt.cpp (g1p-hub): the banner with its waves broken around Clear (the header's text boxes, canvas units), and the word-mark's
+// width as FestWordMark sets it out.
+void FestBannerClear(Canvas& C, const FestivalLook& L, const Rect& R, double SinceOpen, float DayProgress, bool MainDay, bool Still, const std::vector<Rect>& Clear);
+float FestWordWidth(const Canvas& C, const FestivalLook& L, const std::string& Text, float Size);
+} // namespace festart
 } // namespace ui
 
 namespace fest
@@ -281,6 +313,9 @@ std::vector<std::string> FestUiInventory()
 		"label\t1 SEAT AT THE POOL SO FAR",
 		"label\t{N} SEATS WON",
 		"label\t1 SEAT WON",
+		// g1p-hub: what a finished satellite row's winner won, in the prize's place (a seat is not money: never "$0.00").
+		"label\tWon a seat",
+		"label\tWon a Step {K} ticket",
 		// FH-4A. U5: THE RACE's toggles. U7: the YOU row. U8: the ladder's rungs (the race's legend draws its five mark labels).
 		"label\tEVERYONE",
 		"label\tPEOPLE YOU KNOW",
@@ -397,6 +432,8 @@ struct Access
 	static double WorldOf(const RiverLine& RL) { return RL.World; }
 	// FH-4A: a name as the lobby draws it (its flag, the name opening the card, one badge and one pill; the player's own in neon).
 	static void PlayerName(RiverLine& RL, int Npc, float X, float Y, float Size, float MaxW, uint8_t Frame) { RL.PlayerName(Npc, X, Y, Size, MaxW, true, Frame); }
+	// g1p-hub: the same name with no badge glyph and no pill after it (CHAMPIONS, where they wouldn't fit beside the prize).
+	static void PlayerNameBare(RiverLine& RL, int Npc, float X, float Y, float Size, float MaxW) { RL.PlayerName(Npc, X, Y, Size, MaxW, false, 0); }
 	// FH-5b: a placing's name as the lobby draws it (someone nobody follows: their flag and screen name), and a laptop cue (the opening
 	// bell's sting; the session plays it once an id every 50 ms).
 	static void PlacingPlayer(RiverLine& RL, const net::Placing& P, float X, float Y, float Size, float MaxW) { RL.PlayerName(P, X, Y, Size, MaxW, true); }
@@ -1009,6 +1046,8 @@ struct HubUi
 	// reel), read by HubShownKey (FestHubBudgets' coverage and its warm-draw bound).
 	double DrewAt = -1.0;
 	bool DrewBroadcast = false;
+	// g1p-hub: the boxes RCOP's waves passed behind in the last banner or hero band (HubBannerArt; u4_ui reads them, HubWaveClear).
+	std::vector<Rect> WaveClear;
 };
 
 /** FH-5b: what Main Event Day keeps per laptop across hub opens (the HubRaceBooks precedent): the opening bell rung for one Main (and
@@ -1150,15 +1189,125 @@ struct HubCtx
 	bool Still = false;     // the stream preview's settled frame (no motion, no input)
 };
 
+/** g1p-hub (§2.8.2; PIE: RunItTwice's "Jan 22 – Jan …"): the banner's four stat columns on Site's frame, from WordX, StatGap apart,
+ *  each a value (24/900) over its label (11/800). Right to left, a column whose text is wider than its room (to the next column less 12;
+ *  the last to the Main card less 16) pulls itself left until it fits (2 to spare), so a column the next one squeezed moves too; a column
+ *  that fits stays where it stood. Then left to right no column starts nearer than 12 to the text of the one before it (a banner too
+ *  crowded for that would cut its later values at their MaxW, as before). X and MaxW (the room each value is drawn in) come back per
+ *  column. Pure but for the canvas' measure (u4_ui's FestBannerStats calls it on every edition and host). */
+void HubStatLayout(const Canvas& C, net::SiteId Site, const std::pair<std::string, std::string> (&Stats)[4], float (&X)[4], float (&MaxW)[4])
+{
+	const HubFrame& Fr = HubFrameOf(Site);
+	float W[4];
+	for (int I = 0; I < 4; ++I)
+	{
+		X[I] = Fr.WordX + Fr.StatGap * static_cast<float>(I);
+		W[I] = std::max(C.Measure(Stats[I].first, 24.0f, 900), C.Measure(Stats[I].second, 11.0f, 800));
+	}
+	for (int I = 3; I >= 1; --I)
+	{
+		const float Right = I == 3 ? Fr.Main.X - 16.0f : X[I + 1] - 12.0f;
+		if (X[I] + W[I] > Right)
+		{
+			X[I] = Right - W[I] - 2.0f;
+		}
+	}
+	for (int I = 1; I < 4; ++I)
+	{
+		X[I] = std::max(X[I], X[I - 1] + W[I - 1] + 12.0f);
+	}
+	for (int I = 0; I < 4; ++I)
+	{
+		MaxW[I] = (I == 3 ? Fr.Main.X - 16.0f : X[I + 1] - 12.0f) - X[I];
+	}
+}
+
+/** One line of the banner's or the hero band's text, set out before the banner is painted (g1p-hub: RCOP's waves pass behind it). */
+struct HubRun
+{
+	std::string Text;
+	float X = 0.0f;
+	float Y = 0.0f; // the baseline
+	TextStyle St;
+};
+
+/** g1p-hub: the box a run's text fills (its measured width, MaxW-capped as Canvas::Text caps it, its face's ascent above the baseline,
+ *  0.95 of its size, and 0.25 below), padded by 5. */
+Rect HubRunBox(const Canvas& C, const HubRun& R)
+{
+	const Font Face = R.St.Face >= 0 ? static_cast<Font>(R.St.Face) : Canvas::FaceFor(R.St.Weight, R.St.Mono);
+	float W = C.Measure(R.Text, R.St.Size, Face);
+	W = R.St.MaxWidth > 0.0f ? std::min(W, R.St.MaxWidth) : W;
+	const float X0 = R.X - (R.St.HAlign == Align::Center ? W * 0.5f : R.St.HAlign == Align::Right ? W : 0.0f);
+	return {X0 - 5.0f, R.Y - 0.95f * R.St.Size - 5.0f, W + 10.0f, 1.2f * R.St.Size + 10.0f};
+}
+
+/** g1p-hub (PIE: RCOP's waves through its tagline): the look's banner in B, its waves (RCOP's WaveRise) passing behind the header: the
+ *  runs' boxes, the word-mark's (Size at baseline WordY), any Extra box (the hero band's flap row) and the Main card are handed to
+ *  festart::FestBannerClear, which breaks each wave line around them; every other look draws festart::FestBanner as before. The boxes
+ *  are kept for u4_ui (HubWaveClear). */
+void HubBannerArt(HubCtx& X, HubUi& U, bool MainDay, const std::vector<HubRun>& Runs, float WordY, float WordSize, const std::vector<Rect>& Extra)
+{
+	const HubFacts& H = X.H;
+	const Rect& B = X.Fr.Banner;
+	U.WaveClear.clear();
+	if (X.Look.Move != festart::Motion::WaveRise)
+	{
+		festart::FestBanner(X.C, X.Look, B, X.SinceOpen, H.DayProgress, MainDay, X.Still);
+		return;
+	}
+	for (const HubRun& R : Runs)
+	{
+		U.WaveClear.push_back(HubRunBox(X.C, R));
+	}
+	const float Ww = festart::FestWordWidth(X.C, X.Look, H.F->Name, WordSize);
+	U.WaveClear.push_back({X.Fr.WordX - 5.0f, WordY - 0.95f * WordSize - 5.0f, Ww + 10.0f, 1.2f * WordSize + 10.0f});
+	U.WaveClear.insert(U.WaveClear.end(), Extra.begin(), Extra.end());
+	if (H.HasMain)
+	{
+		U.WaveClear.push_back(X.Fr.Main);
+	}
+	festart::FestBannerClear(X.C, X.Look, B, X.SinceOpen, H.DayProgress, MainDay, X.Still, U.WaveClear);
+}
+
 /** The banner (§2.8.2): the look's gradient and motif (FestBanner), today's crest at 150, the word-mark (46), the full title, the
- *  tagline and RCOP's second line, and the four stats from WordX, StatGap apart, each a value over its label. */
-void HubBanner(HubCtx& X)
+ *  tagline and RCOP's second line, and the four stats from WordX, StatGap apart, each a value over its label (g1p-hub: HubStatLayout
+ *  keeps every value whole; the text is set out first so RCOP's waves pass behind it, HubBannerArt). */
+void HubBanner(HubCtx& X, HubUi& U)
 {
 	const HubFacts& H = X.H;
 	const Rect& B = X.Fr.Banner;
 	// A ground under the look (FestBanner paints the Bg2 -> Felt gradient over it once F-look's body lands, FL-7).
 	X.C.FillRoundRect(B, 18.0f, Paint::Linear({B.X, 0.0f}, {B.X + B.W, 0.0f}, rlsites_detail::SitesTone(0x0e1726), rlsites_detail::SitesTone(0x111c2e)));
-	festart::FestBanner(X.C, X.Look, B, X.SinceOpen, H.DayProgress, H.Ph == fest::Phase::MainDay, X.Still);
+	const float TextW = X.Fr.Main.X - X.Fr.WordX - 24.0f;
+	std::vector<HubRun> Runs;
+	float TagY = 228.0f;
+	if (!H.Series->Title.empty())
+	{
+		Runs.push_back({NetUpper(H.Series->Title), X.Fr.WordX, 214.0f, Ts(13.0f, 700, pal::Accent2, Align::Left, Baseline::Alphabetic, false, TextW)});
+		TagY = 236.0f;
+	}
+	Runs.push_back({H.Series->Tagline, X.Fr.WordX, TagY, Ts(16.0f, 500, rlsites_detail::SitesTone(0xc3cedf), Align::Left, Baseline::Alphabetic, false, TextW)});
+	if (H.F->Which == fest::Brand::Rcop)
+	{
+		Runs.push_back({"The river runs highest in the fall.", X.Fr.WordX, 246.0f, Ts(13.0f, 500, pal::Accent2, Align::Left, Baseline::Alphabetic, false, TextW)});
+	}
+	const std::pair<std::string, std::string> State = HubStateStat(H);
+	const std::pair<std::string, std::string> Stats[4] = {
+		{NetMoney(H.Series->GtdCents), "GUARANTEED"},
+		{std::to_string(H.Series->Events), "EVENTS"},
+		{net::DateLabel(H.F->FirstDay) + " \xE2\x80\x93 " + net::DateLabel(H.F->LastDay), "DATES"},
+		State,
+	};
+	float Sx[4];
+	float MaxW[4];
+	HubStatLayout(X.C, H.F->Site, Stats, Sx, MaxW);
+	for (int I = 0; I < 4; ++I)
+	{
+		Runs.push_back({Stats[I].first, Sx[I], 292.0f, Ts(24.0f, 900, I == 0 ? pal::Gold : pal::Ink, Align::Left, Baseline::Alphabetic, false, MaxW[I])});
+		Runs.push_back({Stats[I].second, Sx[I], 314.0f, Ts(11.0f, 800, pal::Muted)});
+	}
+	HubBannerArt(X, U, H.Ph == fest::Phase::MainDay, Runs, 196.0f, 46.0f, {});
 	X.C.StrokeRoundRect(B, 18.0f, NetA(pal::Line, 0.9f), 1.0f);
 	eventart::SeriesCrest(X.C, *H.Series, X.Fr.CrestX, X.Fr.CrestY, 150.0f, X.Still ? 0.0 : X.Now);
 	// PC-10: the overload with DayProgress and Still (an eight-argument call ending in a float would bind the old one).
@@ -1168,35 +1317,13 @@ void HubBanner(HubCtx& X)
 		// No look yet (F-look's table, FL-1): the name in the site's title face, where the word-mark stands.
 		X.UI.Text(H.F->Name, X.Fr.WordX, 196.0f, Ts(46.0f, 900, pal::Ink));
 	}
-	const float TextW = X.Fr.Main.X - X.Fr.WordX - 24.0f;
-	float TagY = 228.0f;
-	if (!H.Series->Title.empty())
+	for (const HubRun& R : Runs)
 	{
-		X.UI.Text(NetUpper(H.Series->Title), X.Fr.WordX, 214.0f, Ts(13.0f, 700, pal::Accent2, Align::Left, Baseline::Alphabetic, false, TextW));
-		TagY = 236.0f;
-	}
-	X.UI.Text(H.Series->Tagline, X.Fr.WordX, TagY, Ts(16.0f, 500, rlsites_detail::SitesTone(0xc3cedf), Align::Left, Baseline::Alphabetic, false, TextW));
-	if (H.F->Which == fest::Brand::Rcop)
-	{
-		X.UI.Text("The river runs highest in the fall.", X.Fr.WordX, 246.0f, Ts(13.0f, 500, pal::Accent2, Align::Left, Baseline::Alphabetic, false, TextW));
-	}
-	const std::pair<std::string, std::string> State = HubStateStat(H);
-	const std::pair<std::string, std::string> Stats[4] = {
-		{NetMoney(H.Series->GtdCents), "GUARANTEED"},
-		{std::to_string(H.Series->Events), "EVENTS"},
-		{net::DateLabel(H.F->FirstDay) + " \xE2\x80\x93 " + net::DateLabel(H.F->LastDay), "DATES"},
-		State,
-	};
-	for (int I = 0; I < 4; ++I)
-	{
-		const float Sx = X.Fr.WordX + X.Fr.StatGap * static_cast<float>(I);
-		const float MaxW = I == 3 ? X.Fr.Main.X - Sx - 16.0f : X.Fr.StatGap - 12.0f;
-		X.UI.Text(Stats[I].first, Sx, 292.0f, Ts(24.0f, 900, I == 0 ? pal::Gold : pal::Ink, Align::Left, Baseline::Alphabetic, false, MaxW));
-		X.UI.Text(Stats[I].second, Sx, 314.0f, Ts(11.0f, 800, pal::Muted));
+		X.UI.Text(R.Text, R.X, R.Y, R.St);
 	}
 }
 
-void HubName(HubCtx& X, int Npc, const std::string& Kept, float Ax, float Nx, float Base, float Size, float MaxW, float Ring);
+void HubName(HubCtx& X, int Npc, const std::string& Kept, float Ax, float Nx, float Base, float Size, float MaxW, float Ring, bool Badges = true);
 
 /** The guarantee meter (§2.8.4, U13; FH-5b) in R inside the Main card: THE GUARANTEE, a track with the pool so far (the registered
  *  entries' prize share) against a gold tick at the guarantee and a hollow mark at the projection, and at the right PROJ SHORT or
@@ -1327,7 +1454,23 @@ void HubHeroBand(HubCtx& X, HubUi& U)
 	const HubFacts& H = X.H;
 	const Rect& B = X.Fr.Banner;
 	X.C.FillRoundRect(B, 18.0f, Paint::Linear({B.X, 0.0f}, {B.X + B.W, 0.0f}, rlsites_detail::SitesTone(0x0e1726), rlsites_detail::SitesTone(0x111c2e)));
-	festart::FestBanner(X.C, X.Look, B, X.SinceOpen, H.DayProgress, true, X.Still);
+	// g1p-hub: the band's text set out first, so RCOP's waves pass behind it, the flap row and the live dot (HubBannerArt).
+	const float FlapY = B.Y + 84.0f;
+	const std::string Flap = HubFlapText(H);
+	const net::Status St = H.MainLive.St;
+	const bool LiveLine = St == net::Status::LateReg || St == net::Status::Running || St == net::Status::FinalTable;
+	std::vector<HubRun> Runs = {{"MAIN EVENT DAY", X.Fr.WordX, B.Y + 72.0f, Ts(12.0f, 800, pal::Accent)}};
+	if (LiveLine)
+	{
+		Runs.push_back({"LIVE \xC2\xB7 " + Grouped(H.MainLive.Left) + " LEFT OF " + Grouped(H.MainLive.Entries), X.Fr.WordX, B.Y + 176.0f,
+			Ts(18.0f, 800, pal::Ink, Align::Left, Baseline::Alphabetic, false, X.Fr.Main.X - X.Fr.WordX - 24.0f)});
+	}
+	else if (St == net::Status::Announced || St == net::Status::Registering)
+	{
+		Runs.push_back({"REGISTERING", X.Fr.WordX, B.Y + 176.0f, Ts(14.0f, 800, pal::Muted)});
+	}
+	const float FlapW = std::max(0.0f, 48.0f * static_cast<float>(Flap.size()) - 4.0f);
+	HubBannerArt(X, U, true, Runs, B.Y + 48.0f, 34.0f, {Rect{X.Fr.WordX - 5.0f, FlapY - 5.0f, FlapW + 10.0f, 74.0f}, Rect{X.Fr.WordX - 21.0f, B.Y + 161.0f, 18.0f, 18.0f}});
 	X.C.StrokeRoundRect(B, 18.0f, NetA(pal::Line, 0.9f), 1.0f);
 	eventart::SeriesCrest(X.C, *H.Series, X.Fr.CrestX, X.Fr.CrestY, 150.0f, X.Still ? 0.0 : X.Now);
 	// PC-10: the overload with DayProgress and Still.
@@ -1336,19 +1479,15 @@ void HubHeroBand(HubCtx& X, HubUi& U)
 	{
 		X.UI.Text(H.F->Name, X.Fr.WordX, B.Y + 48.0f, Ts(34.0f, 900, pal::Ink));
 	}
-	X.UI.Text("MAIN EVENT DAY", X.Fr.WordX, B.Y + 72.0f, Ts(12.0f, 800, pal::Accent));
-	const float FlapY = B.Y + 84.0f;
-	HubFlap(X, U, HubFlapText(H), X.Fr.WordX, FlapY);
-	const net::Status St = H.MainLive.St;
-	if (St == net::Status::LateReg || St == net::Status::Running || St == net::Status::FinalTable)
+	X.UI.Text(Runs[0].Text, Runs[0].X, Runs[0].Y, Runs[0].St);
+	HubFlap(X, U, Flap, X.Fr.WordX, FlapY);
+	if (Runs.size() > 1)
 	{
-		X.UI.Text("LIVE \xC2\xB7 " + Grouped(H.MainLive.Left) + " LEFT OF " + Grouped(H.MainLive.Entries), X.Fr.WordX, B.Y + 176.0f,
-			Ts(18.0f, 800, pal::Ink, Align::Left, Baseline::Alphabetic, false, X.Fr.Main.X - X.Fr.WordX - 24.0f));
-		X.C.FillCircle(X.Fr.WordX - 12.0f, B.Y + 170.0f, 4.0f, pal::Red);
+		X.UI.Text(Runs[1].Text, Runs[1].X, Runs[1].Y, Runs[1].St);
 	}
-	else if (St == net::Status::Announced || St == net::Status::Registering)
+	if (LiveLine)
 	{
-		X.UI.Text("REGISTERING", X.Fr.WordX, B.Y + 176.0f, Ts(14.0f, 800, pal::Muted));
+		X.C.FillCircle(X.Fr.WordX - 12.0f, B.Y + 170.0f, 4.0f, pal::Red);
 	}
 	// The opening bell (§2.8.4): once per laptop and Main, when the hub draws within three world minutes of the start (never in a still).
 	HubCast& Cast = HubCasts()[&X.RL];
@@ -1544,6 +1683,16 @@ void HubMainDetails(HubCtx& X)
 	Access::OpenPage(X.RL, RiverLine::Page::Lobby, X.Now);
 }
 
+/** g1p-hub (PIE: Main Event Day's "$25,000,000 GUARANT…"): the Main card's Details button on Site's frame and the room the guarantee is
+ *  drawn in. On Main Event Day (Broadcast) Details stands at the right of the MAIN EVENT line, so the guarantee takes the card's width
+ *  as on every other day; otherwise Details sits at the card's foot. Pure (u4_ui's FestMainCardFits measures every edition's Main in it). */
+void HubMainBoxes(net::SiteId Site, bool Broadcast, Rect& Details, float& GtdRoom)
+{
+	const Rect& M = HubFrameOf(Site).Main;
+	Details = Broadcast ? Rect{M.X + M.W - 104.0f, M.Y + 10.0f, 88.0f, 24.0f} : Rect{M.X + M.W - 114.0f, M.Y + M.H - 44.0f, 96.0f, 32.0f};
+	GtdRoom = M.W - 36.0f;
+}
+
 /** The Main card (§2.8.2): MAIN EVENT with the date and start, "{Gtd} GUARANTEED", the buy-in and stack, "+ {Added} ADDED" (the rival
  *  Mains), the lock line while the Main isn't joinable (§2.2.3), "{N} SEATS WON BY SATELLITE" once a seat is won, and Details
  *  (`fsmain`), which opens the lobby's event panel on the Main. The defending champion (U4) and "Last year: {Prize}." (U23) are
@@ -1567,11 +1716,15 @@ void HubMainCard(HubCtx& X)
 	O.Size = 14.0f;
 	if (H.Broadcast)
 	{
-		// Main Event Day (§2.8.4): Details beside the guarantee, one line over the meter (the lock line, else the buy-in) and one
-		// under it (U4, else the added money, else the seats won).
+		// Main Event Day (§2.8.4): Details at the right of the MAIN EVENT line (g1p-hub: it stood beside the guarantee, which it cut
+		// short: HubMainBoxes), the guarantee the card's width, one line over the meter (the lock line, else the buy-in) and one under
+		// it (U4, else the added money, else the seats won).
+		Rect Details;
+		float GtdRoom = 0.0f;
+		HubMainBoxes(H.F->Site, true, Details, GtdRoom);
 		if (H.MainGtd > 0)
 		{
-			X.UI.Text(NetMoney(H.MainGtd) + " GUARANTEED", M.X + 18.0f, M.Y + 58.0f, Ts(22.0f, 900, pal::Gold, Align::Left, Baseline::Alphabetic, false, M.W - 132.0f));
+			X.UI.Text(NetMoney(H.MainGtd) + " GUARANTEED", M.X + 18.0f, M.Y + 58.0f, Ts(22.0f, 900, pal::Gold, Align::Left, Baseline::Alphabetic, false, GtdRoom));
 		}
 		if (!H.MainLock.empty())
 		{
@@ -1593,7 +1746,7 @@ void HubMainCard(HubCtx& X)
 			X.UI.Text(Foot, M.X + 18.0f, M.Y + 158.0f, Ts(11.0f, 800, !Defends.empty() ? pal::Gold : H.MainAdded > 0 ? pal::Accent : pal::Muted, Align::Left, Baseline::Alphabetic, false,
 				M.W - 36.0f));
 		}
-		if (rlsites_detail::SitesButton(X.UI, X.C, "fsmain", {M.X + M.W - 104.0f, M.Y + 36.0f, 88.0f, 28.0f}, "Details", O) && !X.Still)
+		if (rlsites_detail::SitesButton(X.UI, X.C, "fsmain", Details, "Details", O) && !X.Still)
 		{
 			HubMainDetails(X);
 		}
@@ -1945,22 +2098,25 @@ void HubDayRows(const net::Network& Net, const fest::Festival& F, HubUi& U, int 
 	U.Late = std::move(Late);
 }
 
-/** A satellite's seat followed up its ladder to the Main it ends in: that Main's lock line while it isn't joinable (§2.2.3), else "". */
+/** A satellite's seat followed up its ladder to the Main it ends in: that Main's lock line while it isn't joinable (§2.2.3), else "".
+ *  g1p-hub: each seat is followed by its ticket (Network::NextFor: the next run that takes it, a template's or a key's through Takes),
+ *  so a ticket that names no template of its own (RCOP's "rcop-main" from 2027 on) still reaches its Main and the row keeps the lock
+ *  line and U31 in every year (§2.16 step 3; PIE: RCOP 2027's Step 1 row had neither). */
 std::string HubSeatLock(const net::Network& Net, const net::EventTemplate& T, double From, int Unlocks)
 {
 	const net::EventTemplate* At = &T;
+	net::EventInstance Target;
 	for (int K = 0; K < 8 && At->Fmt == net::Format::Satellite && !At->SeatTicket.empty(); ++K)
 	{
-		const net::EventTemplate* Up = Net.FindTemplate(At->SeatTicket);
-		if (!Up)
+		if (!Net.NextFor(At->SeatTicket, From, Target))
 		{
 			return std::string();
 		}
-		At = Up;
+		At = &Net.TemplateOf(Target);
+		From = Target.Start;
 	}
-	net::EventInstance Target;
 	std::string SeatLock;
-	if (At == &T || At->Fmt == net::Format::Satellite || !Net.Next(At->Id, From, Target) || Net.Joinable(Target, &SeatLock, Unlocks))
+	if (At == &T || At->Fmt == net::Format::Satellite || Net.Joinable(Target, &SeatLock, Unlocks))
 	{
 		return std::string();
 	}
@@ -1974,6 +2130,81 @@ std::string HubShowTime(double Start)
 	const long long H = M / 60;
 	const long long H12 = H % 12 == 0 ? 12 : H % 12;
 	return std::to_string(H12) + (M % 60 != 0 ? ":" + rlnet_detail::NetPad2(M % 60) : std::string()) + (H < 12 ? " AM" : " PM");
+}
+
+/** g1p-hub: the largest size from Size down to Floor (quarter steps) at which Text measures within W in the weight's face (Mono: the
+ *  mono face); Floor when none does (a caller's MaxW then ellipsizes it). */
+float HubFitSize(const Canvas& C, const std::string& Text, float Size, int Weight, bool Mono, float W, float Floor)
+{
+	float S = Size;
+	while (S > Floor && C.Measure(Text, S, Weight, Mono) > W)
+	{
+		S = std::max(Floor, S - 0.25f);
+	}
+	return S;
+}
+
+constexpr float kHubLockSub = 20.0f * 0.72f; // RegisterBlock's sub line: its button's 20 at 0.72, mono
+constexpr float kHubLockOne = 11.5f;         // the smallest size one line shrinks to
+constexpr float kHubLockTwo = 10.5f;         // two lines' largest size
+constexpr float kHubLockPad = 10.0f;         // the status cell's margin, each side
+
+/** g1p-hub (PIE: the hub rows clipped the career's lock line, "Cash in any tournament to unlock bounty even…"): Network::Joinable's
+ *  lock line set out for a status cell W wide (kHubLockPad a side), mono as RegisterBlock's sub line: one line at its 14.4 when it fits,
+ *  else one line shrunk to fit down to 11.5, else two lines split at the space that leaves the longer half shortest, at the largest size
+ *  up to 10.5 at which both fit (9 at least). Returns the size, the line or lines in Lines. Pure but for the canvas' measure (u4_ui's
+ *  FestLockFits sets out every lock line for both cells at both scales). */
+float HubLockLines(const Canvas& C, const std::string& Lock, float W, std::vector<std::string>& Lines)
+{
+	const float Room = W - 2.0f * kHubLockPad;
+	const float One = HubFitSize(C, Lock, kHubLockSub, 600, true, Room, kHubLockOne);
+	size_t Best = std::string::npos;
+	float BestW = 0.0f;
+	if (C.Measure(Lock, One, 600, true) > Room)
+	{
+		for (size_t I = Lock.find(' '); I != std::string::npos; I = Lock.find(' ', I + 1))
+		{
+			const float Wd = std::max(C.Measure(Lock.substr(0, I), kHubLockTwo, 600, true), C.Measure(Lock.substr(I + 1), kHubLockTwo, 600, true));
+			if (Best == std::string::npos || Wd < BestW)
+			{
+				Best = I;
+				BestW = Wd;
+			}
+		}
+	}
+	if (Best == std::string::npos)
+	{
+		Lines = {Lock};
+		return One;
+	}
+	Lines = {Lock.substr(0, Best), Lock.substr(Best + 1)};
+	const bool FirstLonger = C.Measure(Lines[0], kHubLockTwo, 600, true) >= C.Measure(Lines[1], kHubLockTwo, 600, true);
+	return HubFitSize(C, Lines[FirstLonger ? 0 : 1], kHubLockTwo, 600, true, Room, 9.0f);
+}
+
+/** g1p-hub: RegisterBlock's Locked state drawn by the hub where its lock line needs fitting (HubLockLines): the same disabled button in
+ *  the event's site look, "Locked" where RegisterBlock puts its label (a one-space sub line holds it there), then the line where
+ *  RegisterBlock's sub line stands, or the two lines under the label, in the sub line's ink at the disabled button's alpha. */
+void HubLockedCell(HubCtx& X, const net::EventInstance& E, const Rect& R, const std::string& Lock)
+{
+	ButtonOpts O;
+	O.Kind = ButtonKind::Secondary;
+	O.Enabled = false;
+	O.Size = 20.0f;
+	O.Sub = " ";
+	rlsites_detail::SitesButton(X.UI, X.C, "regx", R, "Locked", O, rlsites_detail::SitesLook(net::SiteOf(E.Id)));
+	std::vector<std::string> Lines;
+	const float Size = HubLockLines(X.C, Lock, R.W, Lines);
+	const float A0 = X.C.GetAlpha();
+	X.C.SetAlpha(A0 * 0.35f);
+	const float Cx = R.X + R.W / 2.0f;
+	const float Cy = R.Y + R.H / 2.0f;
+	for (size_t I = 0; I < Lines.size(); ++I)
+	{
+		const float Base = Lines.size() == 1 ? Cy + O.Size * 0.85f : Cy + 8.5f + 11.0f * static_cast<float>(I);
+		X.C.Text(Lines[I], Cx, Base, Ts(Size, 600, pal::Ink, Align::Center, Baseline::Alphabetic, true));
+	}
+	X.C.SetAlpha(A0);
 }
 
 /** The day's rows (§2.8.2; FH-1b): seven at 72 in view (the wheel scrolls the rest; Ignite's seventh peeks under its frame), each
@@ -2079,7 +2310,11 @@ void HubRows(HubCtx& X, HubUi& U, int Day)
 		eventart::Emblem(X.C, T, R.X + 104.0f + Shift, R.Y + 33.0f, 30.0f, X.Still ? 0.0 : X.Now);
 		const float StatusX = Rb.X - 138.0f;
 		float Nx = R.X + 128.0f + Shift;
-		if (T.EventNo > 0)
+		// g1p-hub (§2.16 step 8, N-2): RunItTwice prints a festival event's code as THE BOARD does, no "#": the row's name carries it
+		// ("WRIT 05: $215 Clerk's Office NLHE"); a GRIT row's two codes stand in its runs' column. Ignite and RiverLine keep "#n".
+		const bool RitCodes = F.Site == net::SiteId::RunItTwice;
+		const std::string Code = RitCodes && !Pair ? rlrit_detail::RitFestCode(Net, E) : std::string();
+		if (T.EventNo > 0 && !RitCodes)
 		{
 			Nx += rlnet_detail::NetPill(X.C, "#" + std::to_string(T.EventNo), Nx, R.Y + 14.0f, IsMain || TitleEvent ? pal::Gold : EdgeCol, true, 10.0f) + 8.0f;
 		}
@@ -2088,7 +2323,9 @@ void HubRows(HubCtx& X, HubUi& U, int Day)
 			// U35's STEP {K} in the number's place (a satellite has none).
 			Nx += rlnet_detail::NetPill(X.C, StepPills.first, Nx, R.Y + 14.0f, pal::Accent2, true, 10.0f) + 8.0f;
 		}
-		X.UI.Text(rlnet_detail::NetShortName(T.Name), Nx, R.Y + 28.0f, Ts(15.0f, 700, pal::Ink, Align::Left, Baseline::Alphabetic, false, std::max(40.0f, StatusX - 12.0f - Nx)));
+		const float NameW = std::max(40.0f, StatusX - 12.0f - Nx);
+		const std::string RowName = Code + rlnet_detail::NetShortName(T.Name);
+		X.UI.Text(RowName, Nx, R.Y + 28.0f, Ts(Code.empty() ? 15.0f : HubFitSize(X.C, RowName, 15.0f, 700, false, NameW, 12.5f), 700, pal::Ink, Align::Left, Baseline::Alphabetic, false, NameW));
 		const std::string SeatLock = IsSat ? HubSeatLock(Net, T, E.Start, S.Unlocks()) : std::string();
 		float Lx = R.X + 128.0f + Shift;
 		if (!SeatLock.empty())
@@ -2179,7 +2416,17 @@ void HubRows(HubCtx& X, HubUi& U, int Day)
 				const net::Placing& W = Res.FinalTable.front();
 				rlnet_detail::NetTrophy(X.C, Rb.X + 18.0f, Rb.Y + 9.0f, 26.0f, Hex(0xffe08a), Hex(0xc9962b));
 				X.UI.Text(Access::PlacingName(X.RL, W), Rb.X + 40.0f, Rb.Y + 20.0f, Ts(14.0f, 700, W.Player == -1 ? pal::Accent : pal::Ink, Align::Left, Baseline::Alphabetic, false, Rb.W - 44.0f));
-				X.UI.Text(Money(W.Prize), Rb.X + 40.0f, Rb.Y + 38.0f, Ts(12.0f, 700, pal::Gold, Align::Left, Baseline::Alphabetic, true));
+				if (IsSat && !T.SeatTicket.empty())
+				{
+					// g1p-hub (PIE: "Main Last Chance" won with "$0.00"): a satellite's first place takes its seat (a step's ticket up the
+					// ladder), which is not money.
+					X.UI.Text(IsStep && StepIt->second.second > 0 ? "Won a Step " + std::to_string(StepIt->second.second) + " ticket" : std::string("Won a seat"), Rb.X + 40.0f,
+						Rb.Y + 38.0f, Ts(12.0f, 700, pal::Gold, Align::Left, Baseline::Alphabetic, false, Rb.W - 44.0f));
+				}
+				else
+				{
+					X.UI.Text(Money(W.Prize), Rb.X + 40.0f, Rb.Y + 38.0f, Ts(12.0f, 700, pal::Gold, Align::Left, Baseline::Alphabetic, true));
+				}
 			}
 		}
 		else if (!Armed || IsMine)
@@ -2189,7 +2436,19 @@ void HubRows(HubCtx& X, HubUi& U, int Day)
 			{
 				Access::SelectEvent(X.RL, E.Id);
 			}
-			Access::RegisterBlock(X.RL, E, L, Rb, X.Now);
+			// g1p-hub (PIE: "Cash in any tournament to unlock bounty even…"): RegisterBlock's Locked state, in its own order (not seated, not
+			// running), with the career's lock line fitted to the cell where its one line at 14.4 wouldn't fit.
+			std::string Lock;
+			const bool Shut = L.St == net::Status::Running || L.St == net::Status::FinalTable;
+			std::vector<std::string> LockSet;
+			if (!S.IsPlaying(E.Id) && !Shut && !Net.Joinable(E, &Lock, S.Unlocks()) && HubLockLines(X.C, Lock, Rb.W, LockSet) < kHubLockSub)
+			{
+				HubLockedCell(X, E, Rb, Lock);
+			}
+			else
+			{
+				Access::RegisterBlock(X.RL, E, L, Rb, X.Now);
+			}
 		}
 	}
 	if (X.Fr.FadeY > 0.0f && X.Fr.FadeY < Rr.Y + Rr.H)
@@ -2367,7 +2626,7 @@ int HubTabs(HubCtx& X, HubUi& U)
 /** A name in the right column (FH-4A): the lobby's PlayerName for the player and for a world person (a world npc id is the network's
  *  player index), after an r Ring avatar centred at (Ax, Base - 0.4 Size) when Ring > 0; a name the world no longer holds prints as
  *  the Honor kept it. */
-void HubName(HubCtx& X, int Npc, const std::string& Kept, float Ax, float Nx, float Base, float Size, float MaxW, float Ring)
+void HubName(HubCtx& X, int Npc, const std::string& Kept, float Ax, float Nx, float Base, float Size, float MaxW, float Ring, bool Badges)
 {
 	const Session& S = Access::SessionOf(X.RL);
 	const world::Npc* P = X.H.W && Npc >= 0 && Npc < static_cast<int>(net::Shared().Players().size()) ? X.H.W->Get(Npc) : nullptr;
@@ -2378,7 +2637,11 @@ void HubName(HubCtx& X, int Npc, const std::string& Kept, float Ax, float Nx, fl
 	{
 		Frame = rlnet_detail::NetBadgeFrame(rlnet_detail::NetAvatar(X.C, Ax, Base - Size * 0.4f, Ring, Nm, Color{0.0f, 0.0f, 0.0f, 0.0f}, Hero));
 	}
-	if (Hero || P)
+	if ((Hero || P) && !Badges)
+	{
+		Access::PlayerNameBare(X.RL, Npc, Nx, Base, Size, MaxW);
+	}
+	else if (Hero || P)
 	{
 		Access::PlayerName(X.RL, Npc, Nx, Base, Size, MaxW, Frame);
 	}
@@ -2567,6 +2830,39 @@ void HubRace(HubCtx& X, HubUi& U)
 }
 
 /** A roll edition's height (§2.8.2, v1.6): a championship's (RCOP's included) four lines take 120 units, any other edition's two 88. */
+/** g1p-hub (PIE: DEFENDING CHAMPION over CHAMPIONS' prize): how far RiverLine::PlayerName draws past a name's MaxW at Size with no
+ *  avatar ring (Frame 0): the badge glyph the network shows, then its one pill as PlayerName picks it (YOU for the player; RIVAL,
+ *  DEFENDING CHAMPION, TEAM RL with no glyph, or NEW with no glyph and 30 days on the scene). 0 for a name nobody follows. */
+float HubNameTail(HubCtx& X, int Npc, float Size)
+{
+	const Session& S = Access::SessionOf(X.RL);
+	const bool Hero = Npc == -1;
+	if (!Hero && (Npc < 0 || Npc >= static_cast<int>(net::Shared().Players().size()) || !S.Living().Get(Npc)))
+	{
+		return 0.0f;
+	}
+	const float Gw = badge::Top(rlnet_detail::NetBadgesOf(S, Npc), badge::Network, 0) ? std::round(Size + 1.0f) + 6.0f : 0.0f;
+	std::string Pill;
+	if (Hero)
+	{
+		Pill = "YOU";
+	}
+	else
+	{
+		const net::Player& P = net::Shared().Players()[static_cast<size_t>(Npc)];
+		const world::Npc* N = S.Living().Get(Npc);
+		const double World = Access::WorldOf(X.RL);
+		Pill = P.Rival                                                                          ? std::string("RIVAL")
+			: rlnet_detail::NetFestDefends(S.Living(), Npc, World)                              ? std::string("DEFENDING CHAMPION")
+			: P.Pro && Gw <= 0.0f                                                                ? std::string("TEAM RL")
+			: Gw <= 0.0f && N->Came != world::Arrival::None && net::DayOf(World) - N->Arrived <= 30 ? std::string("NEW")
+																								   : std::string();
+	}
+	return Pill.empty() ? Gw : 8.0f + Gw + X.C.Measure(Pill, 9.0f, 700) + 9.0f * 1.3f;
+}
+
+constexpr float kHubNameMin = 13.0f * 1.2f + 8.0f + 24.0f; // a name's flag and about three letters at 13
+
 float HubRollPitch(bool Championship)
 {
 	return Championship ? 120.0f : 88.0f;
@@ -2627,7 +2923,12 @@ void HubRoll(HubCtx& X)
 			X.UI.Text(Lines[K].first, Px, Base, Ts(10.0f, 800, pal::Muted));
 			const std::string Fig = K == 3 ? Grouped(Hn->Entries) + " pts" : NetMoney(Hn->Prize) + " \xC2\xB7 1st of " + Grouped(Hn->Entries);
 			const float FigW = X.UI.Text(Fig, Right, Base, Ts(12.0f, 700, Soft, Align::Right, Baseline::Alphabetic, true));
-			HubName(X, Hn->Npc, Hn->Name, 0.0f, Px + 140.0f, Base, 13.0f, std::max(40.0f, Right - FigW - 12.0f - (Px + 140.0f)), 0.0f);
+			// g1p-hub: the name keeps room for the glyph and the pill PlayerName draws after it (HubNameTail), so they never reach the
+			// figure; where that leaves the name less than its flag and a few letters, the name is drawn bare (no glyph, no pill).
+			const float Room = Right - FigW - 12.0f - (Px + 140.0f);
+			const float Tail = HubNameTail(X, Hn->Npc, 13.0f);
+			const bool Badges = Room - Tail >= kHubNameMin;
+			HubName(X, Hn->Npc, Hn->Name, 0.0f, Px + 140.0f, Base, 13.0f, std::max(40.0f, Badges ? Room - Tail : Room), 0.0f, Badges);
 		}
 		Y += Pitch;
 		++Shown;
@@ -2723,12 +3024,24 @@ void HubYour(HubCtx& X, HubUi& U)
 	const float Px = B.X + 22.0f;
 	const float MaxW = B.W - 44.0f;
 	const Color Soft = rlsites_detail::SitesTone(0xc3cedf);
+	const net::Network& Net = net::Site(F.Site);
+	if (!U.LadderBuilt)
+	{
+		U.Ladder = HubLadder(Net, F);
+		U.Steps = HubSteps(Net, F);
+		U.LadderBuilt = true;
+	}
+	const std::string GoodOn = HubGoodOn(HubStepDays(Access::SessionOf(X.RL), Net, F, U.Ladder, H.World), H.Today);
 	if (!H.HasPin)
 	{
-		rlnet_detail::NetParagraph(X.C, "Play any " + fest::NameAfterArticle(F.Name) + " event for your pin.", Px, B.Y + 34.0f, MaxW, 15.0f, 500, Soft, 22.0f);
+		const float After = rlnet_detail::NetParagraph(X.C, "Play any " + fest::NameAfterArticle(F.Name) + " event for your pin.", Px, B.Y + 34.0f, MaxW, 15.0f, 500, Soft, 22.0f);
+		if (!GoodOn.empty())
+		{
+			// g1p-hub (§2.16 step 8a, R-18; PIE: a Step 2 ticket won before any of the edition's events): U37 under U11.
+			X.UI.Text(GoodOn, Px, After + 6.0f, Ts(13.0f, 600, pal::Accent, Align::Left, Baseline::Alphabetic, false, MaxW));
+		}
 		return;
 	}
-	const net::Network& Net = net::Site(F.Site);
 	const float Pin = X.Fr.PinSize;
 	const float Top = B.Y + 18.0f;
 	const world::FestMark Kept = H.Mark.Key == F.SeriesId ? H.Mark.Mark : world::FestMark::None;
@@ -2820,13 +3133,6 @@ void HubYour(HubCtx& X, HubUi& U)
 	}
 	X.UI.Text(HubYourCounts(H.Your, true), Px, Y, Ts(13.0f, 600, Soft, Align::Left, Baseline::Alphabetic, false, MaxW));
 	Y += 22.0f;
-	if (!U.LadderBuilt)
-	{
-		U.Ladder = HubLadder(Net, F);
-		U.Steps = HubSteps(Net, F);
-		U.LadderBuilt = true;
-	}
-	const std::string GoodOn = HubGoodOn(HubStepDays(Access::SessionOf(X.RL), Net, F, U.Ladder, H.World), H.Today);
 	if (!GoodOn.empty())
 	{
 		X.UI.Text(GoodOn, Px, Y, Ts(13.0f, 600, pal::Accent, Align::Left, Baseline::Alphabetic, false, MaxW));
@@ -2890,6 +3196,13 @@ std::string HubShownKey(const RiverLine& RL, double Now, bool& Broadcast)
 	}
 	Broadcast = It->second.DrewBroadcast;
 	return It->second.Key;
+}
+
+/** g1p-hub: the boxes (canvas units) RCOP's waves passed behind in the laptop's last banner or hero band; none for another look. */
+std::vector<Rect> HubWaveClear(const RiverLine& RL)
+{
+	const auto It = HubStates().find(&RL);
+	return It == HubStates().end() ? std::vector<Rect>() : It->second.WaveClear;
 }
 
 /** The popover's phase line (§2.8.6, U16): "Opens {Date}." before the window, "Day {N} of {Days}." on stage, "Crowned {Date}." in
@@ -3140,6 +3453,8 @@ std::string HubMomentLine(const Session& S, const FestMoment& M, const fest::Fes
 }
 
 /** Kinds 1, 2, 3 and 5's card {500, 170, 600, 580} (§2.8.5), Tm seconds after its first live frame (a still: settled). */
+constexpr float kHubMomentCloseY = 743.0f; // g1p-hub: the champion card's U19 line, on the card {500, 170, 600, 580} under TAKE A BOW
+
 void HubChampionCard(Canvas& C, Ui& UI, const Session& S, const FestMoment& M, const fest::Festival& F, double Tm, bool Still, double Now)
 {
 	const Rect K{500.0f, 170.0f, 600.0f, 580.0f};
@@ -3334,7 +3649,8 @@ void HubMoment(RiverLine& RL, Canvas& C, Ui& UI, double World, bool Still, doubl
 			O.Size = 18.0f;
 			const bool Bow = rlsites_detail::SitesButton(UI, C, "fsmoment", {700.0f, 680.0f, 200.0f, 46.0f}, "TAKE A BOW", O);
 			Close = Close || (Bow && !Still);
-			UI.Text("Click anywhere to continue.", 800.0f, 912.0f, Ts(13.0f, 600, pal::Muted, Align::Center));
+			// g1p-hub (PIE: the line sat over Ignite's FUSE at y 912): on the card (to y 750), under TAKE A BOW (to y 726).
+			UI.Text("Click anywhere to continue.", 800.0f, kHubMomentCloseY, Ts(13.0f, 600, pal::Muted, Align::Center));
 		}
 		// Beneath a Main's card (U29): the shelf line while the shelf ships, and the belt line while the edition's race is uncrowned.
 		float Y = 788.0f;
@@ -3519,7 +3835,7 @@ void RiverLine::FestivalHub(const Rect& R, const fest::Festival& F, double Now)
 	}
 	else
 	{
-		rlfest_detail::HubBanner(X);
+		rlfest_detail::HubBanner(X, U);
 		if (H.HasResult)
 		{
 			rlfest_detail::HubChampCard(X); // FH-5b: the Main's champion through the Afterglow
