@@ -287,9 +287,13 @@ set_tests_properties(rival_sites_perf PROPERTIES TIMEOUT 30)
 set_tests_properties(u4_ui_perf PROPERTIES TIMEOUT 102)
 # G1's integration (the lead's L-I.5; P-4, PLAN_G1 §4.2 L9, RULINGS R34-26 and "after the wave's fifth run" item 3): the suites G1
 # changed and the three perf runs re-measured alone, three runs each (ctest -R, one at a time, 2026-11-13, the integrated tree), medians:
-# festivals 15.45 s (31), rival_sites 12.38 s (30), u4_ui 46.90 s (94), synthesized_audio 5.46 s (11), monkey_play 67.07 s with its
-# festival career (135), pro_badges 54.93 s (110), festivals_perf 15.41 s (31), rival_sites_perf 12.90 s (30), u4_ui_perf 50.71 s
-# (102); each within its budget, so only the TIMEOUTs move. Every other suite keeps its Phase 0 TIMEOUT (SPEC v1.7 §8.1).
+# festivals 15.45 s (34), rival_sites 12.38 s (30), u4_ui 46.90 s (94), synthesized_audio 5.46 s (11), monkey_play 67.07 s with its
+# festival career (135), pro_badges 54.93 s (110), festivals_perf 15.41 s (34), rival_sites_perf 12.90 s (30), u4_ui_perf 50.71 s
+# (102); only the TIMEOUTs move. festivals and festivals_perf were set to 31 from these medians and moved to 34 at d868282 (P-4
+# from FestCurveAgrees' walk, one 16.7 s run; RULINGS, the lead after the wave's sixth run, item 1). Each suite is within its
+# budget except u4_ui's festival half, 41.6-46.9 s alone against its 30 s share of the suite's 60 s cap (SPEC v1.7 §8.1, I-17):
+# accepted for G1 (RULINGS, the lead after the wave's seventh run, item 2); G2's first package that touches u4_ui adds a
+# "u4_ui_test slow" argument for the heaviest passes. Every other suite keeps its Phase 0 TIMEOUT (SPEC v1.7 §8.1).
 
 # Not a suite: core-styles' chart compiler (update 2 SPEC §2.4.2, §2.4.4), Tests/charts/*.txt into AI/ChartTables.cpp.
 add_executable(chartgen tools/chartgen/chartgen_main.cpp)
