@@ -2560,10 +2560,14 @@ const char* const FestNetSiteKeys[] = {"news:fest:announce:title", "news:fest:an
  * {Cashes}, picked by World::Headline at one); {Points} is a race total, and one cash scores at least 14 (net::Points' smallest,
  * found here over every field to 20,000); {Events} is a series' event count, at least 2 for every edition fest::All() holds
  * (2026-2028); a record field's {Entries} is judged against every field since the site's launch weeks before (fest::RecordOf), never
- * 1. A new count row fails here until it is classified. The festival UI's own counts (U10's "1 event · 1 cash", "1 SEAT WON BY
- * SATELLITE", "1 entry", "1 regular won their seat by satellite.", "First title on record.") are singular-aware in
- * UI/RiverLineFestival.cpp and UI/RiverLineNet.cpp, and WHO'S IN's "{N} {Festival} titles" is written only from two (G/WorldFest.cpp).
- * Planted bugs: head:fest:crown:one deleted; a festival row "{N} seats" added.
+ * 1. A new count row fails here until it is classified. The festival UI's own copy (fest::FestUiInventory: the hubs', the register
+ * sheets' and the takeovers' rows; the fix round, after U27's "{N} pts to {MARK}" was found with no singular row) is scanned the
+ * same way, the plural noun the next word or the one after ("{N} festival trophies"): each of its eighteen count rows lists every
+ * singular row it draws at one (U10's "1 event" and "1 cash", "1 SEAT WON BY SATELLITE", "1 entry", "1 regular won their seat
+ * by satellite.", "First title on record.", U27's "1 pt to {MARK} · right now": the hero level with a mark's last rank is 1 pt
+ * away) or is a total never 1 (a race's points, at least one cash's; RCOP's event count, at least the fewest edition's). WHO'S IN's
+ * "{N} {Festival} titles" is written only from two (G/WorldFest.cpp).
+ * Planted bugs: head:fest:crown:one deleted; a festival row "{N} seats" added; U27's "1 pt to {MARK} · right now" row deleted.
  */
 void FestCountRowsNet()
 {
@@ -2628,6 +2632,87 @@ void FestCountRowsNet()
 	Expect(Odd.empty() && Twin && Editions > 0 && Fewest >= 2 && Least >= 2.0,
 		"FestCountRows: the festival copy's count rows are the nine known, the crown's {Cashes} with its singular twin (\"from 1 cash.\"), every edition's {Events} at "
 		"least 2 (" + std::to_string(Fewest) + ") and one cash's {Points} at least 2 (" + std::to_string(static_cast<int>(Least)) + ")" + Odd);
+	// The festival UI's own copy (fest::FestUiInventory; g1p-copy's fix round: U27's "{N} pts to {MARK}" had no singular row): a count
+	// before a plural noun, the next word or the one after ("{N} festival trophies"), lists every singular row it draws at one, or is a
+	// total never 1 (a race's points: one cash scores at least Least; RCOP's event count: at least Fewest).
+	const std::vector<std::string> Ui = fest::FestUiInventory();
+	const std::set<std::string> UiRows(Ui.begin(), Ui.end());
+	const std::string Dot = " \xC2\xB7 ";
+	const std::string Dates = "{FirstDate} \xE2\x80\x93 {LastDate}";
+	const std::map<std::string, std::vector<std::string>> UiTwins = {
+		{"label\t{N} SEATS WON BY SATELLITE", {"label\t1 SEAT WON BY SATELLITE"}},
+		{"label\t{Entries} entries", {"label\t1 entry"}},
+		{"label\t{N} SEATS AT THE POOL SO FAR", {"label\t1 SEAT AT THE POOL SO FAR"}},
+		{"label\t{N} SEATS WON", {"label\t1 SEAT WON"}},
+		{"label\t{Events} events" + Dot + "{Cashes} cashes" + Dot + "best {Best} of {Field}" + Dot + "race {Rank} of {Scorers}", {"label\t1 event", "label\t1 cash"}},
+		{"label\t{N} pts to {MARK}" + Dot + "right now", {"label\t1 pt to {MARK}" + Dot + "right now"}},
+		{"sentence\t{N} regulars won their seat by satellite.", {"sentence\t1 regular won their seat by satellite."}},
+		{"sentence\t{N} titles on record.", {"sentence\tFirst title on record."}},
+		{"label\t{Festival}" + Dot + "{Grade}" + Dot + "{Events} events" + Dot + "{Cashes} cashes", {"label\t1 event", "label\t1 cash"}},
+		{"label\t{N} events" + Dot + "{Gtd} guaranteed" + Dot + Dates, {"label\t1 event" + Dot + "{Gtd} guaranteed" + Dot + Dates}},
+		{"label\t{Events} events" + Dot + "{Cashes} cashes" + Dot + "best {Best} of {Field}", {"label\t1 event" + Dot + "1 cash" + Dot + "best {Best} of {Field}"}},
+		{"label\t{N} festival trophies", {"label\t{N} festival trophy"}},
+		{"label\t{N} belts", {"label\t{N} belt"}}};
+	const std::set<std::string> UiTotals = {"label\tYou" + Dot + "{Rank} of {Scorers} in the race" + Dot + "{Points} pts", "label\t{Points} pts",
+		"label\t{FESTIVAL}" + Dot + "{Name} LEADS THE RACE" + Dot + "{N} PTS", "label\t{FESTIVAL}" + Dot + "YOU LEAD THE RACE" + Dot + "{N} PTS",
+		"label\t{N} events" + Dot + "{BuyIn} Main Event with {Gtd} guaranteed"};
+	const auto Letter = [](char C) { return (C >= 'a' && C <= 'z') || (C >= 'A' && C <= 'Z'); };
+	std::set<std::string> UiFound;
+	for (const std::string& Row : Ui)
+	{
+		for (size_t Open = Row.find('{'); Open != std::string::npos; Open = Row.find('{', Open + 1))
+		{
+			const size_t Close = Row.find('}', Open);
+			if (Close == std::string::npos || !Numbers.count(Row.substr(Open + 1, Close - Open - 1)))
+			{
+				continue;
+			}
+			size_t At = Close + 1;
+			for (int Word = 0; Word < 2 && At + 1 < Row.size() && Row[At] == ' ' && Letter(Row[At + 1]); ++Word)
+			{
+				size_t End = At + 1;
+				while (End < Row.size() && Letter(Row[End]))
+				{
+					++End;
+				}
+				if (End - At - 1 >= 2 && (Row[End - 1] == 's' || Row[End - 1] == 'S'))
+				{
+					UiFound.insert(Row);
+					break;
+				}
+				At = End;
+			}
+		}
+	}
+	std::string UiOdd;
+	for (const std::string& Row : UiFound)
+	{
+		const auto Tw = UiTwins.find(Row);
+		if (Tw != UiTwins.end())
+		{
+			for (const std::string& Single : Tw->second)
+			{
+				UiOdd += UiRows.count(Single) ? std::string() : " no singular row for \"" + Row + "\" (\"" + Single + "\")";
+			}
+		}
+		else if (!UiTotals.count(Row))
+		{
+			UiOdd += " new: \"" + Row + "\"";
+		}
+	}
+	for (const auto& Tw : UiTwins)
+	{
+		UiOdd += UiFound.count(Tw.first) ? std::string() : " gone: \"" + Tw.first + "\"";
+	}
+	for (const std::string& Row : UiTotals)
+	{
+		UiOdd += UiFound.count(Row) ? std::string() : " gone: \"" + Row + "\"";
+	}
+	std::printf("  FestCountRows: %zu count rows in the festival UI's %zu (%zu with their singular rows, %zu totals)\n", UiFound.size(), Ui.size(), UiTwins.size(),
+		UiTotals.size());
+	Expect(UiOdd.empty() && UiFound.size() == UiTwins.size() + UiTotals.size() && Fewest >= 2 && Least >= 2.0,
+		"FestCountRows (the festival UI): each of fest::FestUiInventory's " + std::to_string(UiFound.size()) +
+			" count rows lists its singular rows (U27's \"1 pt to {MARK} \xC2\xB7 right now\" among them) or is a total never 1" + UiOdd);
 }
 
 /** §1.2 items 2-5, 9-10, 12-13, §2.11: every core inventory (FN-4b, PLAN_FNET's Corrections item 1): fest::Inventory (F-net's names,
