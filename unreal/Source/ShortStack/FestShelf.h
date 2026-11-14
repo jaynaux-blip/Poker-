@@ -76,6 +76,10 @@ private:
 	void DrawPlates(const FestShelfDetail::FFsPlan& Plan, FNightOneGame& Game);
 	void Apply(const FestShelfDetail::FFsPlan& Plan, bool bPacked);
 	void ShowPins(const FestShelfDetail::FFsPlan& Plan);
+	/** The board's built meshes (FieldMesh, BodyShapeMesh) made again where missing: Transient properties don't survive PIE's duplicate
+	 *  of the stage (nor a load), so the copy that plays rebuilds them before it places pins (the lead's PIE re-check of the polish pass:
+	 *  the duplicate drew the engine cylinder, 25,244 triangles). */
+	void EnsureBoardMeshes();
 	/** The pins' instanced group by its key (FestShelfDetail::FsPinBodyKey and FsPinFieldKey), made on first use: a body (Body 0 gold,
 	 *  1 silver, 2 outline) or an enamel field (bField), in SrgbHex unless the group takes each instance's colour (bShared). */
 	UInstancedStaticMeshComponent* PinGroup(const FString& Key, bool bField, int32 Body, uint32 SrgbHex, bool bShared);

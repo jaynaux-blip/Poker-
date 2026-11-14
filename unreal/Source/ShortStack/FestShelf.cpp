@@ -977,7 +977,15 @@ UInstancedStaticMeshComponent* UFestShelf::PinGroup(const FString& Key, bool bFi
 {
 	if (TObjectPtr<UInstancedStaticMeshComponent>* Found = PinGroups.Find(Key))
 	{
-		return Found->Get();
+		// A group carried over from the editor's copy may hold a mesh the duplicate lost (EnsureBoardMeshes): a field, or the stand-in's
+		// body, takes this copy's built mesh.
+		UInstancedStaticMeshComponent* Kept = Found->Get();
+		UStaticMesh* Want = bField ? FieldMesh.Get() : (PinMesh ? nullptr : BodyShapeMesh.Get());
+		if (Kept && Want && Kept->GetStaticMesh() != Want)
+		{
+			Kept->SetStaticMesh(Want);
+		}
+		return Kept;
 	}
 	if (!BoardRoot)
 	{
@@ -1013,8 +1021,22 @@ UInstancedStaticMeshComponent* UFestShelf::PinGroup(const FString& Key, bool bFi
 	return G;
 }
 
+void UFestShelf::EnsureBoardMeshes()
+{
+	namespace D = FestShelfDetail;
+	if (!FieldMesh)
+	{
+		FieldMesh = D::FsDiscMesh(this, PinMesh ? D::FsFieldSides : D::FsPinSegments, false);
+	}
+	if (!PinMesh && !BodyShapeMesh)
+	{
+		BodyShapeMesh = D::FsDiscMesh(this, D::FsPinSegments, true);
+	}
+}
+
 void UFestShelf::ShowPins(const FestShelfDetail::FFsPlan& Plan)
 {
+	EnsureBoardMeshes();
 	namespace D = FestShelfDetail;
 	for (TPair<FString, TObjectPtr<UInstancedStaticMeshComponent>>& Kv : PinGroups)
 	{
