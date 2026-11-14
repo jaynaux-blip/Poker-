@@ -76,7 +76,11 @@ private:
 	void DrawPlates(const FestShelfDetail::FFsPlan& Plan, FNightOneGame& Game);
 	void Apply(const FestShelfDetail::FFsPlan& Plan, bool bPacked);
 	void ShowPins(const FestShelfDetail::FFsPlan& Plan);
-	UInstancedStaticMeshComponent* PinGroup(const FString& Key, bool bEnamel, uint32 SrgbHex, bool bMetal);
+	/** The pins' instanced group by its key (FestShelfDetail::FsPinBodyKey and FsPinFieldKey), made on first use: a body (Body 0 gold,
+	 *  1 silver, 2 outline) or an enamel field (bField), in SrgbHex unless the group takes each instance's colour (bShared). */
+	UInstancedStaticMeshComponent* PinGroup(const FString& Key, bool bField, int32 Body, uint32 SrgbHex, bool bShared);
+	/** The tint material over Baked's base colour texture (none: white) at Roughness, or null without TintMaterial. */
+	UMaterialInstanceDynamic* PinTint(UMaterialInterface* Baked, float Roughness);
 
 	UPROPERTY()
 	TObjectPtr<USceneComponent> ShelfRoot;
@@ -93,6 +97,16 @@ private:
 	TObjectPtr<UStaticMesh> CylinderMesh;
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> PinMesh;
+	/** G1 polish (P-shelf, §9.4's board budget): the enamel field built at Build (FestShelfDetail::FsDiscMesh: a flat hexagon inside the
+	 *  kit's rim, a 12-sided disc on the stand-in body) and the stand-in body (a 12-sided prism; null when SM_FS_Pin is imported). */
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> FieldMesh;
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> BodyShapeMesh;
+	/** shops_setup.py's M_NS_ClothTint (each instance's colour its custom data 0-2), so the outline rims and the enamel fields draw in
+	 *  one group each; null (not built yet): one group a colour. */
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> TintMaterial;
 	/** One a brand (fest::Brand's order, None's empty): its trophy (or case) on its plinth, hidden until won. */
 	UPROPERTY()
 	TArray<TObjectPtr<USceneComponent>> Trophies;
@@ -102,7 +116,7 @@ private:
 	/** The engraving strips, the bottom tier's then the middle tier's. */
 	UPROPERTY()
 	TArray<TObjectPtr<UWidgetComponent>> PlateStrips;
-	/** The pins, instanced a material at a time (a rim colour, an enamel colour), keyed by it. */
+	/** The pins, instanced a group at a time (a grade's bodies, the fields; or a colour each without the tint material), keyed by it. */
 	UPROPERTY(Transient)
 	TMap<FString, TObjectPtr<UInstancedStaticMeshComponent>> PinGroups;
 	TArray<TSharedPtr<SDrawListWidget>> PlateSlates;
