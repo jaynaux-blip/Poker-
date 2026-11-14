@@ -404,6 +404,34 @@ const std::vector<std::pair<std::string, std::string>>& FestStoryTitles()
 	return All;
 }
 
+/** G1 polish (g1p-copy, fix round 2; the lead's PIE item 11's sweep): a count title's form for one, keyed by its plural template in
+ *  FestStoryTitles. V5 counts the hero's events in the festival (G/SessionFest.cpp's FestStoryFacts packs {N}), and a belt can go to
+ *  one deep Main Event run (PIE's RCOP 2027 belt went to a scorer with 1 cash), so its title reads "One event, one belt" there,
+ *  never "1 events". A table of its own: FestStoryLines and Rerun 2.0's cells pick each style's row by its index in FestStoryTitles,
+ *  so the singular is never a row there. fest::TextInventory lists each singular (the copy lint's one entry, FestCountRows). */
+const std::vector<std::pair<std::string, std::string>>& FestStorySingulars()
+{
+	static const std::vector<std::pair<std::string, std::string>> All = {
+		{"{N} events, one belt", "One event, one belt"},
+	};
+	return All;
+}
+
+/** Text in its form for its count (FestStorySingulars): the singular when Text is a plural count title and its {N} fact reads "1";
+ *  Text itself otherwise. Update 2's titles (FestStoryLines) and Rerun 2.0's festival story cells both fill through it. */
+std::string FestStoryCountForm(const std::string& Text, const std::map<std::string, std::string>& Facts)
+{
+	const auto N = Facts.find("N");
+	for (const std::pair<std::string, std::string>& S : FestStorySingulars())
+	{
+		if (N != Facts.end() && N->second == "1" && Text == S.first)
+		{
+			return S.second;
+		}
+	}
+	return Text;
+}
+
 /** FW-5 (§2.11's articles rule, SPEC v1.7 §2.11 "Articles and dates"): Text with each {Festival} slot filled by what comes
  *  before it. After "the " or "next " (any case, a word of its own) the edition's name drops a leading "The " (fest::NameAfterArticle:
  *  V1, V4 and V7-V9 print "the Championship Online 2027"); anywhere else it prints whole (V3's "How I won The Championship Online 2027
@@ -447,7 +475,8 @@ std::vector<std::string> FestStoryLines(const std::string& Event, TitleStyle T, 
 		{
 			continue;
 		}
-		std::string Line = Name != Shown.end() ? FestStoryNameFill(V.second, Name->second) : V.second;
+		const std::string Form = FestStoryCountForm(V.second, Shown); // g1p-copy: V5 at N = 1 reads "One event, one belt"
+		std::string Line = Name != Shown.end() ? FestStoryNameFill(Form, Name->second) : Form;
 		for (const auto& Kv : Shown)
 		{
 			const std::string Slot = "{" + Kv.first + "}";
@@ -2324,9 +2353,11 @@ std::vector<TitleOption> TitleOptions(const Choice& Ch, const std::vector<Candid
 				{
 					continue;
 				}
-				// A festival story's row fills {Festival} by the article rule first (FW-5, video_copy::FestStoryNameFill).
+				// A festival story's row fills {Festival} by the article rule first (FW-5, video_copy::FestStoryNameFill), in its form for its
+				// count (g1p-copy: V5 at N = 1 reads "One event, one belt", video_copy::FestStoryCountForm).
 				const auto FestName = I < 0 ? F.V.find("Festival") : F.V.end();
-				const std::string Filled = FillU3(FestName != F.V.end() ? video_copy::FestStoryNameFill(X.Text, FestName->second) : X.Text, F);
+				const std::string Form = I < 0 ? video_copy::FestStoryCountForm(X.Text, F.V) : X.Text;
+				const std::string Filled = FillU3(FestName != F.V.end() ? video_copy::FestStoryNameFill(Form, FestName->second) : Form, F);
 				if (Filled.empty())
 				{
 					continue;

@@ -3407,6 +3407,48 @@ void FestRerunStories()
 	Expect(TcoEach, "FestRerunStories: The Championship Online 2027's Main win and belt stories print \"the Championship Online 2027\" in V1 "
 					"and V4 and keep \"The\" in V3 and V6, in both fills, never \"the The\" (" + TcoGot + ")");
 	std::printf("  FestRerunStories: TCO 2027 %s\n", TcoGot.c_str());
+	// V5 at one (g1p-copy's fix round 2, the lead's PIE item 11's sweep): the belt can go to one deep Main Event run (PIE's RCOP 2027
+	// belt went to a scorer with 1 cash), so the hero's belt story from one event reads "One event, one belt" in Update 2's Hype line
+	// and Rerun 2.0's Hype option (video_copy::FestStoryCountForm), never "1 events"; from two events it reads "2 events, one belt".
+	auto BeltUpper = [](std::string S) {
+		for (char& Ch : S)
+		{
+			Ch = Ch >= 'a' && Ch <= 'z' ? static_cast<char>(Ch - 'a' + 'A') : Ch;
+		}
+		return S;
+	};
+	std::string BeltGot;
+	bool BeltEach = true;
+	for (const int Count : {1, 2})
+	{
+		const std::string BeltKey = "fest-belt-rcop";
+		const std::string BeltFacts = "Festival=" + video::vcontent::FactEsc("RCOP 2026") + ";N=" + std::to_string(Count);
+		const std::string BeltWant = Count == 1 ? "One event, one belt" : "2 events, one belt";
+		const std::vector<std::string> U2 = video::video_copy::FestStoryLines(BeltKey, video::TitleStyle::Hype, BeltFacts);
+		video::Candidate BC = C;
+		BC.Id = "story:" + BeltKey;
+		BC.Event = BeltKey;
+		BC.IdeaFacts = BeltFacts;
+		video::Choice Ch;
+		Ch.Candidates = {BC.Id};
+		Ch.T = video::TitleStyle::Hype;
+		const std::vector<video::TitleOption> Opts = video::TitleOptions(Ch, {BC}, video::Channel(), 0, 3);
+		const std::string First = Opts.empty() ? std::string() : Opts.front().Text;
+		BeltEach = BeltEach && U2.size() == 1 && U2.front() == BeltWant && !Opts.empty() && Opts.front().Key.rfind("story.fest-belt.", 0) == 0 &&
+				   First == BeltUpper(BeltWant);
+		for (const std::string& Line : U2)
+		{
+			BeltEach = BeltEach && BeltUpper(Line).find("1 EVENTS") == std::string::npos;
+		}
+		for (const video::TitleOption& O : Opts)
+		{
+			BeltEach = BeltEach && BeltUpper(O.Text).find("1 EVENTS") == std::string::npos;
+		}
+		BeltGot += (BeltGot.empty() ? "" : " | ") + std::string("N=") + std::to_string(Count) + ": " + (U2.empty() ? std::string("-") : U2.front()) + " / " + First;
+	}
+	Expect(BeltEach, "FestRerunStories: V5 reads \"One event, one belt\" for a belt from one event and \"2 events, one belt\" from two, in Update 2's Hype "
+					 "line and Rerun 2.0's Hype option, never \"1 events\" (" + BeltGot + ")");
+	std::printf("  FestRerunStories: V5 %s\n", BeltGot.c_str());
 	// The session: the belt's text becomes Rerun's story at the next calendar step, a series event's (x1.3) with its facts packed; a
 	// festival line sent before the channel had state is marked told; a reload reads the facts again (a story's aren't saved).
 	const FestSessionRunWorld& Run = FestSessionWorld();
