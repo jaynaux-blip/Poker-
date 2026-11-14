@@ -36,8 +36,9 @@ struct FFsPlan;
  * so they never place a trophy. While the room is packed into cartons (evicted) the shelf and the board are hidden.
  *
  * Each mesh loads from the CC0 build's soft path /Game/ThirdParty/FestShelf/<mesh> (git-ignored), else the committed procedural
- * build /Game/ShortStack/Meshes/<mesh>/<mesh>, else engine shapes; Nanite off on every piece (small props). ANightOneStage::BuildSet
- * attaches it (the lead's P6) and calls Build.
+ * build /Game/ShortStack/Meshes/<mesh>/<mesh>, else engine shapes; Nanite off on every piece (small props). The assets must have
+ * Nanite off too (§9.4): on a Nanite asset SetForceDisableNanite draws its coarse fallback, so each budget line names any such mesh.
+ * ANightOneStage::BuildSet attaches it (the lead's P6) and calls Build.
  */
 UCLASS(ClassGroup = (ShortStack))
 class SHORTSTACK_API UFestShelf : public USceneComponent
@@ -52,6 +53,13 @@ public:
 
 	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+	/**
+	 * Dev (ss.Fest.Shelf all|off; SPEC v1.7 §9.4's read of the shelf with all ten trophies against 40k triangles and 12 draw calls, §2.16
+	 * step 11's look for a missing or pink mesh): while on, the shelf shows every piece (ten trophies, three belts, a full board of 40
+	 * pins) in place of the career's Honors and pins. Presentation only, never saved; game thread; off again at each shelf's BeginPlay.
+	 */
+	static void SetDevShowAll(bool bOn);
 
 private:
 	template <typename T>

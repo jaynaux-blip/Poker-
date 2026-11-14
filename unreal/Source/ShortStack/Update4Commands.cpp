@@ -7,6 +7,9 @@
 //          | .Pass | .Result <brand> <cash|ft|win|s1 seat>
 //          to the session's DebugFest (F-world's at G1; §2.16). <brand> is a festival's key: rcop, ring, tco, slam, push, feign,
 //          writ, grit, pennant or reign
+//   ss.Fest.Shelf <all|off>   the game module's alone (no DebugFest body; G1 fix round 1): the apartment's festival shelf and
+//          pin board show every piece (UFestShelf::SetDevShowAll: ten trophies, three belts, 40 pins; presentation only, never
+//          saved) for §9.4's triangle and draw-call read and §2.16 step 11's mesh check, or the career's own again
 //   ss.Scene.Status | .CapNow <n> | .Moment <kind> <key> | .Wake <reach|ft|win|title|room> | .Week <monday> | .Regulars
 //          to DebugScene (W-arrive's at G2; §3.26)
 //   ss.Turn.Budget <ms> | .Trace <on|off>   to DebugScene too, its line led by "turn" ("turn budget 0.5"): the held turn's switch is
@@ -27,6 +30,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
+#include "FestShelf.h"
 #include "HAL/IConsoleManager.h"
 #include "NightOneGame.h"
 #include "NightOneGameMode.h"
@@ -203,6 +207,35 @@ FUpdate4Command FestMoment(EUpdate4Feature::Fest, TEXT("ss.Fest.Moment"), TEXT("
 FUpdate4Command FestPass(EUpdate4Feature::Fest, TEXT("ss.Fest.Pass"), TEXT("Pass"), TEXT("Two rents paid and 20 small events on the record, for the Festival Pass (dev only)."));
 FUpdate4Command FestResult(EUpdate4Feature::Fest, TEXT("ss.Fest.Result"), TEXT("Result"),
 	TEXT("ss.Fest.Result <brand> <cash|ft|win|s1 seat>: plants one result in the live festival's next numbered event through the world's result path (dev only)."));
+
+/**
+ * ss.Fest.Shelf <all|off> (G1 fix round 1; SPEC v1.7 §9.4, §2.16 step 11): no §2.16 hook puts a trophy on a plinth (a trophy is the hero's
+ * own Main win; ss.Fest.Moment writes no Honor), so the PIE read of the shelf with all ten trophies, and the fallback build's look at
+ * every SM_FS mesh, come from this dev view: UFestShelf::SetDevShowAll (presentation only, never saved, off at the shelf's next
+ * BeginPlay). The shelf's LogTemp budget line follows within half a second, marked dev.
+ */
+void Update4Shelf(const TArray<FString>& Args, UWorld* World)
+{
+	const FString Mode = Args.Num() > 0 ? Args[0].ToLower() : FString();
+	if (Mode != TEXT("all") && Mode != TEXT("off"))
+	{
+		UE_LOG(LogUpdate4, Warning, TEXT("ss.Fest.Shelf <all|off>: every piece on the apartment's shelf and pin board, or the career's own (dev only)"));
+		return;
+	}
+	if (!Update4SessionIn(World))
+	{
+		UE_LOG(LogUpdate4, Warning, TEXT("ss.Fest.Shelf %s: only at home (Night One), where the shelf stands"), *Mode);
+		return;
+	}
+	UFestShelf::SetDevShowAll(Mode == TEXT("all"));
+	UE_LOG(LogUpdate4, Display, TEXT("ss.Fest.Shelf %s: %s (dev: presentation only, never saved)"), *Mode,
+		Mode == TEXT("all") ? TEXT("ten trophies, three belts and 40 pins on show") : TEXT("the career's own Honors and pins again"));
+}
+
+FAutoConsoleCommandWithWorldAndArgs FestShelfShow(TEXT("ss.Fest.Shelf"),
+	TEXT("ss.Fest.Shelf <all|off>: the apartment's festival shelf and pin board show every piece (ten trophies, three belts, 40 pins) for the budget read and the fallback check, or the career's own again (dev only)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&Update4Shelf));
+
 // The Scene and the held turn (G2, §3.26; W-arrive's DebugScene).
 FUpdate4Command SceneStatus(EUpdate4Feature::Scene, TEXT("ss.Scene.Status"), TEXT("Status"),
 	TEXT("The Scene: the book (closed or its anchor), A0, CapNow, this week's scale, arrivals by cause this week and in all, the pinned regulars."));

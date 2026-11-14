@@ -5,7 +5,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundBase.h"
 #include "Sound/SoundWaveProcedural.h"
-#include "UObject/SoftObjectPath.h"
+#include "UObject/UObjectGlobals.h"
 
 namespace NightOneAudioDetail
 {
@@ -40,13 +40,22 @@ void Queue(USoundWaveProcedural* Wave, const float* Samples, int32 Count, float 
  * G1 FL-9 (F-look): the bell and the applause, the OpenGameArt CC0 recordings fetched for G1 (PWL's bell_ding4 trimmed to 2.0 s,
  * eXpl0it3r's church-hall applause trimmed to 3 s; LEAD_CALLS: no Freesound sign-in; ledger rows in E:/ShortStack/durable/
  * ASSET_LICENSES.md), imported by the lead under /Game/ThirdParty/Audio/ and named after their sources (PLAN_G1's PC-3).
+ * G1 fix round 1: no setup script imports them, and a plain editor import names each asset after its file
+ * (FestRit_oga_PWL_bell_ding4_2s, CrowdApplause_oga_eXpl0it3r_applause_3s in g1/assets/audio), so each cue looks for that name
+ * second (Which 1): either import plays the recording. Which runs 0, 1, ... until null.
  */
-const TCHAR* SoftCuePath(ss::SoundId Id)
+const TCHAR* SoftCuePath(ss::SoundId Id, int32 Which)
 {
 	switch (Id)
 	{
-	case ss::SoundId::FestRit: return TEXT("/Game/ThirdParty/Audio/FestRit_oga_PWL.FestRit_oga_PWL");
-	case ss::SoundId::CrowdApplause: return TEXT("/Game/ThirdParty/Audio/CrowdApplause_oga_eXpl0it3r.CrowdApplause_oga_eXpl0it3r");
+	case ss::SoundId::FestRit:
+		return Which == 0 ? TEXT("/Game/ThirdParty/Audio/FestRit_oga_PWL.FestRit_oga_PWL")
+			: Which == 1  ? TEXT("/Game/ThirdParty/Audio/FestRit_oga_PWL_bell_ding4_2s.FestRit_oga_PWL_bell_ding4_2s")
+						  : nullptr;
+	case ss::SoundId::CrowdApplause:
+		return Which == 0 ? TEXT("/Game/ThirdParty/Audio/CrowdApplause_oga_eXpl0it3r.CrowdApplause_oga_eXpl0it3r")
+			: Which == 1  ? TEXT("/Game/ThirdParty/Audio/CrowdApplause_oga_eXpl0it3r_applause_3s.CrowdApplause_oga_eXpl0it3r_applause_3s")
+						  : nullptr;
 	case ss::SoundId::NbPencil:
 	case ss::SoundId::CrowdSwell:
 	case ss::SoundId::CrowdOoh:
@@ -54,11 +63,42 @@ const TCHAR* SoftCuePath(ss::SoundId Id)
 	}
 }
 
-/** The asset to play for a cue: null when it has no soft path or its asset isn't there (the synthesized body plays). */
+/**
+ * The asset to play for a cue: null when it has no soft path or no asset is at any of them (the synthesized body plays). The loads are
+ * quiet (LOAD_NoWarn | LOAD_Quiet, as FestShelf's FsLoad): a missing asset is the fallback build (§9.1 rule 7), not a fault. Which one
+ * a cue plays is logged once a cue a run (SPEC v1.7 §2.16 step 11 reads it: the recording, or the synthesized body).
+ */
 USoundBase* SoftCue(ss::SoundId Id)
 {
-	const TCHAR* Path = SoftCuePath(Id);
-	return Path ? Cast<USoundBase>(FSoftObjectPath(FString(Path)).TryLoad()) : nullptr;
+	const TCHAR* First = SoftCuePath(Id, 0);
+	if (!First)
+	{
+		return nullptr;
+	}
+	USoundBase* Found = nullptr;
+	const TCHAR* FoundAt = nullptr;
+	for (int32 Which = 0; !Found && SoftCuePath(Id, Which); ++Which)
+	{
+		FoundAt = SoftCuePath(Id, Which);
+		Found = LoadObject<USoundBase>(nullptr, FoundAt, nullptr, LOAD_NoWarn | LOAD_Quiet);
+	}
+	// Told once a cue a run, and again whenever the answer changes.
+	static TMap<int32, bool> Told;
+	const int32 Key = static_cast<int32>(Id);
+	const bool* Was = Told.Find(Key);
+	if (!Was || *Was != (Found != nullptr))
+	{
+		Told.Add(Key, Found != nullptr);
+		if (Found)
+		{
+			UE_LOG(LogTemp, Log, TEXT("NightOneAudio: cue %d plays the recording %s"), Key, FoundAt);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Log, TEXT("NightOneAudio: cue %d plays its synthesized body (no asset at %s or its file-named twin)"), Key, First);
+		}
+	}
+	return Found;
 }
 } // namespace NightOneAudioDetail
 

@@ -176,6 +176,33 @@ FFsPlan FsPlanOf(const std::vector<ss::world::Honor>& Honors, const std::vector<
 	return P;
 }
 
+/**
+ * Every piece at once (ss.Fest.Shelf all: dev, presentation only; SPEC v1.7 §9.4's read of the shelf with all ten trophies, §2.16 step
+ * 11's look at every mesh): each brand's first edition won (its plate engraved with that name), three belts (REIGN's near-black strap,
+ * PENNANT's green, RCOP's violet) and a full board, four rows of ten pins whose grades turn gold, silver, outline along it.
+ */
+FFsPlan FsAllPlan()
+{
+	FFsPlan P;
+	for (const ss::fest::Festival& F : ss::fest::All())
+	{
+		const int B = static_cast<int>(F.Which);
+		if (B > 0 && B < FsBrands && P.Won[B].empty())
+		{
+			P.Won[B] = F.Name;
+		}
+	}
+	P.Belts = {ss::fest::Brand::Reign, ss::fest::Brand::Pennant, ss::fest::Brand::Rcop};
+	for (int Row = 0; Row < FsPinRows; ++Row)
+	{
+		for (int Col = 0; Col < FsPinCols; ++Col)
+		{
+			P.Pins.push_back({static_cast<ss::fest::Brand>(1 + Col % (FsBrands - 1)), 3 - (Row + Col) % 3, Row, Col});
+		}
+	}
+	return P;
+}
+
 /** The plan as a key (a change rebuilds the pieces and redraws the plates). */
 std::string FsKey(const FFsPlan& P, bool bPacked)
 {
@@ -353,9 +380,14 @@ uint32 FsBeltStrap(ss::fest::Brand B)
 	}
 }
 
+/** ss.Fest.Shelf all (FsAllPlan) while true; set by UFestShelf::SetDevShowAll on the game thread, cleared at each shelf's BeginPlay. */
+bool GFsDevAll = false;
+
 /** What is drawn under Root, printed for §9.4's budgets: triangles (an instanced mesh's instances each counted) and draw sections (an
- *  instanced mesh's sections drawn once for all its instances). The engraving strips are widgets, not counted. */
-void FsTally(const USceneComponent* Root, int32& OutTris, int32& OutSections)
+ *  instanced mesh's sections drawn once for all its instances). The engraving strips are widgets, not counted. A mesh whose asset still
+ *  has Nanite on counts its Nanite triangles (the kit's own; its LOD 0 is only the coarse fallback, which SetForceDisableNanite draws)
+ *  and is named in OutNanite, so the budget line never reads a fallback as the kit (SPEC v1.7 §9.4: Nanite off on small props). */
+void FsTally(const USceneComponent* Root, int32& OutTris, int32& OutSections, TArray<FString>& OutNanite)
 {
 	OutTris = 0;
 	OutSections = 0;
@@ -377,8 +409,13 @@ void FsTally(const USceneComponent* Root, int32& OutTris, int32& OutSections)
 		const int32 Count = Many ? Many->GetInstanceCount() : 1;
 		if (Count > 0)
 		{
-			OutTris += Mesh->GetNumTriangles(0) * Count;
+			const bool bNanite = Mesh->HasValidNaniteData();
+			OutTris += (bNanite ? Mesh->GetNumNaniteTriangles() : Mesh->GetNumTriangles(0)) * Count;
 			OutSections += Mesh->GetNumSections(0);
+			if (bNanite)
+			{
+				OutNanite.AddUnique(Mesh->GetName());
+			}
 		}
 	}
 }
@@ -625,7 +662,13 @@ void UFestShelf::BuildBoardShapes()
 void UFestShelf::BeginPlay()
 {
 	Super::BeginPlay();
+	FestShelfDetail::GFsDevAll = false; // a dev view never outlives its play (the flag is the process's, not the save's)
 	AttachPlateSlate();
+}
+
+void UFestShelf::SetDevShowAll(bool bOn)
+{
+	FestShelfDetail::GFsDevAll = bOn;
 }
 
 void UFestShelf::AttachPlateSlate()
@@ -799,10 +842,19 @@ void UFestShelf::Apply(const FestShelfDetail::FFsPlan& Plan, bool bPacked)
 	// Printed, never assumed (§9.4): the shelf against 40,000 triangles and 12 draws, the board against 5,000 triangles; the lead's PIE
 	// reads the real draw calls (stat scenerendering) beside these.
 	int32 ShelfTris = 0, ShelfSections = 0, BoardTris = 0, BoardSections = 0;
-	D::FsTally(ShelfRoot, ShelfTris, ShelfSections);
-	D::FsTally(BoardRoot, BoardTris, BoardSections);
-	UE_LOG(LogTemp, Log, TEXT("The festival shelf: %d trophies, %d belts, %d pins; the shelf %d triangles in %d mesh sections (+2 engraving strips; caps 40000 and 12), the board %d triangles in %d sections (cap 5000)"),
-		TrophiesShown, static_cast<int32>(Plan.Belts.size()), static_cast<int32>(Plan.Pins.size()), ShelfTris, ShelfSections, BoardTris, BoardSections);
+	TArray<FString> NaniteMeshes;
+	D::FsTally(ShelfRoot, ShelfTris, ShelfSections, NaniteMeshes);
+	D::FsTally(BoardRoot, BoardTris, BoardSections, NaniteMeshes);
+	UE_LOG(LogTemp, Log, TEXT("The festival shelf%s: %d trophies, %d belts, %d pins; the shelf %d triangles in %d mesh sections (+2 engraving strips; caps 40000 and 12), the board %d triangles in %d sections (cap 5000)"),
+		D::GFsDevAll ? TEXT(" (dev: ss.Fest.Shelf all)") : TEXT(""), TrophiesShown, static_cast<int32>(Plan.Belts.size()), static_cast<int32>(Plan.Pins.size()), ShelfTris,
+		ShelfSections, BoardTris, BoardSections);
+	if (NaniteMeshes.Num() > 0)
+	{
+		// The import keeps Nanite unless something turns it off (shortstack_setup's rule reaches only wear and blended meshes): each of
+		// these draws its coarse Nanite fallback here, faceted, until its asset has Nanite off.
+		UE_LOG(LogTemp, Warning, TEXT("The festival shelf: %d of its meshes still have Nanite on (%s): each draws its coarse Nanite fallback here (SetForceDisableNanite; counted above by its own triangles). Turn Nanite off on them (SPEC 9.4; shortstack_setup._without_nanite, PIE stopped)."),
+			NaniteMeshes.Num(), *FString::Join(NaniteMeshes, TEXT(", ")));
+	}
 }
 
 void UFestShelf::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -823,8 +875,12 @@ void UFestShelf::TickComponent(float DeltaTime, ELevelTick TickType, FActorCompo
 	const ANightOneStage* Stage = Cast<ANightOneStage>(GetOwner());
 	const bool bPacked = Stage && Stage->GearShown().bEvicted;
 	const ss::world::World& W = Game->Session.Living();
-	const FestShelfDetail::FFsPlan Plan = bPacked ? FestShelfDetail::FFsPlan() : FestShelfDetail::FsPlanOf(W.Honors(), ss::world::HeroFestPins(W));
-	std::string Key = FestShelfDetail::FsKey(Plan, bPacked);
+	// ss.Fest.Shelf all (dev) shows every piece in place of the career's; packed still wins (nothing on the walls).
+	const bool bDevAll = !bPacked && FestShelfDetail::GFsDevAll;
+	const FestShelfDetail::FFsPlan Plan = bPacked ? FestShelfDetail::FFsPlan()
+		: bDevAll ? FestShelfDetail::FsAllPlan()
+				  : FestShelfDetail::FsPlanOf(W.Honors(), ss::world::HeroFestPins(W));
+	std::string Key = (bDevAll ? std::string("dev|") : std::string()) + FestShelfDetail::FsKey(Plan, bPacked);
 	if (Key != Shown)
 	{
 		Shown = std::move(Key);
