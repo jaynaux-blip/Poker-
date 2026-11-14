@@ -40,6 +40,7 @@ namespace video
 namespace video_copy
 {
 const std::vector<std::pair<std::string, std::string>>& FestStoryTitles(); // G/VideoCopy.cpp: §2.11's V1-V9, (key prefix, title)
+const std::vector<std::pair<std::string, std::string>>& FestStorySingulars(); // G/VideoCopy.cpp: a count title's form for one
 } // namespace video_copy
 } // namespace video
 
@@ -125,6 +126,11 @@ std::vector<std::string> TextInventory()
 		}
 	}
 	for (const std::pair<std::string, std::string>& V : video::video_copy::FestStoryTitles())
+	{
+		Out.push_back("label\t" + V.second);
+	}
+	// G1 polish (g1p-copy, fix round 2): each count title's form for one (V5's "One event, one belt"), printed in its place at N = 1.
+	for (const std::pair<std::string, std::string>& V : video::video_copy::FestStorySingulars())
 	{
 		Out.push_back("label\t" + V.second);
 	}

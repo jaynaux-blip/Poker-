@@ -327,7 +327,8 @@ std::vector<std::string> FestUiInventory()
 		"label\tFINALIST",
 		"label\tPODIUM",
 		"label\tTHE BELT",
-		// U10 (singular at one) and its parts as the panel joins them; U12: the pin's three grades; U27: the ladder's line.
+		// U10 (singular at one) and its parts as the panel joins them; U12: the pin's three grades; U27: the ladder's line (singular
+		// at one, g1p-copy).
 		"label\t{Events} events \xC2\xB7 {Cashes} cashes \xC2\xB7 best {Best} of {Field} \xC2\xB7 race {Rank} of {Scorers}",
 		"label\t1 event",
 		"label\t1 cash",
@@ -335,6 +336,7 @@ std::vector<std::string> FestUiInventory()
 		"label\tSILVER \xC2\xB7 cashed",
 		"label\tOUTLINE \xC2\xB7 played",
 		"label\t{N} pts to {MARK} \xC2\xB7 right now",
+		"label\t1 pt to {MARK} \xC2\xB7 right now",
 		// U28's ticket line on the panel after the crown; U37: a step ticket's runs left.
 		"label\tA seat in the next Main Event",
 		"sentence\tGood on {Dates}.",
@@ -3117,7 +3119,8 @@ void HubYour(HubCtx& X, HubUi& U)
 		const int N = world::FestPointsTo(*H.W, HubRungMarks[Next]);
 		if (N > 0)
 		{
-			X.UI.Text(Grouped(N) + " pts to " + HubRungNames[Next] + " \xC2\xB7 right now", Px, Y, Ts(13.0f, 700, pal::Accent, Align::Left, Baseline::Alphabetic, false, MaxW));
+			// g1p-copy: "1 pt" at one (the hero level with the mark's last rank: FestRank puts the hero behind a tie, so N is 1).
+			X.UI.Text((N == 1 ? std::string("1 pt to ") : Grouped(N) + " pts to ") + HubRungNames[Next] + " \xC2\xB7 right now", Px, Y, Ts(13.0f, 700, pal::Accent, Align::Left, Baseline::Alphabetic, false, MaxW));
 			Y += 24.0f;
 		}
 	}

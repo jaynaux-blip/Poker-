@@ -861,6 +861,159 @@ void SitesRent()
 	SitesExpect(!Said.empty() && Line, "rent card: the bank's short, the sites aren't: \"Site money can't pay rent.\"");
 }
 
+/**
+ * WallRentShares (G1 polish, g1p-copy; the lead's PIE item 12, s04_wall_calendar_nov: the rent due Sun Nov 8, RCOP 2026's Main
+ * Event, showed RENT and not MAIN): on the career's rent day the square keeps the month's word too, RENT a line up in marker inside
+ * the square's ring and the word under it in ballpoint. Measured with the canvas's measurer on November 2026's page (six rows, the
+ * tightest squares): each run starts 2 or more past its date's measured end and ends inside the ring; RENT's cap top (0.72 of its
+ * size, Roboto's 0.711) is inside the ring, the word's cap top 1.5 or more under RENT's baseline, the word's baseline 0.5 or more
+ * over the room's dots (their top, RowH - 11); RENT at 9 or more, the word at 6 or more. On MAIN's Nov 8, FESTIVAL's Nov 30 (FEIGN
+ * 2026 opens; a two-digit date) and the RunItTwice withdrawal's day (RUNITTWICE, the longest word a square gets). A rent day with no
+ * word keeps the old square: RENT alone at 11 on its date's baseline.
+ * Planted bug: the old if/else in wallcalendar::Draw (RENT, else the word): the word is missing from the rent's square.
+ */
+void WallRentShares(SitesLaptop& P)
+{
+	ss::Session& S = P.S;
+	ss::life::State& Lf = S.Life;
+	// The wall's own canvas scale is 1.4 (its texture); 1.0 and 1.5 too, the UI scales (the runs are laid out in the canvas's units).
+	const auto Draw = [&P, &S](float Scale) {
+		DrawList Wall;
+		ss::ui::Canvas C(Wall, P.M, ss::ui::wallcalendar::Width, ss::ui::wallcalendar::Height, Scale);
+		ss::ui::wallcalendar::Draw(C, S);
+		return Wall;
+	};
+	// The month's grid as wallcalendar::Draw lays it: day 0 a Monday, 7 squares of (Width - 72) / 7, rows min(40, 200 / rows) from 224.
+	const int Today = ss::net::DayOf(S.WorldMinutes());
+	int Yr = 0, Mo = 0, Dm = 0;
+	ss::world::CivilDate(Today, Yr, Mo, Dm);
+	const int First = Today - (Dm - 1);
+	int Days = 28;
+	for (int D = 28; D <= 31; ++D)
+	{
+		int Y2 = 0, M2 = 0, D2 = 0;
+		ss::world::CivilDate(First + D - 1, Y2, M2, D2);
+		Days = M2 == Mo ? D : Days;
+	}
+	const int Rows = (((First % 7) + 7) % 7 + Days + 6) / 7;
+	const float RowH = std::min(40.0f, 200.0f / static_cast<float>(Rows));
+	const float Cell = (ss::ui::wallcalendar::Width - 72.0f) / 7.0f;
+	const float Top = 224.0f;
+	const auto IsDate = [&](const ss::ui::DrawCmd& Cmd) {
+		const std::string& T = Cmd.Text.Text;
+		return Cmd.Type == ss::ui::DrawCmd::Kind::Text && !T.empty() && T.size() <= 2 && std::isdigit(static_cast<unsigned char>(T[0])) != 0 &&
+			std::fabs(Cmd.Text.SizePx - 15.0f) < 0.01f && Cmd.Text.BaselineY > Top && Cmd.Text.BaselineY < Top + static_cast<float>(Rows) * RowH;
+	};
+	// A square's runs (the date drawn at its left, x + 7 on the baseline y + 17): its date, and every other text inside it.
+	struct Square
+	{
+		const ss::ui::TextItem* Date = nullptr;
+		std::vector<const ss::ui::TextItem*> Runs;
+		float X = 0.0f, Y = 0.0f;
+	};
+	const auto SquareOf = [&](const DrawList& L, int Day) {
+		Square Sq;
+		for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+		{
+			Sq.Date = !Sq.Date && IsDate(Cmd) && Cmd.Text.Text == std::to_string(Day - First + 1) ? &Cmd.Text : Sq.Date;
+		}
+		if (!Sq.Date)
+		{
+			return Sq;
+		}
+		Sq.X = Sq.Date->X - 7.0f;
+		Sq.Y = Sq.Date->BaselineY - 17.0f;
+		for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+		{
+			if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && &Cmd.Text != Sq.Date && Cmd.Text.X >= Sq.X && Cmd.Text.X < Sq.X + Cell && Cmd.Text.BaselineY > Sq.Y &&
+				Cmd.Text.BaselineY < Sq.Y + RowH)
+			{
+				Sq.Runs.push_back(&Cmd.Text);
+			}
+		}
+		return Sq;
+	};
+	// The RunItTwice withdrawal's day, from the page as it is: the square RUNITTWICE is written in.
+	const DrawList Plain = Draw(1.4f);
+	int RitDay = -1, Bare = -1;
+	for (int Day = First; Day < First + Days; ++Day)
+	{
+		const Square Sq = SquareOf(Plain, Day);
+		for (const ss::ui::TextItem* R : Sq.Runs)
+		{
+			RitDay = R->Text == "RUNITTWICE" ? Day : RitDay;
+		}
+		Bare = Bare < 0 && Day > Today && Sq.Date && Sq.Runs.empty() ? Day : Bare;
+	}
+	const ss::life::Rent Stage = Lf.RentStage;
+	const double Deadline = Lf.RentDeadline;
+	const ss::Chips Due = Lf.RentDueCents;
+	const auto RentOn = [&Lf](int Day) {
+		Lf.RentStage = ss::life::Rent::Due;
+		Lf.RentDeadline = static_cast<double>(Day + 1) * SitesDay; // its day is DayOf(the deadline less a minute)
+		Lf.RentDueCents = 122500;
+	};
+	std::string Why;
+	const std::vector<std::pair<int, std::string>> Cases = {{ss::world::DayOn(2026, 11, 8), "MAIN"}, {ss::world::DayOn(2026, 11, 30), "FESTIVAL"}, {RitDay, "RUNITTWICE"}};
+	for (const std::pair<int, std::string>& K : Cases)
+	for (const float Scale : {1.0f, 1.4f, 1.5f})
+	{
+		RentOn(K.first);
+		const DrawList L = Draw(Scale);
+		const Square Sq = K.first >= First && K.first < First + Days ? SquareOf(L, K.first) : Square();
+		const ss::ui::TextItem* Rent = nullptr;
+		const ss::ui::TextItem* Word = nullptr;
+		for (const ss::ui::TextItem* R : Sq.Runs)
+		{
+			Rent = R->Text == "RENT" ? R : Rent;
+			Word = R->Text == K.second ? R : Word;
+		}
+		if (!Sq.Date || !Rent || !Word)
+		{
+			Why += " " + K.second + ": " + (!Sq.Date ? "no square" : !Rent ? "no RENT" : "no " + K.second) + " in the rent's square";
+			continue;
+		}
+		const float DateEnd = Sq.Date->X + P.M.Width(Sq.Date->Text, Sq.Date->Face, Sq.Date->SizePx);
+		const float Ring = 3.25f; // the ring's inner edge: StrokeRoundRect at 2 in, 2.5 wide
+		const float RentEnd = Rent->X + P.M.Width(Rent->Text, Rent->Face, Rent->SizePx);
+		const float WordEnd = Word->X + P.M.Width(Word->Text, Word->Face, Word->SizePx);
+		const float RentCap = Rent->BaselineY - 0.72f * Rent->SizePx;
+		const float WordCap = Word->BaselineY - 0.72f * Word->SizePx;
+		const float Dots = Sq.Y + RowH - 11.0f;
+		if (Scale == 1.4f)
+		{
+			std::printf("  wall calendar (each of 1.0, 1.4, 1.5): rent on %s: RENT %.1f px x %.1f-%.1f base %.2f, %s %.1f px x %.1f-%.1f base %.2f; date ends %.1f, "
+						"ring %.2f-%.2f, dots' top %.2f (in the square's units)\n",
+				ss::net::DateLabel(K.first).c_str(), Rent->SizePx, Rent->X - Sq.X, RentEnd - Sq.X, Rent->BaselineY - Sq.Y, K.second.c_str(), Word->SizePx, Word->X - Sq.X,
+				WordEnd - Sq.X, Word->BaselineY - Sq.Y, DateEnd - Sq.X, Ring, Cell - Ring, Dots - Sq.Y);
+		}
+		std::string Bad;
+		Bad += Rent->X < DateEnd + 2.0f || Word->X < DateEnd + 2.0f ? " over its date" : "";
+		Bad += RentEnd > Sq.X + Cell - Ring || WordEnd > Sq.X + Cell - Ring ? " past the ring" : "";
+		Bad += RentCap < Sq.Y + Ring ? " RENT over the ring" : "";
+		Bad += WordCap < Rent->BaselineY + 1.5f ? " the word into RENT" : "";
+		Bad += Word->BaselineY > Dots - 0.5f ? " the word on the dots" : "";
+		Bad += Rent->SizePx < 9.0f || Word->SizePx < 6.0f ? " too small" : "";
+		Why += Bad.empty() ? std::string() : " " + K.second + " at " + std::to_string(Scale).substr(0, 3) + ":" + Bad;
+	}
+	// A rent day with nothing else written keeps the old square.
+	if (Bare >= 0)
+	{
+		RentOn(Bare);
+		const DrawList L = Draw(1.4f);
+		const Square Sq = SquareOf(L, Bare);
+		const bool Old = Sq.Date && Sq.Runs.size() == 1 && Sq.Runs[0]->Text == "RENT" && std::fabs(Sq.Runs[0]->SizePx - 11.0f) < 0.01f &&
+			std::fabs(Sq.Runs[0]->BaselineY - Sq.Date->BaselineY) < 0.01f;
+		Why += Old ? std::string() : " " + ss::net::DateLabel(Bare) + ": the rent's square alone is not RENT at 11";
+	}
+	Lf.RentStage = Stage;
+	Lf.RentDeadline = Deadline;
+	Lf.RentDueCents = Due;
+	SitesExpect(RitDay >= 0 && Bare >= 0 && Why.empty(),
+		("wall calendar: the rent's day keeps the month's word (MAIN, FESTIVAL, RUNITTWICE) under RENT, each clear of its date, the ring, the other line and the dots; "
+		 "a rent day with no word keeps RENT alone" + Why).c_str());
+}
+
 void SitesMarks()
 {
 	// The marks (§1.6): a withdrawal on its way is on the second screen's COMING UP in core-sites' words, and written on the
@@ -891,6 +1044,9 @@ void SitesMarks()
 	}
 	WriteList("wall_calendar_sites", Wall);
 	SitesExpect(DrewRun(Wall, "IGNITE"), "wall calendar: the withdrawal's day says IGNITE");
+	// R34-09's rule, held since G1's polish (g1p-copy): November 2026's page names RCOP 2026's MAIN (Sun Nov 8) and FEIGN 2026's
+	// FESTIVAL (Mon Nov 30), and no festival series' first day as SERIES (FW-7's skip, §2.9.1).
+	SitesExpect(DrewRun(Wall, "MAIN") && DrewRun(Wall, "FESTIVAL") && !DrewRun(Wall, "SERIES"), "wall calendar: November's MAIN and FESTIVAL, and no SERIES (R34-09)");
 	// RunItTwice's name is the longest word a square gets: written smaller, no wider than the widest of the others, so it
 	// clears the date at the square's left (IGNITE keeps its size).
 	P.Join(SiteId::RunItTwice, 0);
@@ -935,6 +1091,7 @@ void SitesMarks()
 	const DrawList Lc = P.Settled();
 	SitesExpect(ss::ui::rlsites_detail::SitesInTransit(S) == 3200 && DrewRun(Lc, "$15.00") && !DrewRun(Lc, "$32.00") && !DrewRun(Lc, "$17.00"),
 		"cashier: in transit is the site's own, not every site's");
+	WallRentShares(P);
 }
 
 // ------------------------------------------------------------------ Mail

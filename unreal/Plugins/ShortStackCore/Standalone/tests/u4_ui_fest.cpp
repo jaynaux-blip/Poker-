@@ -1485,7 +1485,7 @@ void FestYourStripHub(HubsLaptop& P, const ss::fest::Festival& Rcop)
 		if (Held == ss::world::FestMark::None || Held < Marks[K])
 		{
 			const long long N = std::llround(ss::fest::MarkCutoff(W, Marks[K]) - Mine) + 1;
-			Line = N > 0 ? ss::Grouped(N) + " pts to " + Names[K] + " \xC2\xB7 right now" : std::string();
+			Line = N > 0 ? (N == 1 ? std::string("1 pt to ") : ss::Grouped(N) + " pts to ") + Names[K] + " \xC2\xB7 right now" : std::string();
 			break;
 		}
 	}
@@ -1519,6 +1519,134 @@ void FestYourStripHub(HubsLaptop& P, const ss::fest::Festival& Rcop)
 	{
 		std::printf("  FestYourStrip: no plain RiverLine event in play on day %d (the plain case skipped)\n", ss::net::DayOf(P.S.WorldMinutes()));
 	}
+}
+
+/** g1p-copy (the lead's item 11 swept over the festival UI's own copy; U27 at one): the moment FestYourStripHub leaves, kept for
+ *  FestLadderOnePt: the laptop's save (the session's own Save, its hooks keeping that one save and then put back as they were), the
+ *  next mark the hero doesn't hold right now (FestYourStripHub's rule) and that mark's cut-off (fest::MarkCutoff). Nothing kept while
+ *  the world is mid-turn (a save would wait for the turn) or before the hero's first cash. */
+struct HubsLadderKept
+{
+	std::string Saved;
+	ss::world::FestMark Mark = ss::world::FestMark::None;
+	const char* Name = "";
+	double Cutoff = 0.0;
+	int Rank = 0;
+	int Scorers = 0;
+};
+
+HubsLadderKept HubsKeepLadder(HubsLaptop& P)
+{
+	namespace world = ss::world;
+	HubsLadderKept K;
+	const world::World& W = P.S.Living();
+	const std::pair<int, int> Me = world::FestStanding(W, -1);
+	if (W.Holding() || Me.first <= 0)
+	{
+		return K;
+	}
+	const world::FestMark Marks[5] = {world::FestMark::Top25, world::FestMark::Top10, world::FestMark::Finalist, world::FestMark::Podium, world::FestMark::Title};
+	const char* const Names[5] = {"TOP 25%", "TOP 10%", "FINALIST", "PODIUM", "THE BELT"};
+	const world::FestMark Held = world::MarkFor(Me.first, Me.second);
+	for (int I = 0; I < 5 && K.Mark == world::FestMark::None; ++I)
+	{
+		if (Held == world::FestMark::None || Held < Marks[I])
+		{
+			K.Mark = Marks[I];
+			K.Name = Names[I];
+		}
+	}
+	if (K.Mark == world::FestMark::None)
+	{
+		return K;
+	}
+	K.Cutoff = ss::fest::MarkCutoff(W, K.Mark);
+	K.Rank = Me.first;
+	K.Scorers = Me.second;
+	const bool Keep = P.H.Keep;
+	const ss::SaveData Before = P.H.Last;
+	P.H.Keep = true;
+	P.S.Save();
+	K.Saved = P.H.Last.Serialize();
+	P.H.Keep = Keep;
+	P.H.Last = Before;
+	return K;
+}
+
+/** How many text runs start with "1 pts" (U27's run starts with its number). */
+int HubsOnePts(const DrawList& L)
+{
+	int N = 0;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		N += Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text.rfind("1 pts", 0) == 0 ? 1 : 0;
+	}
+	return N;
+}
+
+/** FestLadderOnePt (g1p-copy; the lead's item 11, its sweep over the festival UI's count rows): U27 at one point. The hero level with
+ *  the next mark's last rank in the live race (FestRank puts the hero behind everyone tied with them, so world::FestPointsTo is 1, and
+ *  race points are whole, so a tie is easy to reach) reads "1 pt to {MARK} · right now" on YOUR RCOP at 1.0 and 1.5, never "1 pts".
+ *  On a copy of FestYourStripHub's moment (day 13, 23:30): its save, the hero's race points (the race line's -1 record) set to the
+ *  mark's cut-off, reloaded; FestCareerRiverLine's own laptop is left as it was, and this runs after its last page.
+ *  Plant: U27 always "{N} pts to". */
+void FestLadderOnePt(const HubsLadderKept& K)
+{
+	namespace world = ss::world;
+	ss::SaveData D;
+	const bool Parsed = !K.Saved.empty() && K.Mark != world::FestMark::None && ss::SaveData::Parse(K.Saved, D);
+	bool Planted = false;
+	if (Parsed)
+	{
+		// The live race's line: world\tfest\trace\trcop\t<npc:points:cashes,...>[\t<the crowd's scorers>].
+		std::string& Text = D.WorldText.Edit();
+		const std::string Head = "world\tfest\trace\trcop\t";
+		size_t Start = std::string::npos;
+		if (Text.compare(0, Head.size(), Head) == 0)
+		{
+			Start = 0;
+		}
+		else
+		{
+			const size_t Nl = Text.find("\n" + Head);
+			Start = Nl == std::string::npos ? Nl : Nl + 1;
+		}
+		if (Start != std::string::npos)
+		{
+			const size_t From = Start + Head.size();
+			const size_t End = std::min(Text.find_first_of("\t\n", From), Text.size());
+			std::string Records = Text.substr(From, End - From);
+			size_t Hero = Records.compare(0, 3, "-1:") == 0 ? 0 : Records.find(",-1:");
+			Hero = Hero == std::string::npos || Hero == 0 ? Hero : Hero + 1;
+			const size_t Colon = Hero == std::string::npos ? Hero : Records.find(':', Hero + 3);
+			if (Colon != std::string::npos)
+			{
+				Records.replace(Hero + 3, Colon - Hero - 3, std::to_string(std::llround(K.Cutoff)));
+				Text.replace(From, End - From, Records);
+				Planted = true;
+			}
+		}
+	}
+	ui_test::Expect(Parsed && Planted, "FestLadderOnePt: day 13's save parses and its race line holds the hero's record (set to the mark's cut-off)");
+	if (!Parsed || !Planted)
+	{
+		return;
+	}
+	HubsLaptop Q("u4-fest-career-b", &D);
+	Q.OpenHub();
+	const DrawList One = HubsTab(Q, 2);
+	const DrawList Half = Q.Frame(1.5f);
+	const world::World& W = Q.S.Living();
+	const std::pair<int, int> Me = world::FestStanding(W, -1);
+	const int N = world::FestPointsTo(W, K.Mark);
+	const std::string Want = std::string("1 pt to ") + K.Name + " \xC2\xB7 right now";
+	std::printf("  FestLadderOnePt: the hero %s of %d -> %s of %d, level with %s's cut-off (%.0f pts): N %d; U27 at 1.0 \"%s\" %d, at 1.5 %d; \"1 pts\" runs %d, %d\n",
+		ss::Ordinal(K.Rank).c_str(), K.Scorers, ss::Ordinal(Me.first).c_str(), Me.second, K.Name, K.Cutoff, N, Want.c_str(), ui_test::DrewRun(One, Want) ? 1 : 0,
+		ui_test::DrewRun(Half, Want) ? 1 : 0, HubsOnePts(One), HubsOnePts(Half));
+	ui_test::Expect(N == 1 && Me.first > 0 && world::MarkFor(Me.first, Me.second) < K.Mark && ss::fest::MarkCutoff(W, K.Mark) == K.Cutoff,
+		("FestLadderOnePt: the hero level with " + std::string(K.Name) + "'s last rank stays behind it (FestRank), 1 pt away (N " + std::to_string(N) + ")").c_str());
+	ui_test::Expect(ui_test::DrewRun(One, Want) && ui_test::DrewRun(Half, Want) && HubsOnePts(One) == 0 && HubsOnePts(Half) == 0,
+		("FestLadderOnePt: YOUR RCOP's U27 reads \"" + Want + "\" at 1.0 and 1.5, never \"1 pts\"").c_str());
 }
 
 /** FestRollTitles (§2.6.2, §2.8.2; FH-4A), day 35: RCOP 2026's roll edition shows MAIN EVENT, MINI MAIN EVENT, MICRO MAIN EVENT and
@@ -2775,6 +2903,8 @@ void FestCareerRiverLine()
 			std::to_string(FirstOpen) + ", " + std::to_string(HubsCues(P.H, RlSting, Stung)) + ")").c_str());
 	// FH-4A: the YOUR panel before and after the hero's first RCOP event (fest_hub_your_ladder), then THE RACE's movement on days 14-15.
 	FestYourStripHub(P, *Rcop);
+	// g1p-copy: that moment kept (its save, the next mark and its cut-off) for FestLadderOnePt after this career's last page.
+	const HubsLadderKept LadderKept = HubsKeepLadder(P);
 	// FH-6a: the pin wall after the hero's first festival event (FestPinsReveal's after half).
 	FestPinsRevealAfter(P, *Rcop);
 	for (const int Day : {14, 15})
@@ -3084,6 +3214,8 @@ void FestCareerRiverLine()
 		Wall = Wall.empty() && Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text.rfind("FESTIVAL PINS \xC2\xB7 ", 0) == 0 ? Cmd.Text.Text : Wall;
 	}
 	ui_test::Expect(!Wall.empty(), ("fest_career_pins: the Career page shows the pin wall (" + Wall + ")").c_str());
+	// g1p-copy: U27 at one point, on a copy of day 13's moment (after every page above: this laptop is done).
+	FestLadderOnePt(LadderKept);
 }
 
 // ---- FH-6a: the moments (§2.8.5), the pin wall (§2.8.7) and the stings (§2.7.6).

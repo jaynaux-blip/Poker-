@@ -473,7 +473,8 @@ bool World::Headline(const WorldEvent& E, std::string& Title, std::string& Body,
 		const std::vector<std::pair<std::string, std::string>> Vars = {
 			{"Name", Name}, {"Festival", fest::NameAfterArticle(E.What)}, {"Points", Grouped(E.Value)}, {"Cashes", Grouped(E.Amount)}};
 		Title = site::FillCopy(site::CopyText("head:fest:crown:title"), Vars);
-		Body = site::FillCopy(site::CopyText("head:fest:crown"), Vars);
+		// G1 polish (g1p-copy, item 11): one cash in the singular ("6,350 points from 1 cash."), never "1 cashes".
+		Body = site::FillCopy(site::CopyText(E.Amount == 1 ? "head:fest:crown:one" : "head:fest:crown"), Vars);
 		Tag = site::CopyText("tag:fest:crown");
 		return true;
 	}

@@ -2549,7 +2549,209 @@ const char* const FestNetSiteKeys[] = {"news:fest:announce:title", "news:fest:an
 	"news:fest:announce:champ:runittwice", "news:fest:announce:rl", "news:fest:open:title", "news:fest:open", "news:fest:open:grit", "news:fest:record:title",
 	"news:fest:record:ever", "news:fest:record:year", "head:fest:main:title", "head:fest:main", "head:fest:title:title", "head:fest:title", "head:fest:crown:title",
 	"head:fest:crown", "tag:fest:crown", "tag:fest:festival", "invite:ignite:fest:subject", "invite:ignite:fest", "invite:runittwice:fest:subject",
-	"invite:runittwice:fest", "letter:fest:crown:subject", "letter:fest:crown", "ledger:festcredit"};
+	"invite:runittwice:fest", "letter:fest:crown:subject", "letter:fest:crown", "ledger:festcredit",
+	// G1 polish (g1p-copy): the crown line's singular (item 11) and the Pass letters' first-day and later forms (item 10).
+	"head:fest:crown:one", "invite:ignite:fest:today", "invite:ignite:fest:opened", "invite:runittwice:fest:today", "invite:runittwice:fest:opened"};
+
+/**
+ * FestCountRows (G1 polish, g1p-copy; the lead's PIE item 11, "6,350 points from 1 cashes."): every festival row of the sites' copy
+ * table that writes a count before its plural noun ("{Cashes} cashes", "{Points} points", "{Events} events", "{Entries} runners") is
+ * one of the nine known, each safe at one: the crown's {Cashes} has its singular twin head:fest:crown:one ("from 1 cash.", no
+ * {Cashes}, picked by World::Headline at one); {Points} is a race total, and one cash scores at least 14 (net::Points' smallest,
+ * found here over every field to 20,000); {Events} is a series' event count, at least 2 for every edition fest::All() holds
+ * (2026-2028); a record field's {Entries} is judged against every field since the site's launch weeks before (fest::RecordOf), never
+ * 1. A new count row fails here until it is classified. The festival UI's own copy (fest::FestUiInventory: the hubs', the register
+ * sheets' and the takeovers' rows; the fix round, after U27's "{N} pts to {MARK}" was found with no singular row) is scanned the
+ * same way, the plural noun the next word or the one after ("{N} festival trophies"): each of its eighteen count rows lists every
+ * singular row it draws at one (U10's "1 event" and "1 cash", "1 SEAT WON BY SATELLITE", "1 entry", "1 regular won their seat
+ * by satellite.", "First title on record.", U27's "1 pt to {MARK} · right now": the hero level with a mark's last rank is 1 pt
+ * away) or is a total never 1 (a race's points, at least one cash's; RCOP's event count, at least the fewest edition's). WHO'S IN's
+ * "{N} {Festival} titles" is written only from two (G/WorldFest.cpp).
+ * fest::TextInventory (Dee's lines, WHO'S IN's reasons, the story line and Rerun's V1-V9; the fix round 2, after V5's "{N} events,
+ * one belt" was found with no singular form) is scanned the same way, a {Placeholder} between the count and its noun stepping one
+ * word (in both scans): V5 lists its singular "One event, one belt" (a belt can go to one deep Main Event run; Rerun prints it at
+ * N = 1, video_copy::FestStoryCountForm, FestRerunStories holds the print), WHO'S IN's "{N} {Festival} titles" is written only from
+ * two and the defending player's "{Points} pts" is a race total (at least one cash's).
+ * Planted bugs: head:fest:crown:one deleted; a festival row "{N} seats" added; U27's "1 pt to {MARK} · right now" row deleted; V5's
+ * singular dropped from fest::TextInventory.
+ */
+void FestCountRowsNet()
+{
+	namespace fest = ss::fest;
+	namespace net = ss::net;
+	// The copy's number fills (a count, a total, a place): a word after one of these that ends in "s" is a counted plural noun.
+	const std::set<std::string> Numbers = {"Cashes", "Points", "Events", "Entries", "Days", "Nights", "N", "K", "Rank", "Scorers", "Seats", "Left", "Count", "Titles"};
+	const std::set<std::pair<std::string, std::string>> Known = {{"head:fest:crown", "Cashes"}, {"head:fest:crown", "Points"}, {"head:fest:crown:one", "Points"},
+		{"letter:fest:crown", "Points"}, {"news:fest:announce", "Events"}, {"news:fest:announce:rl", "Events"}, {"news:fest:open", "Events"},
+		{"news:fest:record:ever", "Entries"}, {"news:fest:record:year", "Entries"}};
+	std::set<std::pair<std::string, std::string>> Found;
+	for (const char* Key : FestNetSiteKeys)
+	{
+		const std::string Text = ss::site::CopyText(Key);
+		for (size_t Open = Text.find('{'); Open != std::string::npos; Open = Text.find('{', Open + 1))
+		{
+			const size_t Close = Text.find('}', Open);
+			const std::string Name = Close == std::string::npos ? std::string() : Text.substr(Open + 1, Close - Open - 1);
+			if (!Numbers.count(Name) || Close + 2 >= Text.size() || Text[Close + 1] != ' ')
+			{
+				continue;
+			}
+			size_t End = Close + 2;
+			while (End < Text.size() && Text[End] >= 'a' && Text[End] <= 'z')
+			{
+				++End;
+			}
+			const std::string Noun = Text.substr(Close + 2, End - Close - 2);
+			if (Noun.size() >= 2 && Noun.back() == 's')
+			{
+				Found.insert({Key, Name});
+			}
+		}
+	}
+	const std::string One = ss::site::CopyText("head:fest:crown:one");
+	const bool Twin = One.find("points from 1 cash.") != std::string::npos && One.find("{Cashes}") == std::string::npos && One.find("cashes") == std::string::npos;
+	int Editions = 0, Fewest = 1 << 30;
+	for (const fest::Festival& F : fest::All())
+	{
+		const net::SeriesInfo* Sr = net::Site(F.Site).FindSeries(F.SeriesId);
+		Fewest = std::min(Fewest, Sr ? Sr->Events : 0);
+		++Editions;
+	}
+	// One cash's fewest points: for each field, its last paid place (net::Points pays round(15%), at least one) at a free buy-in.
+	double Least = 1e9;
+	for (int Entries = 2; Entries <= 20000; ++Entries)
+	{
+		const int Paid = std::max(1, static_cast<int>(std::lround(static_cast<double>(Entries) * 0.15)));
+		Least = std::min(Least, net::Points(Paid, Entries, 0));
+	}
+	std::string Odd;
+	for (const auto& P : Found)
+	{
+		Odd += Known.count(P) ? std::string() : " new: " + P.first + " {" + P.second + "}";
+	}
+	for (const auto& P : Known)
+	{
+		Odd += Found.count(P) ? std::string() : " gone: " + P.first + " {" + P.second + "}";
+	}
+	std::printf("  FestCountRows: %zu count rows in the festival copy, the crown's singular twin \"%s\", the fewest events of %d editions %d, one cash's fewest points %.0f\n",
+		Found.size(), One.c_str(), Editions, Fewest, Least);
+	Expect(Odd.empty() && Twin && Editions > 0 && Fewest >= 2 && Least >= 2.0,
+		"FestCountRows: the festival copy's count rows are the nine known, the crown's {Cashes} with its singular twin (\"from 1 cash.\"), every edition's {Events} at "
+		"least 2 (" + std::to_string(Fewest) + ") and one cash's {Points} at least 2 (" + std::to_string(static_cast<int>(Least)) + ")" + Odd);
+	// The festival UI's own copy (fest::FestUiInventory; g1p-copy's fix round: U27's "{N} pts to {MARK}" had no singular row): a count
+	// before a plural noun, the next word or the one after ("{N} festival trophies"), lists every singular row it draws at one, or is a
+	// total never 1 (a race's points: one cash scores at least Least; RCOP's event count: at least Fewest).
+	const std::vector<std::string> Ui = fest::FestUiInventory();
+	const std::set<std::string> UiRows(Ui.begin(), Ui.end());
+	const std::string Dot = " \xC2\xB7 ";
+	const std::string Dates = "{FirstDate} \xE2\x80\x93 {LastDate}";
+	const std::map<std::string, std::vector<std::string>> UiTwins = {
+		{"label\t{N} SEATS WON BY SATELLITE", {"label\t1 SEAT WON BY SATELLITE"}},
+		{"label\t{Entries} entries", {"label\t1 entry"}},
+		{"label\t{N} SEATS AT THE POOL SO FAR", {"label\t1 SEAT AT THE POOL SO FAR"}},
+		{"label\t{N} SEATS WON", {"label\t1 SEAT WON"}},
+		{"label\t{Events} events" + Dot + "{Cashes} cashes" + Dot + "best {Best} of {Field}" + Dot + "race {Rank} of {Scorers}", {"label\t1 event", "label\t1 cash"}},
+		{"label\t{N} pts to {MARK}" + Dot + "right now", {"label\t1 pt to {MARK}" + Dot + "right now"}},
+		{"sentence\t{N} regulars won their seat by satellite.", {"sentence\t1 regular won their seat by satellite."}},
+		{"sentence\t{N} titles on record.", {"sentence\tFirst title on record."}},
+		{"label\t{Festival}" + Dot + "{Grade}" + Dot + "{Events} events" + Dot + "{Cashes} cashes", {"label\t1 event", "label\t1 cash"}},
+		{"label\t{N} events" + Dot + "{Gtd} guaranteed" + Dot + Dates, {"label\t1 event" + Dot + "{Gtd} guaranteed" + Dot + Dates}},
+		{"label\t{Events} events" + Dot + "{Cashes} cashes" + Dot + "best {Best} of {Field}", {"label\t1 event" + Dot + "1 cash" + Dot + "best {Best} of {Field}"}},
+		{"label\t{N} festival trophies", {"label\t{N} festival trophy"}},
+		{"label\t{N} belts", {"label\t{N} belt"}}};
+	const std::set<std::string> UiTotals = {"label\tYou" + Dot + "{Rank} of {Scorers} in the race" + Dot + "{Points} pts", "label\t{Points} pts",
+		"label\t{FESTIVAL}" + Dot + "{Name} LEADS THE RACE" + Dot + "{N} PTS", "label\t{FESTIVAL}" + Dot + "YOU LEAD THE RACE" + Dot + "{N} PTS",
+		"label\t{N} events" + Dot + "{BuyIn} Main Event with {Gtd} guaranteed"};
+	const auto Letter = [](char C) { return (C >= 'a' && C <= 'z') || (C >= 'A' && C <= 'Z'); };
+	// A row whose count fill comes before a plural noun, the next word or the one after; a {Placeholder} between them steps one word
+	// ("{N} {Festival} titles", the fix round 2).
+	const auto CountRows = [&Numbers, &Letter](const std::vector<std::string>& Rows) {
+		std::set<std::string> Found;
+		for (const std::string& Row : Rows)
+		{
+			for (size_t Open = Row.find('{'); Open != std::string::npos; Open = Row.find('{', Open + 1))
+			{
+				const size_t Close = Row.find('}', Open);
+				if (Close == std::string::npos || !Numbers.count(Row.substr(Open + 1, Close - Open - 1)))
+				{
+					continue;
+				}
+				size_t At = Close + 1;
+				for (int Word = 0; Word < 2 && At + 1 < Row.size() && Row[At] == ' ' && (Letter(Row[At + 1]) || Row[At + 1] == '{'); ++Word)
+				{
+					if (Row[At + 1] == '{')
+					{
+						const size_t Shut = Row.find('}', At + 1);
+						At = Shut == std::string::npos ? Row.size() : Shut + 1;
+						continue;
+					}
+					size_t End = At + 1;
+					while (End < Row.size() && Letter(Row[End]))
+					{
+						++End;
+					}
+					if (End - At - 1 >= 2 && (Row[End - 1] == 's' || Row[End - 1] == 'S'))
+					{
+						Found.insert(Row);
+						break;
+					}
+					At = End;
+				}
+			}
+		}
+		return Found;
+	};
+	// Each found row lists its singular rows (each one in the inventory) or is a known total; a twin or total no longer found is gone.
+	const auto Classify = [](const std::set<std::string>& Found, const std::set<std::string>& Rows, const std::map<std::string, std::vector<std::string>>& Twins,
+							  const std::set<std::string>& Totals) {
+		std::string Odd;
+		for (const std::string& Row : Found)
+		{
+			const auto Tw = Twins.find(Row);
+			if (Tw != Twins.end())
+			{
+				for (const std::string& Single : Tw->second)
+				{
+					Odd += Rows.count(Single) ? std::string() : " no singular row for \"" + Row + "\" (\"" + Single + "\")";
+				}
+			}
+			else if (!Totals.count(Row))
+			{
+				Odd += " new: \"" + Row + "\"";
+			}
+		}
+		for (const auto& Tw : Twins)
+		{
+			Odd += Found.count(Tw.first) ? std::string() : " gone: \"" + Tw.first + "\"";
+		}
+		for (const std::string& Row : Totals)
+		{
+			Odd += Found.count(Row) ? std::string() : " gone: \"" + Row + "\"";
+		}
+		return Odd;
+	};
+	const std::set<std::string> UiFound = CountRows(Ui);
+	const std::string UiOdd = Classify(UiFound, UiRows, UiTwins, UiTotals);
+	std::printf("  FestCountRows: %zu count rows in the festival UI's %zu (%zu with their singular rows, %zu totals)\n", UiFound.size(), Ui.size(), UiTwins.size(),
+		UiTotals.size());
+	Expect(UiOdd.empty() && UiFound.size() == UiTwins.size() + UiTotals.size() && Fewest >= 2 && Least >= 2.0,
+		"FestCountRows (the festival UI): each of fest::FestUiInventory's " + std::to_string(UiFound.size()) +
+			" count rows lists its singular rows (U27's \"1 pt to {MARK} \xC2\xB7 right now\" among them) or is a total never 1" + UiOdd);
+	// The festival texts (fest::TextInventory; g1p-copy's fix round 2: V5's "{N} events, one belt" had no form for one): V5 lists its
+	// singular (video_copy::FestStorySingulars, printed at N = 1); WHO'S IN's titles count is written only from two
+	// (G/WorldFest.cpp's FestWhyLine) and the defending player's points are a race total (one cash scores at least Least).
+	const std::vector<std::string> Texts = fest::TextInventory();
+	const std::set<std::string> TextRows(Texts.begin(), Texts.end());
+	const std::map<std::string, std::vector<std::string>> TextTwins = {{"label\t{N} events, one belt", {"label\tOne event, one belt"}}};
+	const std::set<std::string> TextTotals = {"label\t{Name}" + Dot + "{N} {Festival} titles", "label\tDEFENDING PLAYER OF THE SERIES" + Dot + "{Name}" + Dot + "{Points} pts"};
+	const std::set<std::string> TextFound = CountRows(Texts);
+	const std::string TextOdd = Classify(TextFound, TextRows, TextTwins, TextTotals);
+	std::printf("  FestCountRows: %zu count rows in the festival texts' %zu (%zu with their singular rows, %zu totals)\n", TextFound.size(), Texts.size(),
+		TextTwins.size(), TextTotals.size());
+	Expect(TextOdd.empty() && TextFound.size() == TextTwins.size() + TextTotals.size() && Least >= 2.0,
+		"FestCountRows (the festival texts): each of fest::TextInventory's " + std::to_string(TextFound.size()) +
+			" count rows lists its singular rows (V5's \"One event, one belt\") or is a total never 1" + TextOdd);
+}
 
 /** §1.2 items 2-5, 9-10, 12-13, §2.11: every core inventory (FN-4b, PLAN_FNET's Corrections item 1): fest::Inventory (F-net's names,
  *  Shorts, Titles, taglines, event names, blurbs, seats texts, the trophies, C1 and the room words), fest::TextInventory (F-world's
@@ -4628,6 +4830,11 @@ void SegNet()
 	if (Only("FestCopy"))
 	{
 		FestCopyNet();
+	}
+	// G1 polish (g1p-copy, item 11).
+	if (Only("FestCountRows"))
+	{
+		FestCountRowsNet();
 	}
 	// FN-4a: RiverLine's dress.
 	if (Only("FestRcopGtdSum"))

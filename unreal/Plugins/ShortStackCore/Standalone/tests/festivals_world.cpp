@@ -2331,8 +2331,28 @@ void FestHeadline()
 	const std::string WinnerName = Winner ? Winner->Name : Crowns.size() == 1 && Crowns[0].Npc == -1 ? After.HeroName : std::string();
 	const bool CrownHead = CrownPosts.size() == 1 && Crowns.size() == 1 && After.Headline(CrownPosts[0], Title, Body, Tag) &&
 						   Title == WinnerName + " is the RCOP 2026 Player of the Series" &&
-						   Body == WinnerName + " takes the RCOP 2026 belt: " + ss::Grouped(Crowns[0].Entries) + " points from " + ss::Grouped(CrownPosts[0].Amount) + " cashes." && Tag == "CROWN";
+						   Body == WinnerName + " takes the RCOP 2026 belt: " + ss::Grouped(Crowns[0].Entries) + " points from " +
+									   (CrownPosts[0].Amount == 1 ? std::string("1 cash.") : ss::Grouped(CrownPosts[0].Amount) + " cashes.") &&
+						   Tag == "CROWN";
 	Expect(CrownHead, "FestHeadline: RCOP 2026's crown reads head:fest:crown filled, tag CROWN ('" + Title + "' / '" + Body + "' / " + Tag + ")");
+	// G1 polish (g1p-copy, the lead's PIE item 11): the crown line counts one cash in the singular ("6,350 points from 1 cash.", PIE's
+	// "1 cashes" on day 400) and every other count in the plural, grouped: the same post at 1, 2 and 1,000 cashes.
+	std::string Counts;
+	for (const ss::Chips N : {static_cast<ss::Chips>(1), static_cast<ss::Chips>(2), static_cast<ss::Chips>(1000)})
+	{
+		if (CrownPosts.size() != 1)
+		{
+			break;
+		}
+		world::WorldEvent Post = CrownPosts[0];
+		Post.Amount = N;
+		std::string T1, B1, G1;
+		const std::string Tail = " points from " + (N == 1 ? std::string("1 cash.") : ss::Grouped(N) + " cashes.");
+		const bool Good = After.Headline(Post, T1, B1, G1) && B1.size() > Tail.size() && B1.compare(B1.size() - Tail.size(), Tail.size(), Tail) == 0 &&
+						  B1.find("1 cashes") == std::string::npos && B1.find('{') == std::string::npos && T1 == Title && G1 == "CROWN";
+		Counts += Good ? std::string() : " [" + std::to_string(N) + ": '" + B1 + "']";
+	}
+	Expect(CrownPosts.size() == 1 && Counts.empty(), "FestHeadline: the crown line reads \"from 1 cash.\" at one cash and \"from 2 cashes.\", \"from 1,000 cashes.\" past it" + Counts);
 	const world::Honor* MainH = nullptr;
 	for (const world::Honor& H : After.Honors())
 	{
@@ -3387,6 +3407,48 @@ void FestRerunStories()
 	Expect(TcoEach, "FestRerunStories: The Championship Online 2027's Main win and belt stories print \"the Championship Online 2027\" in V1 "
 					"and V4 and keep \"The\" in V3 and V6, in both fills, never \"the The\" (" + TcoGot + ")");
 	std::printf("  FestRerunStories: TCO 2027 %s\n", TcoGot.c_str());
+	// V5 at one (g1p-copy's fix round 2, the lead's PIE item 11's sweep): the belt can go to one deep Main Event run (PIE's RCOP 2027
+	// belt went to a scorer with 1 cash), so the hero's belt story from one event reads "One event, one belt" in Update 2's Hype line
+	// and Rerun 2.0's Hype option (video_copy::FestStoryCountForm), never "1 events"; from two events it reads "2 events, one belt".
+	auto BeltUpper = [](std::string S) {
+		for (char& Ch : S)
+		{
+			Ch = Ch >= 'a' && Ch <= 'z' ? static_cast<char>(Ch - 'a' + 'A') : Ch;
+		}
+		return S;
+	};
+	std::string BeltGot;
+	bool BeltEach = true;
+	for (const int Count : {1, 2})
+	{
+		const std::string BeltKey = "fest-belt-rcop";
+		const std::string BeltFacts = "Festival=" + video::vcontent::FactEsc("RCOP 2026") + ";N=" + std::to_string(Count);
+		const std::string BeltWant = Count == 1 ? "One event, one belt" : "2 events, one belt";
+		const std::vector<std::string> U2 = video::video_copy::FestStoryLines(BeltKey, video::TitleStyle::Hype, BeltFacts);
+		video::Candidate BC = C;
+		BC.Id = "story:" + BeltKey;
+		BC.Event = BeltKey;
+		BC.IdeaFacts = BeltFacts;
+		video::Choice Ch;
+		Ch.Candidates = {BC.Id};
+		Ch.T = video::TitleStyle::Hype;
+		const std::vector<video::TitleOption> Opts = video::TitleOptions(Ch, {BC}, video::Channel(), 0, 3);
+		const std::string First = Opts.empty() ? std::string() : Opts.front().Text;
+		BeltEach = BeltEach && U2.size() == 1 && U2.front() == BeltWant && !Opts.empty() && Opts.front().Key.rfind("story.fest-belt.", 0) == 0 &&
+				   First == BeltUpper(BeltWant);
+		for (const std::string& Line : U2)
+		{
+			BeltEach = BeltEach && BeltUpper(Line).find("1 EVENTS") == std::string::npos;
+		}
+		for (const video::TitleOption& O : Opts)
+		{
+			BeltEach = BeltEach && BeltUpper(O.Text).find("1 EVENTS") == std::string::npos;
+		}
+		BeltGot += (BeltGot.empty() ? "" : " | ") + std::string("N=") + std::to_string(Count) + ": " + (U2.empty() ? std::string("-") : U2.front()) + " / " + First;
+	}
+	Expect(BeltEach, "FestRerunStories: V5 reads \"One event, one belt\" for a belt from one event and \"2 events, one belt\" from two, in Update 2's Hype "
+					 "line and Rerun 2.0's Hype option, never \"1 events\" (" + BeltGot + ")");
+	std::printf("  FestRerunStories: V5 %s\n", BeltGot.c_str());
 	// The session: the belt's text becomes Rerun's story at the next calendar step, a series event's (x1.3) with its facts packed; a
 	// festival line sent before the channel had state is marked told; a reload reads the facts again (a story's aren't saved).
 	const FestSessionRunWorld& Run = FestSessionWorld();
@@ -3910,6 +3972,53 @@ void FestPassGate()
 	}
 	Expect(Named && Letters.empty(), "FestPassGate: the Pass letter (Why 5) names the festival, the day it opens and (Ignite's) its Main's buy-in: L1-L2 for FEIGN 2026, L3-L4 "
 									 "for REIGN 2027" + Letters);
+	// G1 polish (g1p-copy, the lead's PIE item 10: FEIGN 2026's letter dated Tue Dec 1 said "opens on Nov 30"): the letter's tense
+	// follows the day it's written. Every day the Pass is open for each Ignite and RunItTwice edition fest::All() holds (2026-2028;
+	// fest::PassFestival: Announced to the Main's day), at 00:06 (the daily check's minute in PIE) and at 23:00: before the first day
+	// "<Name> opens on <Date>,", on it "<Name> opens today,", after it "<Name> opened on <Date>,", and never "opens on" a day gone by.
+	std::string Tenses, Pie;
+	int Before = 0, OnTheDay = 0, Since = 0;
+	for (const fest::Festival& F : fest::All())
+	{
+		if (F.Site != net::SiteId::Ignite && F.Site != net::SiteId::RunItTwice)
+		{
+			continue;
+		}
+		for (int Day = F.FirstDay - 60; Day <= F.LastDay + 1; ++Day)
+		{
+			for (const double Minute : {6.0, 23.0 * 60.0})
+			{
+				const double At = static_cast<double>(Day) * 1440.0 + Minute;
+				if (fest::PassFestival(F.Site, At) != &F)
+				{
+					continue;
+				}
+				site::Book B;
+				ss::life::State L;
+				site::Invite(B, L, F.Site, At, 5, false);
+				const std::string Date = fest::DateInSentence(F.FirstDay, Day);
+				const std::string Want = Day < F.FirstDay ? F.Name + " opens on " + Date + "," : Day == F.FirstDay ? F.Name + " opens today," : F.Name + " opened on " + Date + ",";
+				const ss::life::Letter* M = L.Inbox.size() == 1 ? &L.Inbox.back() : nullptr;
+				const bool Good = M && M->Kind == site::LetterInvite && M->Body.find(Want) != std::string::npos && M->Body.find('{') == std::string::npos &&
+								  (Day < F.FirstDay || M->Body.find(" opens on ") == std::string::npos);
+				Before += Good && Day < F.FirstDay ? 1 : 0;
+				OnTheDay += Good && Day == F.FirstDay ? 1 : 0;
+				Since += Good && Day > F.FirstDay ? 1 : 0;
+				if (!Good && Tenses.size() < 600)
+				{
+					Tenses += " [" + F.Name + " on " + net::DateLabel(Day) + ": want '" + Want + "', '" + (M ? M->Body.substr(0, 90) : std::string("no letter")) + "']";
+				}
+				if (&F == Feign1 && Day == F.FirstDay + 1 && Minute == 6.0 && M)
+				{
+					Pie = M->Body.substr(0, M->Body.find(" Bring friends."));
+				}
+			}
+		}
+	}
+	std::printf("  FestPassGate: Pass letters %d before the first day, %d on it, %d after it; FEIGN 2026's on Dec 1: \"%s\"\n", Before, OnTheDay, Since, Pie.c_str());
+	Expect(Named && Tenses.empty() && Before > 0 && OnTheDay > 0 && Since > 0 && Feign1 && Pie.find(Feign1->Name + " opened on Nov 30, and you're on the list.") != std::string::npos,
+		"FestPassGate: a Pass letter written before the first day says \"opens on\" it, on it \"opens today\", after it \"opened on\" (FEIGN 2026's on Dec 1: \"opened on "
+		"Nov 30\")" + Tenses);
 }
 
 /**
