@@ -1936,6 +1936,43 @@ bool HubsSilver(const ss::ui::Color& C, uint32_t Silver)
 	return std::fabs(C.R - W.R) < 0.01f && std::fabs(C.G - W.G) < 0.01f && std::fabs(C.B - W.B) < 0.01f && C.A > 0.3f && C.A < 0.6f;
 }
 
+/** g1p-hub, FestWaveClear's drawn test: the core vertices of RCOP's silver wave line (Silver, the look's Accent2) inside the box of any
+ *  text run of the banner {24, 132, 1552, 204} right of the crest (x 205 on); Runs counts those runs. Where names the first few. */
+int HubsWaveHits(const DrawList& L, uint32_t Silver, const std::string& Tag, int& Runs, std::string& Where)
+{
+	std::vector<HubsBox> Boxes;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.X >= 205.0f && Cmd.Text.BaselineY > 132.0f && Cmd.Text.BaselineY < 336.0f && !Cmd.Text.Text.empty() && Cmd.Text.Text != " ")
+		{
+			Boxes.push_back(HubsRunBox(Cmd));
+		}
+	}
+	Runs += static_cast<int>(Boxes.size());
+	int Hits = 0;
+	for (const ss::ui::Vertex& V : L.Vertices)
+	{
+		if (!HubsSilver(V.Col, Silver))
+		{
+			continue;
+		}
+		for (const HubsBox& B : Boxes)
+		{
+			if (V.X > B.X0 && V.X < B.X1 && V.Y > B.Y0 && V.Y < B.Y1)
+			{
+				++Hits;
+				if (Where.size() < 300)
+				{
+					char Buf[120];
+					std::snprintf(Buf, sizeof(Buf), " a wave vertex at (%.0f, %.0f) %s;", static_cast<double>(V.X), static_cast<double>(V.Y), Tag.c_str());
+					Where += Buf;
+				}
+			}
+		}
+	}
+	return Hits;
+}
+
 /** FestWaveClear (g1p-hub item 5; PIE s03_hub_race, s09b_rcop2027_hub: the line through "The RiverLine Championship of Online Poker…"):
  *  RCOP's waves pass behind the hub's header text at every phase of their motion. Drawn: the RCOP hub at 48 times through a world day
  *  (every half hour of the waves' climb) and six frames through the rise after an open, each at both UI scales: no core vertex of the
@@ -2060,6 +2097,26 @@ void FestWaveClearHubs(HubsLaptop& P, const ss::fest::Festival& Rcop)
 	ui_test::Expect(Frames == 108 && Runs > 0 && Hits == 0 && Uncovered == 0, ("FestWaveClear: RCOP's silver wave passes behind every header run of the hub at 48 times of day and through the rise, at both scales" +
 																			  (Where.empty() ? std::string() : ":" + Where)).c_str());
 	ui_test::Expect(!Clear.empty() && Inside == 0 && Empty == 0 && Crossing > 0, "FestWaveClear: at every minute of the climb and every drop of the rise the wave lines stay out of the header's boxes, and only the boxes keep them out");
+	// The hero band (Main Event Day's broadcast, §2.8.4): its word-mark, MAIN EVENT DAY, the flap row and the live line, every hour of
+	// RCOP 2026's Main day (this laptop walks on from its Buildup; it draws no page after this).
+	int BandFrames = 0, BandRuns = 0, BandHits = 0;
+	std::string BandWhere;
+	P.At(static_cast<double>(Rcop.MainDay) * ss::net::MinutesPerDay + 1.0);
+	P.OpenHub();
+	for (int Hour = 0; Hour < 24; ++Hour)
+	{
+		P.At(static_cast<double>(Rcop.MainDay) * ss::net::MinutesPerDay + 60.0 * static_cast<double>(Hour) + 1.0);
+		for (const float Scale : {1.0f, 1.5f})
+		{
+			const DrawList L = P.Frame(Scale);
+			bool Broadcast = false;
+			BandFrames += !rf::HubShownKey(P.RL, P.Now, Broadcast).empty() && Broadcast ? 1 : 0;
+			BandHits += HubsWaveHits(L, Look.Accent2, std::to_string(Hour) + ":00 x" + (Scale == 1.0f ? "1.0" : "1.5"), BandRuns, BandWhere);
+		}
+	}
+	std::printf("  FestWaveClear (the hero band): %d broadcast frames through RCOP 2026's Main day, %d runs\n", BandFrames, BandRuns);
+	ui_test::Expect(BandFrames == 48 && BandRuns > 0 && BandHits == 0, ("FestWaveClear: on Main Event Day RCOP's silver wave passes behind the hero band's text and flap row every hour, at both scales" +
+																	   (BandWhere.empty() ? std::string() : ":" + BandWhere)).c_str());
 }
 
 /** FestRollPillClear (g1p-hub item 4; PIE s09b_rcop2027_hub: DEFENDING CHAMPION over the prize): CHAMPIONS on RCOP 2027's day 395, where
