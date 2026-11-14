@@ -98,5 +98,18 @@ int FestStepCredits(life::State& L, const world::World& W, double Now);
  *  belt is yours" ({Festival} the edition's name without its year), its body's two {Festival} after "the " and "next " through
  *  fest::NameAfterArticle. */
 std::pair<std::string, std::string> FestCrownLetter(const fest::Festival& F, double Points);
+
+/** G1 polish (P-shelf; PIE_G1_NOTES' dev hooks): the edition ss.Fest.Hub <brand> [year] names, the one rule for DebugFest's hub answer
+ *  and its laptop half (game/Update4Commands.cpp asks DebugFest's "hubseries"): with a year, the brand's edition that year (nullptr:
+ *  none); with none, the brand's first edition whose hub isn't over (its window not yet past, or its phase at Now, fest::PhaseOf with
+ *  W, not Off), else its latest. */
+const fest::Festival* FestHubEdition(fest::Brand B, int Year, double Now, const world::World* W);
+/** Why ss.Fest.Hub would not open edition H at Now, as a "not yet: " line ("" when it would): before its announcement, or a rival's hub
+ *  with no account there (Account: the player holds one on H's site, the laptop's own rule). */
+std::string FestHubRefusal(const fest::Festival& H, double Now, const world::World* W, bool Account);
+/** ss.Fest.Describe's line for site S's Festival Pass (§2.10 item 1, as SiteMoney.cpp's GateMet reads it): the rents against the gate's,
+ *  PaidEvents against what the site's edition in its window needs (a first edition needs none: fest::PassNeeds 0), else that no
+ *  festival is in its window; ", account open" with Account. */
+std::string FestPassLine(net::SiteId S, int RentsPaid, int PaidEvents, double Now, const world::World* W, bool Account);
 } // namespace session_fest_detail
 } // namespace ss

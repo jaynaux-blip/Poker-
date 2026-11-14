@@ -768,16 +768,16 @@ const fest::Festival* FestEditionNow(fest::Brand B, int Today, const fest::Festi
 	return Out;
 }
 
-/** The edition's next numbered event from Now (its events in start order, the Main among them; never a satellite): false when none
- *  is left. */
-bool FestNextNumbered(const fest::Festival& F, double Now, net::EventInstance& Out)
+/** The edition's next numbered event from Now (its events in start order, the Main among them; never a satellite), skipping any in
+ *  Played (event ids: the hero's results so far, G1 polish P-shelf): false when none is left. */
+bool FestNextNumbered(const fest::Festival& F, double Now, net::EventInstance& Out, const std::set<std::string>* Played = nullptr)
 {
 	const net::Network& N = net::ForEvent(F.MainId);
 	const double From = std::max(Now, static_cast<double>(F.FirstDay) * net::MinutesPerDay);
 	for (const net::EventInstance& E : N.Window(From, static_cast<double>(F.LastDay + 1) * net::MinutesPerDay))
 	{
 		const net::EventTemplate& T = N.TemplateOf(E);
-		if (T.Series == F.SeriesId && std::find(F.Satellites.begin(), F.Satellites.end(), T.Id) == F.Satellites.end())
+		if (T.Series == F.SeriesId && std::find(F.Satellites.begin(), F.Satellites.end(), T.Id) == F.Satellites.end() && (!Played || Played->count(E.Id) == 0))
 		{
 			Out = E;
 			return true;
@@ -869,13 +869,7 @@ std::string FestDescribe(const world::World& W, const life::State& L, const rep:
 	Out += "\nYour marks: " + (Marks.empty() ? std::string("none") : Marks);
 	for (const net::SiteId S : {net::SiteId::Ignite, net::SiteId::RunItTwice})
 	{
-		const net::SiteDef& D = net::Def(S);
-		const fest::Festival* F = D.Gate.FestivalEvents >= 0 ? fest::PassFestival(S, Now) : nullptr;
-		Out += "\n" + D.Name + "'s Pass: rents " + std::to_string(L.RentsPaid) + " of " + std::to_string(std::max(2, D.Gate.MinRentsPaid)) + ", paid events " +
-			std::to_string(std::max(P.OnlineEvents, P.Paid100)) +
-			(F ? " of " + std::to_string(fest::PassNeeds(*F, D.Gate)) + ", " + F->Name + " in its window (" + FestPhaseName(fest::PhaseOf(*F, Now, &W)) + ")"
-			   : std::string(", no festival in its window")) +
-			(site::AccountOf(L.Sites, S) ? ", account open" : "");
+		Out += "\n" + FestPassLine(S, L.RentsPaid, std::max(P.OnlineEvents, P.Paid100), Now, &W, site::AccountOf(L.Sites, S) != nullptr);
 	}
 	return Out;
 }
@@ -922,6 +916,55 @@ std::string FestRaceText(const world::World& W, int Count, int Today)
 	return Out + (Live ? (Me.first > 0 ? "\n  You: rank " + Grouped(Me.first) + " of " + Grouped(Me.second) : std::string("\n  You: not scoring yet")) : std::string());
 }
 } // namespace
+
+const fest::Festival* FestHubEdition(fest::Brand B, int Year, double Now, const world::World* W)
+{
+	// G1 polish (P-shelf, PIE_G1_NOTES' dev hooks): one rule for DebugFest's hub answer and the laptop half (Update4Commands.cpp asks
+	// "hubseries"), where the answer had LastDay + kAfterglowDays with FestEditionNow's fallback and the laptop LastDay + kAfterglowDays
+	// + 2 with none. An edition's hub is over once its window has passed and its phase reads Off (the crown can wait two days past
+	// LastEnd, so no fixed day count matches PhaseOf); All() is in FirstDay order.
+	const int Today = net::DayOf(Now);
+	const fest::Festival* Latest = nullptr;
+	for (const fest::Festival& G : fest::All())
+	{
+		if (G.Which != B)
+		{
+			continue;
+		}
+		if (Year > 0 ? G.Year == Year : Today <= G.LastDay || fest::PhaseOf(G, Now, W) != fest::Phase::Off)
+		{
+			return &G;
+		}
+		Latest = &G;
+	}
+	return Year > 0 ? nullptr : Latest;
+}
+
+std::string FestHubRefusal(const fest::Festival& H, double Now, const world::World* W, bool Account)
+{
+	const fest::Phase Ph = fest::PhaseOf(H, Now, W);
+	if (Ph == fest::Phase::Off && net::DayOf(Now) < H.FirstDay)
+	{
+		return "not yet: " + H.Name + "'s hub opens when it is announced (" + net::DateLabel(H.FirstDay - fest::kAnnounceDays) + ")";
+	}
+	if (H.Site != net::SiteId::RiverLine && !Account)
+	{
+		return "not yet: " + H.Name + "'s hub (" + FestPhaseName(Ph) + ") is on " + net::Def(H.Site).Name + ", which needs an account there first";
+	}
+	return std::string();
+}
+
+std::string FestPassLine(net::SiteId S, int RentsPaid, int PaidEvents, double Now, const world::World* W, bool Account)
+{
+	// G1 polish (P-shelf): what the gate needs, as SiteMoney.cpp's GateMet reads it (a first edition needs no events: PassNeeds 0, where
+	// the line read "paid events 5 of 0").
+	const net::SiteDef& D = net::Def(S);
+	const fest::Festival* F = D.Gate.FestivalEvents >= 0 ? fest::PassFestival(S, Now) : nullptr;
+	const int Needs = F ? fest::PassNeeds(*F, D.Gate) : 0;
+	const std::string Window = F ? ", " + F->Name + " in its window (" + FestPhaseName(fest::PhaseOf(*F, Now, W)) + ")" : std::string(", no festival in its window");
+	return D.Name + "'s Pass: rents " + std::to_string(RentsPaid) + " of " + std::to_string(std::max(2, D.Gate.MinRentsPaid)) + ", paid events " + std::to_string(PaidEvents) +
+		(!F ? std::string() : Needs > 0 ? " of " + std::to_string(Needs) : std::string(" (a first edition needs none)")) + Window + (Account ? ", account open" : "");
+}
 } // namespace session_fest_detail
 
 std::string Session::DebugFest(const std::string& Args)
@@ -971,7 +1014,7 @@ std::string Session::DebugFest(const std::string& Args)
 	{
 		return "look off: the site in front would drop its dev look (dev)";
 	}
-	if (Verb != "hub" && Verb != "look" && Verb != "moment" && Verb != "result")
+	if (Verb != "hub" && Verb != "hubseries" && Verb != "look" && Verb != "moment" && Verb != "result")
 	{
 		return Usage;
 	}
@@ -986,29 +1029,24 @@ std::string Session::DebugFest(const std::string& Args)
 	{
 		return Verb + " " + A[1] + ": no edition";
 	}
-	if (Verb == "hub")
+	if (Verb == "hub" || Verb == "hubseries")
 	{
-		// That edition's hub (a year picks one; else the edition open now, or the next to come).
+		// That edition's hub (a year picks one; else the edition whose hub isn't over, or the next to come): FestHubEdition, the one rule.
+		// "hubseries" is the laptop half's (game/Update4Commands.cpp, never typed): the edition's series id when the hub would open, else
+		// the same answer as "hub", so the laptop never opens on a refusal (G1 polish P-shelf).
 		const int Year = A.size() > 2 ? std::atoi(A[2].c_str()) : 0;
-		const fest::Festival* H = nullptr;
-		for (const fest::Festival& G : fest::All())
-		{
-			const bool Pick = G.Which == B && (Year > 0 ? G.Year == Year : G.LastDay + fest::kAfterglowDays >= Today);
-			H = !H && Pick ? &G : H;
-		}
-		H = H ? H : Year > 0 ? nullptr : F;
+		const fest::Festival* H = sfd::FestHubEdition(B, Year, FestNow, &LivingWorld);
 		if (!H)
 		{
 			return "hub " + A[1] + ": no edition in " + std::to_string(Year);
 		}
-		const fest::Phase Ph = fest::PhaseOf(*H, FestNow, &LivingWorld);
-		if (Ph == fest::Phase::Off && Today < H->FirstDay)
+		const std::string No = sfd::FestHubRefusal(*H, FestNow, &LivingWorld, site::AccountOf(Life.Sites, H->Site) != nullptr);
+		if (!No.empty())
 		{
-			return "not yet: " + H->Name + "'s hub opens when it is announced (" + net::DateLabel(H->FirstDay - fest::kAnnounceDays) + ")";
+			return No;
 		}
-		const bool Rival = H->Site != net::SiteId::RiverLine;
-		return "hub " + A[1] + ": would open " + H->Name + "'s hub on " + net::Def(H->Site).Name + " (" + sfd::FestPhaseName(Ph) + ")" +
-			(Rival && !site::AccountOf(Life.Sites, H->Site) ? "; it needs an account on " + net::Def(H->Site).Name + " first" : std::string());
+		return Verb == "hubseries" ? H->SeriesId
+								   : "hub " + A[1] + ": would open " + H->Name + "'s hub on " + net::Def(H->Site).Name + " (" + sfd::FestPhaseName(fest::PhaseOf(*H, FestNow, &LivingWorld)) + ")";
 	}
 	if (Verb == "look")
 	{
@@ -1122,9 +1160,17 @@ std::string Session::DebugFest(const std::string& Args)
 		Save();
 		return "result " + A[1] + " s1 seat: " + N.NameOf(E) + " (" + sfd::FestWhen(E.Start) + ") won, a ticket for " + Step1->SeatTicket + " in the wallet (dev)";
 	}
-	if (!sfd::FestNextNumbered(*Live, FestNow, E))
+	// The next numbered event the hero has no result in yet (G1 polish P-shelf): a second call at the same clock plants a second result,
+	// where it planted into the first one's event again and reported a result it did not add.
+	std::set<std::string> Played;
+	for (const world::HeroFestResult& Row : world::HeroFestResults(LivingWorld, Live->SeriesId))
 	{
-		return "result " + A[1] + " " + What + ": no numbered event is left in " + Live->Name;
+		Played.insert(Row.EventId);
+	}
+	if (!sfd::FestNextNumbered(*Live, FestNow, E, &Played))
+	{
+		const bool Left = sfd::FestNextNumbered(*Live, FestNow, E);
+		return "result " + A[1] + " " + What + (Left ? ": every numbered event left in " + Live->Name + " already has your result" : ": no numbered event is left in " + Live->Name);
 	}
 	const std::vector<Chips> Pay = N.Payouts(E);
 	const int Paid = static_cast<int>(Pay.size());
