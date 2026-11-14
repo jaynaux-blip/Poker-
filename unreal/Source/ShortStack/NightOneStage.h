@@ -23,6 +23,7 @@ class USkeletalMesh;
 class UStaticMesh;
 class UStaticMeshComponent;
 class UWidgetComponent;
+class UFestShelf;
 
 /**
  * What the apartment shows of the player's life: the GearDrop gear they own, set up where it would go, and the
@@ -85,7 +86,7 @@ public:
 	 * Bumped whenever the set's construction changes in a way play depends on (new parts the game drives): a stage
 	 * saved in a level before that (a cooked map not saved again since) is replaced at play by one built now.
 	 */
-	static constexpr int32 SetVersion = 2;
+	static constexpr int32 SetVersion = 3;
 	bool IsSetCurrent() const { return BuiltSetVersion == SetVersion; }
 
 	// ------------------------------------------------------------ game hooks
@@ -481,6 +482,10 @@ protected:
 	FVector LampOnSill = FVector::ZeroVector;
 	FRoomGear Gear;
 	bool bGearApplied = false;
+	/** Update 4 G1 (SPEC v1.7 §9.4, §2.6.4; F-look FL-9, FestShelf.h): the festival shelf by the right wall and the cork pin board by
+	 *  the desk; they poll the career themselves twice a second. The apartment's only (Dee's front room builds its own set). */
+	UPROPERTY()
+	TObjectPtr<UFestShelf> FestShelf;
 	int32 StudioState = -1; // the streaming lights: -1 unknown, 0 off, 1 on
 	UPROPERTY()
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> TimedMaterials; // sky, city, glass, rain: Dawn / Flash parameters

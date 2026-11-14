@@ -15,6 +15,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "DeeRoomStage.h"
+#include "FestShelf.h"
 #include "NightOneGameMode.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Sponsor.h"
@@ -348,6 +349,8 @@ void ANightOneStage::BuildSet()
 	BuildLights();
 	BuildLeds();
 	BuildGear();
+	FestShelf = NewPart<UFestShelf>();
+	FestShelf->Build();
 	BuiltSetVersion = SetVersion;
 	AppliedDawn = -1.0f;
 	ApplyHour();

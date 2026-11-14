@@ -30,7 +30,11 @@
 #include "HAL/IConsoleManager.h"
 #include "NightOneGame.h"
 #include "NightOneGameMode.h"
+#include "ShortStack/Game/Festival.h"
+#include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Sites.h"
+#include "ShortStack/UI/FestivalArt.h"
 
 #include <string>
 
@@ -84,9 +88,62 @@ void Update4Log(const TCHAR* Name, const FString& Line, const FString& Answer)
 	}
 }
 
+/**
+ * ss.Fest.Hub's laptop half (G1, F-hubs' fhubs_to_lead_3; LEAD_CALLS R-19): the edition <brand> [year] names (fest::All(): that
+ * year's, else the brand's on-stage or next edition), opened on its host's SERIES page through the laptop (RiverLine::DebugOpen's
+ * "riverline series <site>", then ShowSeries on the edition's series id, so the host routes it to FestivalHub, SPEC v1.7 §2.8.1).
+ * A rival's hub shows once the player holds an account there (DebugOpen's site rule). "" when it opened, else why not.
+ */
+FString Update4OpenHub(UWorld* World, const TArray<FString>& Args)
+{
+	ANightOneGameMode* Mode = World ? World->GetAuthGameMode<ANightOneGameMode>() : nullptr;
+	FNightOneGame* Game = Mode ? Mode->GetGame() : nullptr;
+	if (!Game || Args.Num() < 1)
+	{
+		return TEXT("ss.Fest.Hub <brand> [year]: only at home (Night One), with a brand named");
+	}
+	const std::string Key(TCHAR_TO_UTF8(*Args[0].ToLower()));
+	const int Year = Args.Num() > 1 ? FCString::Atoi(*Args[1]) : 0;
+	const int Today = ss::net::DayOf(Game->Session.WorldMinutes());
+	const ss::fest::Festival* Pick = nullptr;
+	for (const ss::fest::Festival& F : ss::fest::All())
+	{
+		// All() is in FirstDay order: with no year, the first edition of the brand not yet past its Afterglow's reach.
+		if (!Pick && Key == ss::fest::BrandKey(F.Which) && (Year > 0 ? F.Year == Year : F.LastDay + ss::fest::kAfterglowDays + 2 >= Today))
+		{
+			Pick = &F;
+		}
+	}
+	if (!Pick)
+	{
+		return FString::Printf(TEXT("ss.Fest.Hub %s: no such edition (rcop, ring, tco, slam, push, feign, writ, grit, pennant, reign [year])"), *Args[0]);
+	}
+	if (!Game->Client.DebugOpen(std::string("riverline series ") + ss::net::KeyOf(Pick->Site)))
+	{
+		return TEXT("ss.Fest.Hub: the laptop couldn't open the SERIES page");
+	}
+	Game->Client.ShowSeries(Pick->SeriesId, 0.0);
+	return FString();
+}
+
 void Update4Forward(EUpdate4Feature Feature, const TCHAR* Verb, const TArray<FString>& Args, UWorld* World)
 {
 	const TCHAR* Name = Update4FeatureName(Feature);
+	// G1 (F-look's P5; SPEC v1.7 §2.16; LEAD_CALLS R-19): ss.Fest.Look dresses the site in front through the UI's dev look
+	// (festart::DevLook: presentation only, never saved; SitesSkin and SitesTableLook read it ahead of the calendar), wherever the laptop
+	// is, then answers through DebugFest as the other verbs do.
+	if (Feature == EUpdate4Feature::Fest && FCString::Stricmp(Verb, TEXT("Look")) == 0)
+	{
+		const std::string Key = Args.Num() > 0 ? std::string(TCHAR_TO_UTF8(*Args[0].ToLower())) : std::string();
+		const ss::fest::Brand Look = Key == "off" ? ss::fest::Brand::None : ss::fest::BrandOf(Key);
+		if (Key != "off" && Look == ss::fest::Brand::None)
+		{
+			UE_LOG(LogUpdate4, Warning, TEXT("ss.Fest.Look: \"%s\" is no festival (rcop, ring, tco, slam, feign, push, writ, grit, pennant, reign, or off)"), UTF8_TO_TCHAR(Key.c_str()));
+			return;
+		}
+		ss::ui::festart::DevLook(Look);
+		UE_LOG(LogUpdate4, Display, TEXT("ss.Fest.Look %s: dev look (presentation only, never saved)"), UTF8_TO_TCHAR(Key.c_str()));
+	}
 	// ss.Turn.* and ss.Tpi.* borrow another family's debug body, so their line names their family first.
 	FString Line = Feature == EUpdate4Feature::Turn ? FString(TEXT("turn ")) : Feature == EUpdate4Feature::Tpi ? FString(TEXT("tpi ")) : FString();
 	Line += FString(Verb).ToLower();
@@ -112,6 +169,12 @@ void Update4Forward(EUpdate4Feature Feature, const TCHAR* Verb, const TArray<FSt
 	case EUpdate4Feature::Growth: Out = S->DebugGrowth(In); break;
 	case EUpdate4Feature::Crowd: Out = S->DebugCrowd(In); break;
 	default: Out = S->DebugBig(In); break;
+	}
+	if (Feature == EUpdate4Feature::Fest && FCString::Stricmp(Verb, TEXT("Hub")) == 0)
+	{
+		// G1 (fhubs_to_lead_3): after the session's answer, the laptop opens the edition's hub.
+		const FString Why = Update4OpenHub(World, Args);
+		Out += "\n" + std::string(Why.IsEmpty() ? "The laptop shows the edition's hub." : TCHAR_TO_UTF8(*Why));
 	}
 	Update4Log(Name, Line, FString(UTF8_TO_TCHAR(Out.c_str())));
 }
