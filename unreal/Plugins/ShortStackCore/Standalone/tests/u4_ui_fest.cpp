@@ -2126,7 +2126,7 @@ void FestWaveClearHubs(HubsLaptop& P, const ss::fest::Festival& Rcop)
  *  name is drawn. Plant: the name's MaxW without HubNameTail's room (PlayerName's DEFENDING CHAMPION over the figure). */
 void FestRollPillClear(HubsLaptop& P, const std::string& Champion)
 {
-	P.OpenHub();
+	// The hub career B has open (its clock not stepped: P.Now drives the taskbar's wire, and the pages after this keep their frames).
 	const DrawList One = HubsTab(P, 1);
 	const DrawList Half = P.Frame(1.5f);
 	int Lines = 0, Bad = 0;
@@ -2176,7 +2176,7 @@ void FestLockedMainRows2027(HubsLaptop& P, const ss::fest::Festival& Rcop27)
 {
 	const std::string Lock = HubsMainLock(P.S, Rcop27);
 	const std::string U31 = "A seat won here waits in your wallet until big fields open.";
-	P.OpenHub();
+	// The hub career B has open, its clock not stepped (FestRollPillClear's note); the wheel scrolls its rows to their end.
 	for (int K = 0; K < 12; ++K)
 	{
 		P.RL.UI.Ptr.Active = true;
