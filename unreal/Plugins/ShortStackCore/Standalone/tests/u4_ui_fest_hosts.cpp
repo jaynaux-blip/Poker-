@@ -29,25 +29,32 @@
 // U26; PLAN_FHUBS Q23), on FestHonestLines' career: the wire's overlay items through RCOP 2026's days against the test's own reading of
 // site::show::OverlayOf, drawn on the lobby; RCOP 2026's Afterglow on slide 0 and the wire (the champion from the world's roll, nothing
 // before the crown or after the three days); RunItTwice's first edition's Afterglow on the tape; FestCopyUi's B half gains their strings.
+// G1 polish (g1p, key ignite; PIE_G1_NOTES' cosmetic list): FestTitleFits (the bandstand's two-line title for every Ignite festival
+// event of 2026-2028, measured in its boxes at both scales; FestBandstandPick reads the drawn lines) and FestSignFits (the Lighthouse's
+// Afterglow sign, "{SHORT} CHAMPION" over the champion's whole name, for every Ignite brand and the world's longest names).
 #include "UiSeg.h"
 
 #include "CopyLint.h"
 #include "Trademarks.h"
 #include "ShortStack/Game/Festival.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Handles.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/SiteShow.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/WorldFest.h"
+#include "ShortStack/Rng.h"
 #include "ShortStack/UI/EventArt.h"
 #include "ShortStack/UI/RiverLine.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/WorldFestDetail.h"
+#include "../../Source/ShortStackCore/Private/ShortStack/UI/IgniteArt.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/UI/RitArt.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -91,6 +98,11 @@ bool IgniteSheetOpen(const RiverLine* RL);
 // UI/RiverLineIgnite.cpp (FH-3b): the bandstand's festival pick and the Lighthouse's festival line.
 bool IgniteBandstandFest(double World, net::EventInstance& Out, std::string& Label);
 std::string IgniteLighthouseAt(double World);
+// UI/RiverLineIgnite.cpp (G1 polish g1p items 6 and 7): the bandstand title's and the Lighthouse sign's lines as the draw makes them
+// (per line its words and {size, box, baseline, face}), and an edition's Afterglow line for a champion.
+std::vector<std::pair<std::string, std::array<float, 4>>> IgniteBandTitleLines(const Canvas& C, const net::EventTemplate& T, bool Pv, float ClockW, float& FactsBase);
+std::vector<std::pair<std::string, std::array<float, 4>>> IgniteLighthouseSignLines(const Canvas& C, const std::string& FestLine);
+std::string IgniteLighthouseAfterglow(const fest::Festival& F, const std::string& Champion);
 void IgniteFestChipFace(Canvas& At, const net::SeriesInfo& Sr, const Rect& R, bool On, bool Hot, uint32_t Fill, uint32_t Coral, uint32_t RimHi);
 } // namespace rlignite_detail
 namespace rlrit_detail
@@ -426,9 +438,15 @@ void FestBandstandPick()
 	ui_test::Expect(HasPick, "FestBandstandPick: FEIGN's first day has an event still to start at noon");
 	ui_test::Expect(HasPick && ui_test::DrewRun(During, Label), ("FestBandstandPick: the bandstand draws " + Label).c_str());
 	ui_test::Expect(!ui_test::Drew(During, "TONIGHT \xC2\xB7 BANDSTAND") && !ui_test::Drew(During, "UP NEXT \xC2\xB7 BANDSTAND"), "FestBandstandPick: The Spark is not kept during the festival");
-	const std::string Card = HostsRunAt(During, 230.0f, 196.0f);
+	// G1 polish (g1p item 6): the card's title on two lines, the code and buy-in at (230, 186), the words at (230, 204), both drawn whole
+	// (no ellipsis) and together the picked event's name.
+	const std::string Card = HostsRunAt(During, 230.0f, 186.0f);
 	const std::string Code = Short + " #" + std::to_string(HasPick ? Net.TemplateOf(Pick).EventNo : 0) + ":";
 	ui_test::Expect(HasPick && Card.compare(0, Code.size(), Code) == 0, ("FestBandstandPick: the bandstand's card is the picked event (" + Code + "), not " + Card).c_str());
+	const std::string CardWords = HostsRunAt(During, 230.0f, 204.0f);
+	const std::string PickName = HasPick ? Net.TemplateOf(Pick).Name : std::string();
+	ui_test::Expect(HasPick && Card + " " + CardWords == PickName,
+		("FestBandstandPick: the bandstand's title is the picked event's whole name on two lines (" + PickName + "), not " + Card + " / " + CardWords).c_str());
 	const int Days = Feign->LastDay - Feign->FirstDay + 1;
 	ui_test::Expect(ui_test::DrewRun(During, Short + " \xC2\xB7 DAY 1 OF " + std::to_string(Days)), "FestBandstandPick: the Lighthouse reads FEIGN · DAY 1 OF 10");
 	ui_test::Expect(ui_test::DrewRun(During, Short), "FestBandstandPick: chip 10 reads the festival's Short");
@@ -446,9 +464,13 @@ void FestBandstandPick()
 	ui_test::Expect(HasEve, "FestBandstandPick: FEIGN's first day has an event still to start at 19:00");
 	ui_test::Expect(HasEve && ui_test::DrewRun(Eve, EveLabel), ("FestBandstandPick: at 19:00 the bandstand draws " + EveLabel).c_str());
 	ui_test::Expect(!ui_test::Drew(Eve, "TONIGHT \xC2\xB7 BANDSTAND"), "FestBandstandPick: at 19:00 The Spark's TONIGHT slide is not kept during the festival");
-	const std::string EveCard = HostsRunAt(Eve, 230.0f, 196.0f);
+	const std::string EveCard = HostsRunAt(Eve, 230.0f, 186.0f);
 	const std::string EveCode = Short + " #" + std::to_string(HasEve ? Net.TemplateOf(EvePick).EventNo : 0) + ":";
 	ui_test::Expect(HasEve && EveCard.compare(0, EveCode.size(), EveCode) == 0, ("FestBandstandPick: at 19:00 the bandstand's card is the picked event (" + EveCode + "), not " + EveCard).c_str());
+	const std::string EveWords = HostsRunAt(Eve, 230.0f, 204.0f);
+	const std::string EveName = HasEve ? Net.TemplateOf(EvePick).Name : std::string();
+	ui_test::Expect(HasEve && EveCard + " " + EveWords == EveName,
+		("FestBandstandPick: at 19:00 the bandstand's title is the picked event's whole name on two lines (" + EveName + "), not " + EveCard + " / " + EveWords).c_str());
 	const double Took = std::chrono::duration<double>(std::chrono::steady_clock::now() - Began).count();
 	// The budget row (PLAN_FHUBS FH-3: the Ignite floor's chip and label <= 1k; printed here, asserted in FH-7 with F-look's attraction
 	// merged): chip 10's face drawn alone at both scales (on, the busiest) plus the shelf's label and sub-line (two text runs, no
@@ -484,6 +506,292 @@ void FestBandstandPick()
 				"PLAY %zu vertices / %zu runs on day %d, %zu / %zu on FEIGN's day 1; %.2f s\n",
 		Picked, Spark, ChipV[0], ChipV[1], ChipRuns, Before.Vertices.size(), HostsRuns(Before), Feign->FirstDay - ss::fest::kBuildupDays - 2, During.Vertices.size(),
 		HostsRuns(During), Took);
+}
+
+/** A line's measured width as the draw measures it: its own size and face ({size, box, baseline, face}). */
+float HostsLineWidth(const ss::ui::Canvas& C, const std::pair<std::string, std::array<float, 4>>& Line)
+{
+	return C.Measure(Line.first, Line.second[0], static_cast<ss::ui::Font>(static_cast<int>(Line.second[3])));
+}
+
+/** The Ignite festivals of the 2026-2028 calendars (FEIGN, PUSH, PENNANT), in FirstDay order. */
+std::vector<const ss::fest::Festival*> HostsIgniteEditions()
+{
+	std::vector<const ss::fest::Festival*> Out;
+	for (const ss::fest::Festival& F : ss::fest::All())
+	{
+		if (F.Site == ss::net::SiteId::Ignite && F.Year >= 2026 && F.Year <= 2028)
+		{
+			Out.push_back(&F);
+		}
+	}
+	return Out;
+}
+
+/**
+ * FestTitleFits (G1 polish, g1p item 6; PIE s06_ignite_lobby, s06_ignite_wed and s08a_pennant_ignite read "FEIGN #5: $7…", "PENNANT #6:
+ * $…"): every numbered and headline event of every Ignite festival in the 2026-2028 calendars (FEIGN 2026-2028, PUSH and PENNANT 2027-
+ * 2028) takes the bandstand's two-line title (rlignite_detail::IgniteBandTitleLines, the layout the draw uses): its code and buy-in
+ * over its words, the two together its whole name. At UI scales 1.0 and 1.5, on the boardwalk's bandstand and under PENNANT's pavilion,
+ * with the widest clock pill the card can show: each line's measured width (the canvas's measure, the size and face the draw uses) fits
+ * its box; line 1 ends 8 clear of the clock's pill and line 2 8 clear of the event's Sparks; line 1 stands below the head (the card's
+ * eyebrow, or the pavilion screen's top), line 2 below line 1's baseline and the facts line below line 2's. Every other Ignite event
+ * keeps today's one line (32 in 226 at 196; 26 in 214 at 210 under the pavilion). FestBandstandPick's PLAY frames hold the drawn half.
+ * Plant: the festival events kept on today's one line (the whole name at 32 in 226: "FEIGN #5: $7…").
+ */
+void FestTitleFits()
+{
+	namespace ri = ss::ui::rlignite_detail;
+	const auto Began = std::chrono::steady_clock::now();
+	const ss::net::Network& Net = ss::net::Site(ss::net::SiteId::Ignite);
+	const std::vector<const ss::fest::Festival*> Editions = HostsIgniteEditions();
+	std::string Names;
+	for (const ss::fest::Festival* F : Editions)
+	{
+		const ss::net::SeriesInfo* Sr = Net.FindSeries(F->SeriesId);
+		Names += (Names.empty() ? "" : ", ") + (Sr ? Sr->Short : F->SeriesId) + " " + std::to_string(F->Year);
+	}
+	ui_test::Expect(Editions.size() == 7, ("FestTitleFits: the 2026-2028 calendars hold seven Ignite festivals (" + Names + ")").c_str());
+	ui_test::TableMeasurer M;
+	const char* const Clocks[] = {"STARTS 23:59:59", "LATE 23:59:59", "IN 23:59:59", "ON NOW"};
+	int Events = 0;
+	int Bad = 0;
+	int Plain = 0;
+	std::string First;
+	std::string FirstPlain;
+	float Fullest[2] = {0.0f, 0.0f};
+	std::string FullestLine[2];
+	float Smallest[2] = {99.0f, 99.0f};
+	for (int Si = 0; Si < 2; ++Si)
+	{
+		const float Scale = Si == 0 ? 1.0f : 1.5f;
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, Scale);
+		float ClockW = 110.0f;
+		for (const char* Ck : Clocks)
+		{
+			ClockW = std::max(ClockW, C.Measure(Ck, 12.5f, 900) + 26.0f);
+		}
+		for (const ss::net::EventTemplate& T : Net.Templates())
+		{
+			const ss::fest::Festival* F = T.Series.empty() ? nullptr : ss::fest::FestivalOf(T.Series);
+			const bool Mine = F && std::find(Editions.begin(), Editions.end(), F) != Editions.end();
+			for (const bool Pv : {false, true})
+			{
+				float FactsBase = 0.0f;
+				const std::vector<std::pair<std::string, std::array<float, 4>>> Lines = ri::IgniteBandTitleLines(C, T, Pv, ClockW, FactsBase);
+				char Where[64];
+				std::snprintf(Where, sizeof(Where), " (%s, scale %.1f)", Pv ? "pavilion" : "bandstand", static_cast<double>(Scale));
+				if (!F)
+				{
+					// Today's one line, as before.
+					const bool Same = Lines.size() == 1 && Lines[0].first == T.Name && Lines[0].second[0] == (Pv ? 26.0f : 32.0f) &&
+						Lines[0].second[1] == (Pv ? 214.0f : 226.0f) && Lines[0].second[2] == (Pv ? 210.0f : 196.0f) && FactsBase == (Pv ? 231.0f : 218.0f);
+					Plain += Same ? 0 : 1;
+					if (!Same && FirstPlain.empty())
+					{
+						FirstPlain = "a non-festival event changed its one line: " + T.Name + Where;
+					}
+					continue;
+				}
+				if (!Mine)
+				{
+					continue;
+				}
+				Events += Si == 0 && !Pv ? 1 : 0;
+				// Each line as drawn first (its measure in its box), then the two lines together its whole name.
+				std::string Why;
+				const float PillLeft = Pv ? 452.0f : 584.0f - ClockW;
+				const float SparksLeft = 546.0f - C.Measure("+" + ss::Grouped(ri::IgniteBaseSparks(T.BuyInCents)), 17.0f, ss::ui::Font::BlackItalic);
+				for (size_t I = 0; I < Lines.size() && I < 2 && Why.empty(); ++I)
+				{
+					const float W = HostsLineWidth(C, Lines[I]);
+					const float Box = Lines[I].second[1];
+					const float Size = Lines[I].second[0];
+					const ss::ui::Font Face = static_cast<ss::ui::Font>(static_cast<int>(Lines[I].second[3]));
+					const float Top = Lines[I].second[2] - M.Ascent(Face, Size);
+					char Num[160];
+					std::snprintf(Num, sizeof(Num), "line %zu '%s' measures %.1f at %.1f in a box of %.1f", I + 1, Lines[I].first.c_str(), static_cast<double>(W), static_cast<double>(Size),
+						static_cast<double>(Box));
+					if (W > Box + 0.01f || Size < 8.0f)
+					{
+						Why = Num;
+					}
+					else if (230.0f + W > (I == 0 ? PillLeft : SparksLeft) - 8.0f)
+					{
+						Why = std::string(Num) + (I == 0 ? ", into the clock's pill" : ", into the Sparks");
+					}
+					else if (Top < (I == 0 ? (Pv ? 182.0f : 160.0f) : Lines[0].second[2]))
+					{
+						Why = std::string(Num) + ", over the line above";
+					}
+					if (Box > 0.0f && W / Box > Fullest[I])
+					{
+						Fullest[I] = W / Box;
+						FullestLine[I] = Num;
+					}
+					Smallest[I] = std::min(Smallest[I], Size);
+				}
+				if (Why.empty() && (Lines.size() != 2 || Lines[0].first + " " + Lines[1].first != T.Name))
+				{
+					Why = "not its whole name on two lines: " + (Lines.empty() ? std::string() : Lines[0].first) + (Lines.size() > 1 ? " / " + Lines[1].first : std::string());
+				}
+				if (Why.empty() && FactsBase - M.Ascent(ss::ui::Font::Bold, Pv ? 13.5f : 14.0f) < Lines[1].second[2])
+				{
+					Why = "the facts line runs into line 2";
+				}
+				if (!Why.empty())
+				{
+					++Bad;
+					if (First.empty())
+					{
+						First = T.Name + ": " + Why + Where;
+					}
+				}
+			}
+		}
+	}
+	ui_test::Expect(Events >= 7 * 18, ("FestTitleFits: every Ignite festival's numbered and headline events are checked (" + std::to_string(Events) + ")").c_str());
+	ui_test::Expect(Bad == 0, ("FestTitleFits: every festival event's bandstand title is its whole name, each line fitting its box clear of the pill and the Sparks (" +
+								  std::to_string(Bad) + " bad; first: " + First + ")")
+								  .c_str());
+	ui_test::Expect(Plain == 0, ("FestTitleFits: every other Ignite event keeps today's one-line title (" + FirstPlain + ")").c_str());
+	std::printf("FestTitleFits: %s; %d festival events x 2 forms x 2 scales; fullest line 1: %s (%.0f%%); fullest line 2: %s (%.0f%%); smallest sizes %.1f / %.1f; "
+				"%.2f s\n",
+		Names.c_str(), Events, FullestLine[0].c_str(), static_cast<double>(Fullest[0] * 100.0f), FullestLine[1].c_str(), static_cast<double>(Fullest[1] * 100.0f),
+		static_cast<double>(Smallest[0]), static_cast<double>(Smallest[1]), std::chrono::duration<double>(std::chrono::steady_clock::now() - Began).count());
+}
+
+/**
+ * FestSignFits (G1 polish, g1p item 7; PIE s08a_afterglow_ignite reads "PENNANT CHAMPION · J…"): in the Afterglow the Lighthouse's sign
+ * shows the champion's whole name. For every Ignite festival of the 2026-2028 calendars (each brand's form: FEIGN, PUSH, PENNANT; U15's
+ * words through rlignite_detail::IgniteLighthouseAfterglow) and the longest names the world can produce (the widest and the longest of
+ * 20,000 handles::Make draws over the network's countries, regulars and pros, at most 17 characters as Sim::UniqueName keeps them, and
+ * a 17-character name of the widest capital), the sign prints "{SHORT} CHAMPION" over the name (rlignite_detail::IgniteLighthouseSignLines,
+ * the layout the draw uses): both whole, each line's measured width within the plate's 120 at UI scales 1.0 and 1.5, a generated name
+ * at 9 or more, the name's line under the head's. The Buildup's and the days' lines keep today's one line at 10.
+ * Plant: the Afterglow kept on today's one line at 10 in 120 ("PENNANT CHAMPION · J…").
+ */
+void FestSignFits()
+{
+	namespace ri = ss::ui::rlignite_detail;
+	const auto Began = std::chrono::steady_clock::now();
+	const std::vector<const ss::fest::Festival*> Editions = HostsIgniteEditions();
+	ui_test::TableMeasurer M;
+	// The world's longest names: handles::Make's widest and longest (capitals, as the sign prints them), at most 17 characters.
+	ss::Rng R("u4-ui-sign-names");
+	ss::ui::DrawList Probe;
+	ss::ui::Canvas Pc(Probe, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+	std::vector<std::pair<float, std::string>> Widest;
+	std::string Longest;
+	for (int I = 0; I < 20000; ++I)
+	{
+		const std::string Country = ss::handles::PickCountry(R);
+		const std::string Name = ss::handles::Make(R, Country, I % 4 == 0);
+		if (Name.empty() || Name.size() > 17)
+		{
+			continue;
+		}
+		std::string Caps = Name;
+		for (char& Ch : Caps)
+		{
+			Ch = static_cast<char>(std::toupper(static_cast<unsigned char>(Ch)));
+		}
+		Widest.push_back({Pc.Measure(Caps, 11.0f, 900), Name});
+		Longest = Name.size() > Longest.size() ? Name : Longest;
+	}
+	std::sort(Widest.begin(), Widest.end(), [](const auto& A, const auto& B) { return A.first > B.first || (A.first == B.first && A.second < B.second); });
+	std::vector<std::string> Champions;
+	for (size_t I = 0; I < Widest.size() && I < 8; ++I)
+	{
+		Champions.push_back(Widest[I].second);
+	}
+	Champions.push_back(Longest);
+	const std::string Wall(17, 'W');
+	Champions.push_back(Wall);
+	int Lines = 0;
+	int Bad = 0;
+	std::string First;
+	float Fullest = 0.0f;
+	std::string FullestLine;
+	float Smallest = 99.0f;
+	for (int Si = 0; Si < 2; ++Si)
+	{
+		const float Scale = Si == 0 ? 1.0f : 1.5f;
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, Scale);
+		for (const ss::fest::Festival* F : Editions)
+		{
+			const ss::net::SeriesInfo* Sr = ss::net::Site(ss::net::SiteId::Ignite).FindSeries(F->SeriesId);
+			const std::string Short = Sr ? Sr->Short : std::string();
+			// The Buildup's and the days' lines keep today's one line.
+			for (const std::string& Today : {Short + " \xC2\xB7 OPENS IN 14D", Short + " \xC2\xB7 DAY 13 OF 13"})
+			{
+				const std::vector<std::pair<std::string, std::array<float, 4>>> One = ri::IgniteLighthouseSignLines(C, Today);
+				if (One.size() != 1 || One[0].first != Today || One[0].second[0] != 10.0f || One[0].second[2] != 286.5f)
+				{
+					++Bad;
+					First = First.empty() ? "the line '" + Today + "' left today's one line" : First;
+				}
+			}
+			for (const std::string& Champ : Champions)
+			{
+				const std::string Line = ri::IgniteLighthouseAfterglow(*F, Champ);
+				const std::vector<std::pair<std::string, std::array<float, 4>>> Two = ri::IgniteLighthouseSignLines(C, Line);
+				char Where[96];
+				std::snprintf(Where, sizeof(Where), " (%s %d, scale %.1f)", Short.c_str(), F->Year, static_cast<double>(Scale));
+				// Each line as drawn first (its measure in the plate), then the head over the whole name.
+				std::string Why = Line.empty() ? std::string("no Afterglow line") : std::string();
+				for (size_t I = 0; I < Two.size() && Why.empty(); ++I)
+				{
+					++Lines;
+					const float W = HostsLineWidth(C, Two[I]);
+					const float Size = Two[I].second[0];
+					char Num[160];
+					std::snprintf(Num, sizeof(Num), "'%s' measures %.1f at %.1f in %.0f", Two[I].first.c_str(), static_cast<double>(W), static_cast<double>(Size),
+						static_cast<double>(Two[I].second[1]));
+					if (W > Two[I].second[1] + 0.01f || Size <= 0.0f)
+					{
+						Why = Num;
+					}
+					else if (I == 1 && Champ != Wall && Size < 9.0f)
+					{
+						Why = std::string(Num) + ", under 9";
+					}
+					else if (I == 1 && Two[1].second[2] - M.Ascent(ss::ui::Font::Black, Size) < Two[0].second[2])
+					{
+						Why = std::string(Num) + ", over the head's line";
+					}
+					if (I == 1 && Champ != Wall)
+					{
+						if (W / Two[I].second[1] > Fullest)
+						{
+							Fullest = W / Two[I].second[1];
+							FullestLine = Num;
+						}
+						Smallest = std::min(Smallest, Size);
+					}
+				}
+				if (Why.empty() && (Two.size() != 2 || Two[0].first != Short + " CHAMPION" || Two[0].first + " \xC2\xB7 " + Two[1].first != Line))
+				{
+					Why = "not '" + Short + " CHAMPION' over the whole name: " + (Two.empty() ? std::string() : Two[0].first) + (Two.size() > 1 ? " / " + Two[1].first : std::string());
+				}
+				if (!Why.empty())
+				{
+					++Bad;
+					First = First.empty() ? Why + Where : First;
+				}
+			}
+		}
+	}
+	ui_test::Expect(Editions.size() == 7 && Champions.size() >= 3, "FestSignFits: seven Ignite festivals and the world's longest names are checked");
+	ui_test::Expect(Bad == 0, ("FestSignFits: the Afterglow sign prints {SHORT} CHAMPION over the champion's whole name, each line inside the plate (" + std::to_string(Bad) +
+								  " bad; first: " + First + ")")
+								  .c_str());
+	std::printf("FestSignFits: %zu editions x %zu names x 2 scales, %d lines; widest generated '%s', longest '%s' (%zu); fullest name line: %s (%.0f%%), smallest %.1f; "
+				"%.2f s\n",
+		Editions.size(), Champions.size(), Lines, Widest.empty() ? "" : Widest.front().second.c_str(), Longest.c_str(), Longest.size(), FullestLine.c_str(),
+		static_cast<double>(Fullest * 100.0f), static_cast<double>(Smallest), std::chrono::duration<double>(std::chrono::steady_clock::now() - Began).count());
 }
 
 std::vector<uint32_t> HostsCodePoints(const std::string& S)
@@ -2665,6 +2973,8 @@ void SegFestHosts()
 {
 	FestHostsRouting();
 	FestBandstandPick();
+	FestTitleFits();
+	FestSignFits();
 	FestCopyUiHosts();
 	FestRitCodesAndHeld();
 	FestHonestLines();

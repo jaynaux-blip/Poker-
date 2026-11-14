@@ -30,6 +30,7 @@
 #include "ShortStack/UI/SiteMotion.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstring>
@@ -906,6 +907,138 @@ std::string IgniteLighthouseAt(double World)
 	return IgniteLighthouseLine(Fs, World, Fs.P == fest::Phase::Afterglow && Fs.F ? IgniteFestChampion(*Fs.F) : std::string());
 }
 
+/** G1 polish (g1p item 7): the Lighthouse's Afterglow line for edition F crowned with Champion, U15's words as IgniteLighthouseLine
+ *  prints them ("" when F isn't on a series of Ignite's): u4_ui's FestSignFits feeds it each Ignite brand and the world's longest names. */
+std::string IgniteLighthouseAfterglow(const fest::Festival& F, const std::string& Champion)
+{
+	IgniteFestNow Fs;
+	Fs.F = &F;
+	Fs.Sr = net::Site(net::SiteId::Ignite).FindSeries(F.SeriesId);
+	Fs.P = fest::Phase::Afterglow;
+	return IgniteLighthouseLine(Fs, static_cast<double>(F.LastDay + 1) * net::MinutesPerDay, Champion);
+}
+
+/** G1 polish (g1p items 6 and 7): the largest size, in half pixels down from Ceiling, at which S fits Box by the canvas's own measure (the
+ *  one the draw uses: Slate's in the game, the metrics table in the tests), so a long name is drawn whole, never cut with an ellipsis. */
+float IgniteFitSize(const Canvas& C, const std::string& S, Font Face, float Ceiling, float Box)
+{
+	float Size = Ceiling;
+	const float Wide = C.Measure(S, Size, Face);
+	if (Wide > Box && Wide > 0.0f)
+	{
+		Size = std::floor(Ceiling * Box / Wide * 2.0f) / 2.0f;
+	}
+	while (Size > 4.0f && C.Measure(S, Size, Face) > Box)
+	{
+		Size -= 0.5f;
+	}
+	return Size;
+}
+
+/** The Lighthouse sign's words (G1 polish, g1p item 7; U15): today's line and the festival's Buildup and day lines as one line at 10 (as
+ *  before), and the Afterglow's "{SHORT} CHAMPION · {NAME}" as two, "{SHORT} CHAMPION" over the champion's whole name, each sized down
+ *  from its ceiling (8, 11) until it fits the plate's text column (IgniteSignTextW) by the canvas's measure. */
+struct IgniteSignText
+{
+	std::string Head;
+	std::string Name; // "" for the one line (Head at HeadSize)
+	float HeadSize = 10.0f;
+	float NameSize = 0.0f;
+};
+constexpr float IgniteSignTextW = 120.0f;
+constexpr float IgniteSignHeadBase = 279.0f;
+constexpr float IgniteSignNameBase = 291.0f;
+
+IgniteSignText IgniteLighthouseSign(const Canvas& C, const std::string& Line)
+{
+	IgniteSignText Out;
+	const std::string Mark = " CHAMPION \xC2\xB7 ";
+	const size_t At = Line.find(Mark);
+	if (At == std::string::npos || At + Mark.size() >= Line.size())
+	{
+		Out.Head = Line;
+		return Out;
+	}
+	Out.Head = Line.substr(0, At + 9);
+	Out.Name = Line.substr(At + Mark.size());
+	Out.HeadSize = IgniteFitSize(C, Out.Head, Font::Black, 8.0f, IgniteSignTextW);
+	Out.NameSize = IgniteFitSize(C, Out.Name, Font::Black, 11.0f, IgniteSignTextW);
+	return Out;
+}
+
+/** The bandstand card's title (G1 polish, g1p item 6): every event's name on one line in the title face as before (32, or 26 under
+ *  PENNANT's pavilion), except a festival's numbered and headline events ("FEIGN #5: $7.70 Spinning Disc No-Limit Hold'em"), which take
+ *  two: the code and the buy-in in the title face, the name's words under them, each sized down from its ceiling until it fits its box
+ *  by the canvas's measure (line 1 clear of the clock's pill, line 2 of the Sparks). The facts line steps down 2 under two lines. */
+struct IgniteBandTitle
+{
+	std::string Line1;
+	std::string Line2; // "" for the one line
+	float Size1 = 0.0f, Size2 = 0.0f;
+	float Base1 = 0.0f, Base2 = 0.0f;
+	float Box1 = 0.0f, Box2 = 0.0f;
+	float FactsBase = 0.0f;
+};
+
+/** ClockW: the clock pill's width outside the pavilion (its left edge is 584 - ClockW); the pavilion's pill is fixed at x 452. */
+IgniteBandTitle IgniteBandTitleFor(const Canvas& C, const net::EventTemplate& T, bool Pv, float ClockW)
+{
+	IgniteBandTitle Out;
+	const size_t Colon = T.Name.find(": ");
+	const std::string Fee = net::BuyIn(T.BuyInCents) + " ";
+	const bool Fest = !T.Series.empty() && fest::FestivalOf(T.Series) != nullptr && Colon != std::string::npos &&
+		T.Name.compare(Colon + 2, Fee.size(), Fee) == 0 && T.Name.size() > Colon + 2 + Fee.size();
+	if (!Fest)
+	{
+		Out.Line1 = T.Name;
+		Out.Size1 = Pv ? 26.0f : 32.0f;
+		Out.Base1 = Pv ? 210.0f : 196.0f;
+		Out.Box1 = Pv ? 214.0f : 226.0f;
+		Out.FactsBase = Pv ? 231.0f : 218.0f;
+		return Out;
+	}
+	Out.Line1 = T.Name.substr(0, Colon + 1 + Fee.size());
+	Out.Line2 = T.Name.substr(Colon + 2 + Fee.size());
+	Out.Box1 = Pv ? 214.0f : std::min(226.0f, 584.0f - ClockW - 10.0f - 230.0f);
+	Out.Box2 = Pv ? 214.0f : 236.0f;
+	Out.Size1 = IgniteFitSize(C, Out.Line1, Font::BlackItalic, Pv ? 21.0f : 26.0f, Out.Box1);
+	Out.Size2 = IgniteFitSize(C, Out.Line2, Canvas::FaceFor(800, false), Pv ? 12.5f : 14.0f, Out.Box2);
+	Out.Base1 = Pv ? 205.0f : 186.0f;
+	Out.Base2 = Pv ? 220.0f : 204.0f;
+	Out.FactsBase = Pv ? 233.0f : 220.0f;
+	return Out;
+}
+
+/** u4_ui's FestTitleFits and FestSignFits (g1p items 6 and 7) read the two layouts as the draw makes them: per line its words and {size,
+ *  box, baseline, face}; FactsBase the facts line's baseline under the title. */
+std::vector<std::pair<std::string, std::array<float, 4>>> IgniteBandTitleLines(const Canvas& C, const net::EventTemplate& T, bool Pv, float ClockW, float& FactsBase)
+{
+	const IgniteBandTitle Bt = IgniteBandTitleFor(C, T, Pv, ClockW);
+	FactsBase = Bt.FactsBase;
+	std::vector<std::pair<std::string, std::array<float, 4>>> Out;
+	Out.push_back({Bt.Line1, {Bt.Size1, Bt.Box1, Bt.Base1, static_cast<float>(static_cast<int>(Font::BlackItalic))}});
+	if (!Bt.Line2.empty())
+	{
+		Out.push_back({Bt.Line2, {Bt.Size2, Bt.Box2, Bt.Base2, static_cast<float>(static_cast<int>(Canvas::FaceFor(800, false)))}});
+	}
+	return Out;
+}
+
+std::vector<std::pair<std::string, std::array<float, 4>>> IgniteLighthouseSignLines(const Canvas& C, const std::string& FestLine)
+{
+	const IgniteSignText Words = IgniteLighthouseSign(C, FestLine);
+	const float Black = static_cast<float>(static_cast<int>(Font::Black));
+	std::vector<std::pair<std::string, std::array<float, 4>>> Out;
+	if (Words.Name.empty())
+	{
+		Out.push_back({FestLine, {10.0f, IgniteSignTextW, 286.5f, Black}});
+		return Out;
+	}
+	Out.push_back({Words.Head, {Words.HeadSize, IgniteSignTextW, IgniteSignHeadBase, Black}});
+	Out.push_back({Words.Name, {Words.NameSize, IgniteSignTextW, IgniteSignNameBase, Black}});
+	return Out;
+}
+
 /** FestBandstandPick (SPEC v1.7 §2.7.4, §2.15.2; F-hubs FH-3b): while a festival is Live on Ignite the bandstand features its latest
  *  event starting later that day ("FEIGN TONIGHT · #9", U32), else nothing (The Spark, or what's up next, as today). Label is the
  *  bandstand's line; the pick is a pure function of the clock (u4_ui calls it on the real calendar). */
@@ -1067,7 +1200,17 @@ void IgniteBoardwalk(IgniteCtx& X)
 		{
 			Line = "SUNDAY BLAZE";
 		}
-		C.Text(Line, 42.0f, 286.5f, IgniteTx(10.0f, 900, Series ? Hex(IgTang) : Hex(IgSun), Align::Left, Baseline::Alphabetic, 120.0f));
+		// G1 polish (g1p item 7): the Afterglow's champion line on two lines, the whole name on the second (IgniteLighthouseSign).
+		const IgniteSignText Words = FestLine.empty() ? IgniteSignText{Line} : IgniteLighthouseSign(C, Line);
+		if (Words.Name.empty())
+		{
+			C.Text(Line, 42.0f, 286.5f, IgniteTx(10.0f, 900, Series ? Hex(IgTang) : Hex(IgSun), Align::Left, Baseline::Alphabetic, IgniteSignTextW));
+		}
+		else
+		{
+			C.Text(Words.Head, 42.0f, IgniteSignHeadBase, IgniteTx(Words.HeadSize, 900, Hex(IgTang), Align::Left, Baseline::Alphabetic, IgniteSignTextW));
+			C.Text(Words.Name, 42.0f, IgniteSignNameBase, IgniteTx(Words.NameSize, 900, Hex(IgTang), Align::Left, Baseline::Alphabetic, IgniteSignTextW));
+		}
 	}
 
 	// The Bandstand: TONIGHT (the slide-1 logic: the night's featured event), else what's up next. Update 4 G1 (SPEC v1.7 §2.7.4,
@@ -1129,11 +1272,6 @@ void IgniteBoardwalk(IgniteCtx& X)
 		{
 			const net::EventTemplate& T = Net.TemplateOf(E);
 			const net::LiveState L = Net.Live(E, X.World);
-			C.Text(T.Name, 230.0f, Pv ? 210.0f : 196.0f, IgniteBi(Pv ? 26.0f : 32.0f, Hex(IgSun), Align::Left, Baseline::Alphabetic, Pv ? 214.0f : 226.0f));
-			std::string Facts = IgniteWhen(E.Start, X.World) + " \xC2\xB7 " + net::BuyIn(T.BuyInCents);
-			Facts += T.GtdCents > 0 ? " \xC2\xB7 GTD " + rlnet_detail::NetMoney(T.GtdCents) : std::string();
-			Facts += " \xC2\xB7 " + Grouped(L.Entries) + " in";
-			C.Text(Facts, 230.0f, Pv ? 231.0f : 218.0f, IgniteTx(Pv ? 13.5f : 14.0f, 700, Hex(K.Cream), Align::Left, Baseline::Alphabetic, 354.0f));
 			std::string Clock;
 			switch (L.St)
 			{
@@ -1142,6 +1280,17 @@ void IgniteBoardwalk(IgniteCtx& X)
 			case net::Status::LateReg: Clock = "LATE " + rlnet_detail::NetHms(L.LateRegLeft); break;
 			default: Clock = "ON NOW"; break;
 			}
+			// G1 polish (g1p item 6): a festival event's title on two lines, each fitted to its box (IgniteBandTitleFor).
+			const IgniteBandTitle Bt = IgniteBandTitleFor(C, T, Pv, std::max(110.0f, C.Measure(Clock, 12.5f, 900) + 26.0f));
+			C.Text(Bt.Line1, 230.0f, Bt.Base1, IgniteBi(Bt.Size1, Hex(IgSun), Align::Left, Baseline::Alphabetic, Bt.Box1));
+			if (!Bt.Line2.empty())
+			{
+				C.Text(Bt.Line2, 230.0f, Bt.Base2, IgniteTx(Bt.Size2, 800, Hex(IgSun), Align::Left, Baseline::Alphabetic, Bt.Box2));
+			}
+			std::string Facts = IgniteWhen(E.Start, X.World) + " \xC2\xB7 " + net::BuyIn(T.BuyInCents);
+			Facts += T.GtdCents > 0 ? " \xC2\xB7 GTD " + rlnet_detail::NetMoney(T.GtdCents) : std::string();
+			Facts += " \xC2\xB7 " + Grouped(L.Entries) + " in";
+			C.Text(Facts, 230.0f, Bt.FactsBase, IgniteTx(Pv ? 13.5f : 14.0f, 700, Hex(K.Cream), Align::Left, Baseline::Alphabetic, 354.0f));
 			if (Pv)
 			{
 				// The pavilion's screen: the pill at {452, 188, 132, 24}, clear of the frieze and the pennants.
