@@ -1317,6 +1317,25 @@ void FestCrownSkipInvariant()
 				 world::HeroMark(After, "rcop") == M->Mark && world::FestStanding(After, -1) == std::make_pair(HeroRank, Sc) && world::HeroMarks(After).size() == 1;
 		Got += "; the hero's mark " + std::to_string(M ? static_cast<int>(M->Mark) : -1) + " at rank " + std::to_string(HeroRank) + " of " + std::to_string(Sc);
 	}
+	// The lead (after G1's PIE): the crown's item on RiverLine's News carries no money (the post's Amount is the winner's cashes; PIE's
+	// card read "$0.29" for 29 cashes).
+	{
+		ss::net::Network Rl;
+		Rl.Attach(&S);
+		int CrownItems = 0;
+		ss::Chips CrownMoney = 0;
+		for (const ss::net::NewsItem& It : Rl.News(Want + 60.0, ss::net::HeroStats(), 1000000))
+		{
+			if (It.Title.find("Player of the Series") != std::string::npos && It.At == Want)
+			{
+				++CrownItems;
+				CrownMoney += It.Amount;
+			}
+		}
+		Rl.Attach(nullptr);
+		Expect(CrownItems == 1 && CrownMoney == 0, "FestCrownSkipInvariant: RCOP 2026's crown is one item on RiverLine's News and carries no money (" +
+											   std::to_string(CrownItems) + " item(s), " + std::to_string(CrownMoney) + " cents)");
+	}
 	std::printf("  FestCrownSkipInvariant: RCOP 2026 crowned at %s (LastEnd %s): %s\n", FestWhenWorld(Want).c_str(), FestWhenWorld(End).c_str(), Got.c_str());
 	Expect(Writes, "FestCrownSkipInvariant: the crown writes one Honor (C1's title, '<series>#pos', the points, Prize 0), one FestivalCrown post (RiverLine's: no site bits, no FlagHero), "
 				   "+6 online fame to the person who won, the hero's mark (MarkFor, no ticket below FINALIST), FestLast's top ten, and closes the race (" + Got + ")");

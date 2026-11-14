@@ -2202,7 +2202,8 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 				{
 					continue;
 				}
-				Post(It->At, NewsKind::People, Headline, Body, Tag, It->Amount, It->Npc);
+				// Update 4 G1 (the lead, after PIE): a festival crown's Amount is the winner's cashes (G/WorldText.cpp), never money on the card.
+				Post(It->At, NewsKind::People, Headline, Body, Tag, It->Kind == world::EventKind::FestivalCrown ? 0 : It->Amount, It->Npc);
 			}
 		}
 	}
@@ -2324,7 +2325,8 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 			const bool Win = It->Kind == world::EventKind::Won || It->Kind == world::EventKind::Champion || It->Kind == world::EventKind::Discovered || It->Kind == world::EventKind::Breakout;
 			const bool Record = It->Kind == world::EventKind::PlayerOfYear || It->Kind == world::EventKind::HallOfFame || It->Kind == world::EventKind::Milestone;
 			const NewsKind K = Win ? NewsKind::BigWin : Record ? NewsKind::Record : NewsKind::People;
-			Post(It->At, K, Title, Body, Tag, It->Amount, It->Npc);
+			// Update 4 G1 (the lead, after PIE): a festival crown's Amount is the winner's cashes (G/WorldText.cpp), never money on the card.
+			Post(It->At, K, Title, Body, Tag, It->Kind == world::EventKind::FestivalCrown ? 0 : It->Amount, It->Npc);
 		}
 	}
 	// Update 4 (SPEC v1.7 §3.15, §3.19, §6 PA-10): the world's own posts on this site's page (G2's RISING and NEW FACES, W-story),
