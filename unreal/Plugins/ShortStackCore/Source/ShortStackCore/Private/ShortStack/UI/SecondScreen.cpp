@@ -846,22 +846,36 @@ void Draw(Canvas& C, const Session& S)
 				C.Text(Mark, Cx + 7.0f, Cy + RowH - 5.0f, Ts(11.0f, 900, E->State == life::LiveEntry::Registered || E->PrizeCents > 0 ? Marker : rl::NetA(Marker, 0.6f)));
 			}
 		}
-		if (RentLive && Day == RentDay)
+		const auto Mk = Written.find(Day);
+		const bool RentHere = RentLive && Day == RentDay;
+		if (RentHere && Mk == Written.end())
 		{
 			C.Text("RENT", Cx + Cell - 6.0f, Cy + 17.0f, Ts(11.0f, 900, Marker, Align::Right));
 			C.StrokeRoundRect({Cx + 2.0f, Cy + 2.0f, Cell - 4.0f, RowH - 4.0f}, 3.0f, Marker, 2.5f);
 		}
-		else if (const auto Mk = Written.find(Day); Mk != Written.end())
+		else if (Mk != Written.end())
 		{
 			// What else is due that day, in ballpoint: a payment, a chop, a sponsor's review. A longer word (a rival site's
 			// name) is written smaller so it clears the date at the square's left (every older word fits at 10).
 			const float Room = Cell - 6.0f - 7.0f - C.Measure("30", 15.0f, 900) - 4.0f;
-			float Size = 10.0f;
+			// G1 polish (g1p-copy, item 12): on the rent's own day the word shares the square with RENT (a festival's MAIN on the
+			// career's rent day showed RENT alone): RENT a line up in marker, the word under it in ballpoint, both at 9.5 at most,
+			// clear of the date, of each other, of the square's ring and of the room's dots in a six-row month.
+			float Size = RentHere ? 9.5f : 10.0f;
 			while (Size > 6.0f && C.Measure(Mk->second, Size, 900) > Room)
 			{
 				Size -= 0.5f;
 			}
-			C.Text(Mk->second, Cx + Cell - 6.0f, Cy + 16.0f, Ts(Size, 900, Pen, Align::Right));
+			if (RentHere)
+			{
+				C.Text("RENT", Cx + Cell - 6.0f, Cy + 11.5f, Ts(9.5f, 900, Marker, Align::Right));
+				C.StrokeRoundRect({Cx + 2.0f, Cy + 2.0f, Cell - 4.0f, RowH - 4.0f}, 3.0f, Marker, 2.5f);
+				C.Text(Mk->second, Cx + Cell - 6.0f, Cy + std::min(23.0f, RowH - 13.0f), Ts(Size, 900, Pen, Align::Right));
+			}
+			else
+			{
+				C.Text(Mk->second, Cx + Cell - 6.0f, Cy + 16.0f, Ts(Size, 900, Pen, Align::Right));
+			}
 		}
 		if (Day < Today)
 		{

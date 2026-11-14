@@ -2549,7 +2549,86 @@ const char* const FestNetSiteKeys[] = {"news:fest:announce:title", "news:fest:an
 	"news:fest:announce:champ:runittwice", "news:fest:announce:rl", "news:fest:open:title", "news:fest:open", "news:fest:open:grit", "news:fest:record:title",
 	"news:fest:record:ever", "news:fest:record:year", "head:fest:main:title", "head:fest:main", "head:fest:title:title", "head:fest:title", "head:fest:crown:title",
 	"head:fest:crown", "tag:fest:crown", "tag:fest:festival", "invite:ignite:fest:subject", "invite:ignite:fest", "invite:runittwice:fest:subject",
-	"invite:runittwice:fest", "letter:fest:crown:subject", "letter:fest:crown", "ledger:festcredit"};
+	"invite:runittwice:fest", "letter:fest:crown:subject", "letter:fest:crown", "ledger:festcredit",
+	// G1 polish (g1p-copy): the crown line's singular (item 11) and the Pass letters' first-day and later forms (item 10).
+	"head:fest:crown:one", "invite:ignite:fest:today", "invite:ignite:fest:opened", "invite:runittwice:fest:today", "invite:runittwice:fest:opened"};
+
+/**
+ * FestCountRows (G1 polish, g1p-copy; the lead's PIE item 11, "6,350 points from 1 cashes."): every festival row of the sites' copy
+ * table that writes a count before its plural noun ("{Cashes} cashes", "{Points} points", "{Events} events", "{Entries} runners") is
+ * one of the nine known, each safe at one: the crown's {Cashes} has its singular twin head:fest:crown:one ("from 1 cash.", no
+ * {Cashes}, picked by World::Headline at one); {Points} is a race total, and one cash scores at least 14 (net::Points' smallest,
+ * found here over every field to 20,000); {Events} is a series' event count, at least 2 for every edition fest::All() holds
+ * (2026-2028); a record field's {Entries} is judged against every field since the site's launch weeks before (fest::RecordOf), never
+ * 1. A new count row fails here until it is classified. The festival UI's own counts (U10's "1 event · 1 cash", "1 SEAT WON BY
+ * SATELLITE", "1 entry", "1 regular won their seat by satellite.", "First title on record.") are singular-aware in
+ * UI/RiverLineFestival.cpp and UI/RiverLineNet.cpp, and WHO'S IN's "{N} {Festival} titles" is written only from two (G/WorldFest.cpp).
+ * Planted bugs: head:fest:crown:one deleted; a festival row "{N} seats" added.
+ */
+void FestCountRowsNet()
+{
+	namespace fest = ss::fest;
+	namespace net = ss::net;
+	// The copy's number fills (a count, a total, a place): a word after one of these that ends in "s" is a counted plural noun.
+	const std::set<std::string> Numbers = {"Cashes", "Points", "Events", "Entries", "Days", "Nights", "N", "K", "Rank", "Scorers", "Seats", "Left", "Count", "Titles"};
+	const std::set<std::pair<std::string, std::string>> Known = {{"head:fest:crown", "Cashes"}, {"head:fest:crown", "Points"}, {"head:fest:crown:one", "Points"},
+		{"letter:fest:crown", "Points"}, {"news:fest:announce", "Events"}, {"news:fest:announce:rl", "Events"}, {"news:fest:open", "Events"},
+		{"news:fest:record:ever", "Entries"}, {"news:fest:record:year", "Entries"}};
+	std::set<std::pair<std::string, std::string>> Found;
+	for (const char* Key : FestNetSiteKeys)
+	{
+		const std::string Text = ss::site::CopyText(Key);
+		for (size_t Open = Text.find('{'); Open != std::string::npos; Open = Text.find('{', Open + 1))
+		{
+			const size_t Close = Text.find('}', Open);
+			const std::string Name = Close == std::string::npos ? std::string() : Text.substr(Open + 1, Close - Open - 1);
+			if (!Numbers.count(Name) || Close + 2 >= Text.size() || Text[Close + 1] != ' ')
+			{
+				continue;
+			}
+			size_t End = Close + 2;
+			while (End < Text.size() && Text[End] >= 'a' && Text[End] <= 'z')
+			{
+				++End;
+			}
+			const std::string Noun = Text.substr(Close + 2, End - Close - 2);
+			if (Noun.size() >= 2 && Noun.back() == 's')
+			{
+				Found.insert({Key, Name});
+			}
+		}
+	}
+	const std::string One = ss::site::CopyText("head:fest:crown:one");
+	const bool Twin = One.find("points from 1 cash.") != std::string::npos && One.find("{Cashes}") == std::string::npos && One.find("cashes") == std::string::npos;
+	int Editions = 0, Fewest = 1 << 30;
+	for (const fest::Festival& F : fest::All())
+	{
+		const net::SeriesInfo* Sr = net::Site(F.Site).FindSeries(F.SeriesId);
+		Fewest = std::min(Fewest, Sr ? Sr->Events : 0);
+		++Editions;
+	}
+	// One cash's fewest points: for each field, its last paid place (net::Points pays round(15%), at least one) at a free buy-in.
+	double Least = 1e9;
+	for (int Entries = 2; Entries <= 20000; ++Entries)
+	{
+		const int Paid = std::max(1, static_cast<int>(std::lround(static_cast<double>(Entries) * 0.15)));
+		Least = std::min(Least, net::Points(Paid, Entries, 0));
+	}
+	std::string Odd;
+	for (const auto& P : Found)
+	{
+		Odd += Known.count(P) ? std::string() : " new: " + P.first + " {" + P.second + "}";
+	}
+	for (const auto& P : Known)
+	{
+		Odd += Found.count(P) ? std::string() : " gone: " + P.first + " {" + P.second + "}";
+	}
+	std::printf("  FestCountRows: %zu count rows in the festival copy, the crown's singular twin \"%s\", the fewest events of %d editions %d, one cash's fewest points %.0f\n",
+		Found.size(), One.c_str(), Editions, Fewest, Least);
+	Expect(Odd.empty() && Twin && Editions > 0 && Fewest >= 2 && Least >= 2.0,
+		"FestCountRows: the festival copy's count rows are the nine known, the crown's {Cashes} with its singular twin (\"from 1 cash.\"), every edition's {Events} at "
+		"least 2 (" + std::to_string(Fewest) + ") and one cash's {Points} at least 2 (" + std::to_string(static_cast<int>(Least)) + ")" + Odd);
+}
 
 /** §1.2 items 2-5, 9-10, 12-13, §2.11: every core inventory (FN-4b, PLAN_FNET's Corrections item 1): fest::Inventory (F-net's names,
  *  Shorts, Titles, taglines, event names, blurbs, seats texts, the trophies, C1 and the room words), fest::TextInventory (F-world's
@@ -4628,6 +4707,11 @@ void SegNet()
 	if (Only("FestCopy"))
 	{
 		FestCopyNet();
+	}
+	// G1 polish (g1p-copy, item 11).
+	if (Only("FestCountRows"))
+	{
+		FestCountRowsNet();
 	}
 	// FN-4a: RiverLine's dress.
 	if (Only("FestRcopGtdSum"))

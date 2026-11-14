@@ -179,6 +179,8 @@ const SiteCopyLine SiteCopyTable[] = {
 	{"head:fest:title", "{Prize} and a {Festival} title, from a field of {Entries}.", true},
 	{"head:fest:crown:title", "{Name} is the {Festival} Player of the Series", false},
 	{"head:fest:crown", "{Name} takes the {Festival} belt: {Points} points from {Cashes} cashes.", true},
+	// G1 polish (g1p-copy; the lead's PIE list item 11): a belt won from one cash reads it in the singular (World::Headline picks it).
+	{"head:fest:crown:one", "{Name} takes the {Festival} belt: {Points} points from 1 cash.", true},
 	{"tag:fest:crown", "CROWN", false},
 	{"tag:fest:festival", "FESTIVAL", false},
 	{"invite:ignite:fest:subject", "You're on the list for {Festival}", false},
@@ -187,9 +189,29 @@ const SiteCopyLine SiteCopyTable[] = {
 		"first deposit 100%, up to $100, released as you play: $5 for every $20 of rake inside 60 days. The {MainBuyIn} Main Event has money added. Accept below "
 		"and your Cashier's ready.",
 		true},
+	// G1 polish (g1p-copy; the lead's PIE list item 10): the Pass letter written on the festival's first day (":today") or after it
+	// (":opened", while it runs: the Pass closes with the Main's day) never says it "opens on" a day gone by. Invite picks the form.
+	{"invite:ignite:fest:today",
+		"Hi, it's Bree from Ignite Poker. {Festival} opens today, and you're on the list. Bring friends. Bring snacks. Open an account and we'll match your "
+		"first deposit 100%, up to $100, released as you play: $5 for every $20 of rake inside 60 days. The {MainBuyIn} Main Event has money added. Accept below "
+		"and your Cashier's ready.",
+		true},
+	{"invite:ignite:fest:opened",
+		"Hi, it's Bree from Ignite Poker. {Festival} opened on {Date}, and you're on the list. Bring friends. Bring snacks. Open an account and we'll match your "
+		"first deposit 100%, up to $100, released as you play: $5 for every $20 of rake inside 60 days. The {MainBuyIn} Main Event has money added. Accept below "
+		"and your Cashier's ready.",
+		true},
 	{"invite:runittwice:fest:subject", "An invitation to {Festival}", false},
 	{"invite:runittwice:fest",
 		"This is Ingrid Vale at RunItTwice. {Festival} opens on {Date}, and we'd like you at the table. Make a first deposit of $50 or more and we'll put $33 in "
+		"tickets on your account: a $22 Sunday Grind and two $5.50 Supper Stacks. Accept below and the Cashier's yours.",
+		true},
+	{"invite:runittwice:fest:today",
+		"This is Ingrid Vale at RunItTwice. {Festival} opens today, and we'd like you at the table. Make a first deposit of $50 or more and we'll put $33 in "
+		"tickets on your account: a $22 Sunday Grind and two $5.50 Supper Stacks. Accept below and the Cashier's yours.",
+		true},
+	{"invite:runittwice:fest:opened",
+		"This is Ingrid Vale at RunItTwice. {Festival} opened on {Date}, and we'd like you at the table. Make a first deposit of $50 or more and we'll put $33 in "
 		"tickets on your account: a $22 Sunday Grind and two $5.50 Supper Stacks. Accept below and the Cashier's yours.",
 		true},
 	{"letter:fest:crown:subject", "{Festival} {Year}: the belt is yours", false},
@@ -694,9 +716,12 @@ void Invite(Book& B, life::State& L, net::SiteId S, double World, int Why, bool 
 	if (PassFest)
 	{
 		const net::EventTemplate* Main = net::ForEvent(PassFest->MainId).FindTemplate(PassFest->MainId);
+		const int Today = net::DayOf(World);
 		const std::vector<std::pair<std::string, std::string>> FestVars = {
-			{"Festival", PassFest->Name}, {"Date", fest::DateInSentence(PassFest->FirstDay, net::DayOf(World))}, {"MainBuyIn", net::BuyIn(Main ? Main->BuyInCents : 0)}};
-		PostLetter(L, S, World, LetterInvite, FillCopy(SiteText(Key + ":fest:subject"), FestVars), FillCopy(SiteText(Key + ":fest"), FestVars));
+			{"Festival", PassFest->Name}, {"Date", fest::DateInSentence(PassFest->FirstDay, Today)}, {"MainBuyIn", net::BuyIn(Main ? Main->BuyInCents : 0)}};
+		// G1 polish (g1p-copy, item 10): "opens on {Date}" before the first day, "opens today" on it, "opened on {Date}" after it.
+		const char* const Tense = Today < PassFest->FirstDay ? ":fest" : Today == PassFest->FirstDay ? ":fest:today" : ":fest:opened";
+		PostLetter(L, S, World, LetterInvite, FillCopy(SiteText(Key + ":fest:subject"), FestVars), FillCopy(SiteText(Key + Tense), FestVars));
 		L.Update2LinesRead |= life::U2Sites;
 		return;
 	}
